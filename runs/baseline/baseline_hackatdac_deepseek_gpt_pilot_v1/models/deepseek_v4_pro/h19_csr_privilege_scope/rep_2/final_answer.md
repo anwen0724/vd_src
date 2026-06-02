@@ -1,0 +1,136 @@
+{
+  "analysis_summary": "The CSR register file (csr_regfile.sv) in the Ariane RISC-V core was analyzed for permission-related security vulnerabilities. One critical privilege escalation vulnerability was identified: the `umode_i` input signal, when asserted, forces the core's effective privilege level (`priv_lvl_o`) to Machine mode (PRIV_LVL_M = 2'b11) unconditionally. This overrides the architectural privilege level (`priv_lvl_q`) and causes all CSR access privilege checks to pass, effectively granting Machine-mode CSR access to code running at any privilege level. Additionally, a specific bypass exists for CSR_MEPC, allowing read/write access to the Machine Exception Program Counter regardless of current privilege. These represent serious hardware-level privilege escalation paths.",
+  "findings": [
+    {
+      "finding_id": "F001",
+      "status": "confirmed_finding",
+      "summary": "Privilege escalation via `umode_i` input: when asserted, `priv_lvl_o` is unconditionally forced to Machine mode, bypassing all CSR access privilege checks.",
+      "vulnerability_category": "Privilege Escalation / Insufficient Access Control",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 938,
+          "line_end": 938,
+          "module": "csr_regfile",
+          "signal_or_register": "priv_lvl_o, umode_i"
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 854,
+          "line_end": 854,
+          "module": "csr_regfile",
+          "signal_or_register": "priv_lvl_o (privilege check)"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 938,
+          "line_end": 938,
+          "module": "csr_regfile",
+          "object": "assign priv_lvl_o",
+          "evidence_type": "source_code",
+          "description": "The output privilege level priv_lvl_o is assigned: (debug_mode_q || umode_i) ? riscv::PRIV_LVL_M : priv_lvl_q. When umode_i is high, priv_lvl_o becomes M-mode (2'b11) regardless of the actual architectural privilege state priv_lvl_q.",
+          "supports_claim": "Direct evidence that umode_i forces Machine mode privilege."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 854,
+          "line_end": 854,
+          "module": "csr_regfile",
+          "object": "CSR privilege check logic",
+          "evidence_type": "source_code",
+          "description": "The privilege check for CSR access uses priv_lvl_o: if ((riscv::priv_lvl_t'(priv_lvl_o & csr_addr.csr_decode.priv_lvl) != csr_addr.csr_decode.priv_lvl) && !(csr_addr.address==riscv::CSR_MEPC)). Since priv_lvl_o can be forced to M-mode by umode_i, the AND-mask always yields the required privilege level, always passing the check.",
+          "supports_claim": "Shows that the vulnerability in priv_lvl_o assignment propagates to privilege checks."
+        },
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": 22,
+          "line_end": 24,
+          "module": "riscv_pkg",
+          "object": "PRIV_LVL_M",
+          "evidence_type": "source_code",
+          "description": "PRIV_LVL_M is defined as 2'b11. When ANDed with any other privilege level value, the result equals the other value, defeating the privilege-level masking check.",
+          "supports_claim": "Explains why forcing to M-mode bypasses the AND-based privilege check."
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": 50,
+          "line_end": 51,
+          "module": "ariane",
+          "object": "umode_i input port",
+          "evidence_type": "source_code",
+          "description": "umode_i is exposed as a top-level input port in ariane.sv, meaning it is externally controllable at the SoC level.",
+          "supports_claim": "umode_i is an externally accessible signal, increasing attack surface."
+        }
+      ],
+      "reasoning_summary": "The `priv_lvl_o` signal is used downstream for all CSR access privilege decisions (line ~854). The assignment at line 938 allows `umode_i` to unconditionally elevate `priv_lvl_o` to Machine mode. Since the privilege check masks `priv_lvl_o` with the CSR-required privilege level, an M-mode `priv_lvl_o` (2'b11) will always satisfy any privilege requirement. This means asserting `umode_i` gives Machine-mode CSR access (read/write) to any less-privileged code, including the ability to modify `mstatus`, `mepc`, `mtvec`, `pmpcfg`, etc., leading to full system compromise.",
+      "security_impact": "Critical. An attacker who can assert the `umode_i` signal (via a compromised peripheral, software-controlled GPIO, or physical tampering) can escalate to Machine-mode privilege. This allows arbitrary modification of all machine-level CSRs, including the trap vector (mtvec), exception delegation (medeleg/mideleg), physical memory protection (PMP) settings, and satp (page table root). This results in complete compromise of the RISC-V hart's security properties, including TEE isolation, secure boot chains, and access control mechanisms.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact intended purpose of `umode_i` is not documented in the provided source scope. While the signal name suggests 'user mode indication', the logic forces Machine mode when asserted, which appears inverted from the naming convention. Source comments from the original Ariane/CVA6 repository indicate this may be a debug or test feature, but without the full commit history or design documentation, we cannot confirm whether this was intentional backdoor access or a design flaw. Additionally, the full `ariane_pkg.sv` package file (which defines `csr_t`, `fu_op`, etc.) was not available in the input scope, limiting analysis of the CSR address decode logic.",
+      "recommended_follow_up": [
+        "Review the purpose and necessity of the `umode_i` input. If it is a debug-only feature, it should be gated by a debug authentication mechanism or fused off in production silicon.",
+        "Ensure `umode_i` is tied to 0 in production SoC integrations and cannot be toggled by software or external interfaces.",
+        "Consider removing the `umode_i` override of `priv_lvl_o` in the CSR file and instead using a dedicated debug-mode privilege mechanism.",
+        "Audit the CSR_MEPC bypass (line 854) to confirm whether unrestricted access to MEPC is architecturally acceptable."
+      ]
+    },
+    {
+      "finding_id": "F002",
+      "status": "potential_warning",
+      "summary": "CSR_MEPC privilege check bypass: the CSR access control logic unconditionally allows read/write access to CSR_MEPC regardless of current privilege level.",
+      "vulnerability_category": "Insufficient Access Control / Privilege Check Bypass",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 854,
+          "line_end": 854,
+          "module": "csr_regfile",
+          "signal_or_register": "csr_addr (CSR_MEPC)"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 854,
+          "line_end": 854,
+          "module": "csr_regfile",
+          "object": "privilege check expression",
+          "evidence_type": "source_code",
+          "description": "The privilege check has a bypass: && !(csr_addr.address==riscv::CSR_MEPC). This means MEPC (Machine Exception Program Counter) can be read and written from any privilege level without triggering an illegal instruction exception.",
+          "supports_claim": "Direct evidence of privilege bypass for CSR_MEPC."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 220,
+          "line_end": 220,
+          "module": "csr_regfile",
+          "object": "CSR read for MEPC",
+          "evidence_type": "source_code",
+          "description": "CSR_MEPC read returns mepc_q without any privilege check in the read path.",
+          "supports_claim": "Read bypass is consistent with the write bypass."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 484,
+          "line_end": 484,
+          "module": "csr_regfile",
+          "object": "CSR write for MEPC",
+          "evidence_type": "source_code",
+          "description": "CSR_MEPC write sets mepc_d without any privilege check in the update path.",
+          "supports_claim": "Write bypass is consistent with the read bypass."
+        }
+      ],
+      "reasoning_summary": "The RISC-V privileged specification requires that attempts to access a CSR without appropriate privilege raise an illegal instruction exception. MEPC is a Machine-mode CSR and should only be accessible from M-mode. The explicit bypass in the privilege check (line 854) allows unrestricted access. Combined with F001, this could allow unprivileged code to read and manipulate the machine exception return address, subverting exception handling.",
+      "security_impact": "Medium-High. MEPC holds the return address from machine-mode traps. If an attacker can write MEPC, they can redirect machine-mode execution flow after an MRET instruction. This could be used to hijack control flow after any machine-mode trap handler returns. The RISC-V spec allows MEPC to be written with arbitrary addresses, so this is a vector for control-flow hijacking at the highest privilege level.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The rationale for this bypass is unknown. It could be a debugging convenience, a workaround for a specific trap-handling flow, or a legacy artifact. The original Ariane/CVA6 designers may have had a specific architectural reason. Without the full design documentation or commit history, we cannot determine intent. The `ariane_pkg.sv` package file containing the full CSR address enum definitions was not included in the scope.",
+      "recommended_follow_up": [
+        "Review the justification for the CSR_MEPC privilege bypass and remove it if not required by a specific, documented use case.",
+        "If the bypass is required for a specific flow, restrict it to only read access or add additional hardware checks (e.g., only allow the bypass during specific trap-handling sequences)."
+      ]
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "The input scope is limited to include/riscv_pkg.sv, src/csr_regfile.sv, and src/ariane.sv. The full ariane_pkg.sv (containing csr_t, fu_op, exception_t, and scoreboard_entry_t type definitions) was not available, limiting the ability to trace the complete CSR address decode path and all CSR access control decisions. Additionally, the README notes this is a local RTL view, so it may not represent the final, patched version of the design. The CVA6/Ariane core has undergone many revisions, and some of these issues may already be addressed in upstream versions."
+}

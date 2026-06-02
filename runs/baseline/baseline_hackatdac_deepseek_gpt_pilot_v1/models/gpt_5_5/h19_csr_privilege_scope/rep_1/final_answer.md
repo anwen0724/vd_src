@@ -1,0 +1,215 @@
+{
+  "analysis_summary": "Reviewed the scoped RTL/source files under the provided input scope using only directory listing, file reads, and text search. The CSR register file implements architectural privilege checks for CSR access, but contains an explicit exception that exempts the Machine-mode `CSR_MEPC` from the normal privilege-level check. Because `mepc` is readable and writable in the same CSR file, this creates a permission-related vulnerability: lower-privileged code can potentially read or modify Machine exception return state without taking the expected illegal-instruction exception. A second issue involving `umode_i` forcing `priv_lvl_o` to Machine mode is reported as a potential warning because the visible scoped source does not show whether `umode_i` is externally trusted or tied off in production.",
+  "findings": [
+    {
+      "finding_id": "CSR-PRIV-001",
+      "status": "confirmed_finding",
+      "summary": "Machine CSR `mepc` is explicitly exempted from the normal CSR privilege check, allowing unauthorized read/write access paths.",
+      "vulnerability_category": "Improper privilege enforcement / unauthorized CSR access",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 102,
+          "line_end": 102,
+          "module": "csr_regfile",
+          "signal_or_register": "csr_addr"
+        },
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": 457,
+          "line_end": 465,
+          "module": "riscv package",
+          "signal_or_register": "csr_t / csr_addr_t"
+        },
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": 365,
+          "line_end": 365,
+          "module": "riscv package",
+          "signal_or_register": "CSR_MEPC"
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 220,
+          "line_end": 220,
+          "module": "csr_regfile",
+          "signal_or_register": "mepc_q / csr_rdata"
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 484,
+          "line_end": 484,
+          "module": "csr_regfile",
+          "signal_or_register": "mepc_d"
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 852,
+          "line_end": 856,
+          "module": "csr_regfile",
+          "signal_or_register": "csr_exception_o / priv_lvl_o / CSR_MEPC"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 102,
+          "line_end": 102,
+          "module": "csr_regfile",
+          "object": "csr_addr",
+          "evidence_type": "source",
+          "description": "The CSR address input is cast into a decoded CSR structure used by the access control logic.",
+          "supports_claim": "Shows that CSR address bits are decoded into the `csr_addr` structure used later by the privilege check."
+        },
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": 457,
+          "line_end": 465,
+          "module": "riscv package",
+          "object": "csr_addr_t / csr_t",
+          "evidence_type": "source",
+          "description": "The package defines `csr_addr_t` with `rw` and `priv_lvl`, and `csr_t` with both the CSR enum address and decoded CSR address fields.",
+          "supports_claim": "Shows that CSR privilege level is explicitly represented in the decoded CSR address structure."
+        },
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": 365,
+          "line_end": 365,
+          "module": "riscv package",
+          "object": "CSR_MEPC",
+          "evidence_type": "source",
+          "description": "`CSR_MEPC` is defined as `12'h341`, in the Machine-mode CSR range alongside other Machine CSRs.",
+          "supports_claim": "Identifies `mepc` as a Machine CSR by address definition."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 220,
+          "line_end": 220,
+          "module": "csr_regfile",
+          "object": "CSR_MEPC read case",
+          "evidence_type": "source",
+          "description": "The CSR read case returns `mepc_q` when the requested CSR is `CSR_MEPC`.",
+          "supports_claim": "Shows that `CSR_MEPC` has a reachable read path."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 484,
+          "line_end": 484,
+          "module": "csr_regfile",
+          "object": "CSR_MEPC write case",
+          "evidence_type": "source",
+          "description": "The CSR write case updates `mepc_d` when the requested CSR is `CSR_MEPC`.",
+          "supports_claim": "Shows that `CSR_MEPC` has a reachable write path."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 852,
+          "line_end": 856,
+          "module": "csr_regfile",
+          "object": "CSR privilege check",
+          "evidence_type": "source",
+          "description": "The central CSR privilege check raises an illegal instruction when current privilege does not satisfy the CSR-required privilege, but explicitly suppresses that check for `CSR_MEPC`.",
+          "supports_claim": "Directly supports the vulnerability: `CSR_MEPC` is exempted from the normal permission failure condition."
+        }
+      ],
+      "reasoning_summary": "RISC-V CSR privilege requirements are encoded in the CSR address and decoded into `csr_addr.csr_decode.priv_lvl`. The CSR block checks `priv_lvl_o` against this required privilege for CSR reads and writes, but adds `&& !(csr_addr.address==riscv::CSR_MEPC)`, which means an access to Machine-mode `mepc` will not raise the illegal-instruction exception even when the current privilege is insufficient. Since `CSR_MEPC` has both read and write cases, the bypass affects real state rather than an unreachable CSR.",
+      "security_impact": "Lower-privileged software may read Machine exception return addresses, leaking privileged control-flow state, or write `mepc`, potentially influencing the target of a later Machine-mode return path. This weakens privilege isolation between Machine mode and lower privilege levels.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The scoped source does not include dynamic simulation or the full instruction decode/commit behavior, so an exact instruction trace was not proven. However, the static RTL evidence clearly shows the privilege-check bypass and the read/write handlers for `CSR_MEPC`.",
+      "recommended_follow_up": [
+        "Remove the `CSR_MEPC` exemption from the CSR privilege check unless there is a formally justified architectural requirement, and enforce Machine-mode-only access to `mepc`.",
+        "Add directed tests or assertions that S-mode and U-mode reads/writes to `CSR_MEPC` raise illegal-instruction exceptions.",
+        "Review all other CSR privilege exceptions for similar special cases."
+      ]
+    },
+    {
+      "finding_id": "CSR-PRIV-002",
+      "status": "potential_warning",
+      "summary": "External/top-level `umode_i` can force `priv_lvl_o` to Machine mode in the CSR block.",
+      "vulnerability_category": "Privilege override / improper trust boundary",
+      "affected_locations": [
+        {
+          "file": "src/ariane.sv",
+          "line_start": 50,
+          "line_end": 50,
+          "module": "ariane",
+          "signal_or_register": "umode_i"
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": 520,
+          "line_end": 520,
+          "module": "ariane",
+          "signal_or_register": "umode_i connection"
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 83,
+          "line_end": 83,
+          "module": "csr_regfile",
+          "signal_or_register": "umode_i"
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 938,
+          "line_end": 938,
+          "module": "csr_regfile",
+          "signal_or_register": "priv_lvl_o"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/ariane.sv",
+          "line_start": 50,
+          "line_end": 50,
+          "module": "ariane",
+          "object": "umode_i",
+          "evidence_type": "source",
+          "description": "Top-level `ariane` exposes `umode_i` as an input.",
+          "supports_claim": "Shows `umode_i` enters the scoped design at the top-level interface."
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": 520,
+          "line_end": 520,
+          "module": "ariane",
+          "object": "csr_regfile umode_i port connection",
+          "evidence_type": "source",
+          "description": "Top-level `ariane` connects `umode_i` into the CSR register file.",
+          "supports_claim": "Shows the signal influences CSR logic."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 83,
+          "line_end": 83,
+          "module": "csr_regfile",
+          "object": "umode_i",
+          "evidence_type": "source",
+          "description": "`csr_regfile` declares `umode_i` as an input.",
+          "supports_claim": "Confirms the CSR block consumes this signal."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 938,
+          "line_end": 938,
+          "module": "csr_regfile",
+          "object": "priv_lvl_o",
+          "evidence_type": "source",
+          "description": "The current privilege output is assigned to Machine mode whenever either debug mode or `umode_i` is asserted.",
+          "supports_claim": "Shows `umode_i` can force `priv_lvl_o` to `PRIV_LVL_M`, affecting permission decisions that depend on `priv_lvl_o`."
+        }
+      ],
+      "reasoning_summary": "`priv_lvl_o` represents the current privilege level and is used by CSR permission logic. The assignment `(debug_mode_q || umode_i) ? PRIV_LVL_M : priv_lvl_q` means assertion of `umode_i` makes the core appear to be in Machine mode, even if the stored privilege register is lower. If `umode_i` is controllable outside a trusted debug/test context, this can broadly bypass privilege checks.",
+      "security_impact": "If `umode_i` can be asserted by an untrusted source, lower-privileged execution may be treated as Machine mode, enabling unauthorized CSR access and weakening memory-translation or privilege controls dependent on `priv_lvl_o`.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The scoped files do not show the source, intended use, or production tie-off of `umode_i`. This prevents confirming exploitability from visible evidence alone.",
+      "recommended_follow_up": [
+        "Determine from integration constraints whether `umode_i` is tied off, trusted, or externally controllable in production.",
+        "If `umode_i` is a test or configuration override, guard it behind synthesis/test-only controls and document the trust assumption.",
+        "Add assertions that untrusted runtime inputs cannot force `priv_lvl_o` to Machine mode."
+      ]
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "Analysis was limited to visible files under the provided input scope. No simulation, formal checking, lint, synthesis, or external integration review was performed. Some exploitability details, especially for `umode_i`, depend on integration context not present in the scoped source."
+}
