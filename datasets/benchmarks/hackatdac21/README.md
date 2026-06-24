@@ -1,52 +1,55 @@
-# hackatdac21 Benchmark Data
+# Hack@DAC21 Benchmark Data
 
-This directory stores structured benchmark data derived from the seed mapping document.
+本目录保存 Hack@DAC21 在本课题中的 evaluator-side benchmark 资产。
 
-Source seed mapping:
+这些文件用于后续对模型/agent 输出进行人工或脚本辅助评估，不应复制到 agent 可见输入目录。
 
-```text
-data/benchmarks/_seed_mappings/hackatdac2021_full_mapping.md
-```
+## 当前状态
 
-Design target: OpenPiton + Ariane/RISC-V
+- `official_gt.csv`：99 个官方公开 bug 描述，来源为 Hack@DAC21 GitHub README bug list。
+- `task_gt.csv`：99 个 case 的任务相关性标注与源码复核状态。
+- `batch_plan.md`：当前批次选择和 deferred case 记录。
+- `eval_case_set.csv`：当前可用于评分的 22 个 `rtl_confirmed` case。
+- `cases/`：22 个评分 case 的 case-level GT 文档。
+- `evidence_gt.jsonl`：22 个评分 case 的 evidence-level GT，已转换为当前统一 schema。
+- `source_refs.md`：公开来源、源码镜像和 seed mapping 记录。
 
-Current status:
+## 当前评分集
 
-- `official_gt.csv`: initialized from description-level seed mapping.
-- `task_gt.csv`: initialized from description-level seed mapping; first RTL-confirmed batch has been labeled.
-- `eval_case_set.csv`: first RTL-confirmed evaluation set for Hack@DAC21.
-- `batch_plan.md`: records selected and deferred case groups.
-- `cases/`: case-level GT documents for confirmed cases.
-- `evidence_gt.jsonl`: hidden evidence records for confirmed cases.
+当前 Hack@DAC21 评分集包含 22 个 case：
 
-Important constraints:
+- H21-005
+- H21-013
+- H21-031
+- H21-035
+- H21-036
+- H21-039
+- H21-042
+- H21-043
+- H21-047
+- H21-048
+- H21-049
+- H21-059
+- H21-060
+- H21-073
+- H21-074
+- H21-075
+- H21-078
+- H21-079
+- H21-080
+- H21-097
+- H21-098
+- H21-099
 
-- Only cases marked `rtl_confirmed` should be used for scoring.
-- Cases still marked `needs_review` are not baseline-ready.
-- Do not treat description-level labels as ground truth without source evidence.
+评分入口以 `eval_case_set.csv` 为准。
 
-Confirmed evaluation set:
+## 使用原则
 
-- current_confirmed_cases: 22
-- H21-005: HMAC access grants PKT access through access-control coupling.
-- H21-013: AES internal registers externally visible.
-- H21-031: DMA registers missing register-lock mediation.
-- H21-035: register locks reset to disabled state.
-- H21-036: SHA input data remains readable after hash computation.
-- H21-039: AES plaintext remains readable after encryption.
-- H21-042: access-control values reset to full access.
-- H21-043: some ACCT registers are not effectively register-lock protected.
-- H21-047: one AES0 key path is not masked in debug mode.
-- H21-048: JTAG unlock clears register-lock state.
-- H21-049: chicken-bit style flag corrupts access-control output.
-- H21-059: PKT read/default handling can leak fuse data.
-- H21-060: AES0 key0 can leak through default read handling.
-- H21-073: AES2 protected registers accessible from user mode through reset-open access control.
-- H21-074: HMAC protected registers are accessible from user mode through reset-open access control.
-- H21-075: HMAC key-derived registers have inconsistent register-lock mediation.
-- H21-078: PKT fuse-control registers are writable without lock guards.
-- H21-079: SHA data registers have inconsistent read/write lock mediation.
-- H21-080: AES1 key registers have inconsistent read/write lock mediation.
-- H21-097: HMAC key-related registers are not reset.
-- H21-098: AES1 key path remains unmasked in debug mode.
-- H21-099: CLINT registers lack explicit access-control mediation.
+- agent 不应读取本目录。
+- 评分时使用 `eval_case_set.csv`、`cases/*.md` 和 `evidence_gt.jsonl` 作为隐藏事实参照。
+- `task_gt.csv` 中尚未 `rtl_confirmed` 的 case 不能直接进入评分集。
+
+## 2026-06-22 Expansion Update
+
+Current scored eval cases after expansion: 47.
+

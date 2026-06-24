@@ -1,0 +1,2 @@
+"""Proposed method implementation."""
+
