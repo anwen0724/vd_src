@@ -48,6 +48,7 @@ class ProposedPipelineResult:
     obligations_path: Path
     inspection_records_path: Path
     closure_records_path: Path
+    final_answer_path: Path
     structured_output_path: Path
 
 
@@ -103,6 +104,7 @@ class ProposedMethodPipeline:
         obligations_path = output_dir / "obligations.json"
         inspection_records_path = output_dir / "inspection_records.json"
         closure_records_path = output_dir / "closure_records.json"
+        final_answer_path = output_dir / "final_answer.json"
         structured_output_path = output_dir / "structured_output.json"
 
         _write_model(static_fact_layer_path, static_facts)
@@ -110,10 +112,9 @@ class ProposedMethodPipeline:
         _write_model(obligations_path, obligations)
         _write_model(inspection_records_path, records)
         _write_model(closure_records_path, closure)
-        structured_output_path.write_text(
-            json.dumps(agent_output, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        output_text = json.dumps(agent_output, ensure_ascii=False, indent=2)
+        final_answer_path.write_text(output_text, encoding="utf-8")
+        structured_output_path.write_text(output_text, encoding="utf-8")
 
         return ProposedPipelineResult(
             output_dir=output_dir,
@@ -122,10 +123,10 @@ class ProposedMethodPipeline:
             obligations_path=obligations_path,
             inspection_records_path=inspection_records_path,
             closure_records_path=closure_records_path,
+            final_answer_path=final_answer_path,
             structured_output_path=structured_output_path,
         )
 
 
 def _write_model(path: Path, model) -> None:
     path.write_text(model.model_dump_json(indent=2), encoding="utf-8")
-

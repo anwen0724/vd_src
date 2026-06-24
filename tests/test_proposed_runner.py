@@ -43,9 +43,12 @@ endmodule
     assert Path(record.obligations_path).exists()
     assert Path(record.inspection_records_path).exists()
     assert Path(record.closure_records_path).exists()
+    assert Path(record.final_answer_path).exists()
     output_text = Path(record.structured_output_path).read_text(encoding="utf-8")
+    assert Path(record.final_answer_path).read_text(encoding="utf-8") == output_text
     AgentOutput.model_validate_json(output_text)
 
     metadata = json.loads(Path(record.run_metadata_path).read_text(encoding="utf-8"))
     assert metadata["method_name"] == "proposed_initial"
     assert metadata["provider"] == "mock"
+    assert metadata["final_answer_path"] == record.final_answer_path

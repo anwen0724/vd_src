@@ -44,6 +44,7 @@ class ProposedRunRecord:
     obligations_path: str
     inspection_records_path: str
     closure_records_path: str
+    final_answer_path: str
     structured_output_path: str
     run_metadata_path: str
 
@@ -90,6 +91,7 @@ class ProposedRunner:
             "max_tool_result_chars": config.max_tool_result_chars,
             "started_at": started_at,
             "completed_at": completed_at,
+            "final_answer_path": str(result.final_answer_path),
             "structured_output_path": str(result.structured_output_path),
         }
         metadata_out.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -102,6 +104,7 @@ class ProposedRunner:
             obligations_path=str(result.obligations_path),
             inspection_records_path=str(result.inspection_records_path),
             closure_records_path=str(result.closure_records_path),
+            final_answer_path=str(result.final_answer_path),
             structured_output_path=str(result.structured_output_path),
             run_metadata_path=str(metadata_out),
         )
