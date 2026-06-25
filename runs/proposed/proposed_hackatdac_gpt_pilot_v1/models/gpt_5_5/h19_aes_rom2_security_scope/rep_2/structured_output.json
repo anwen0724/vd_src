@@ -1,0 +1,539 @@
+{
+  "analysis_summary": "The proposed method produced 6 finding(s) from 10 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "AES key and intermediate state are software-readable through the AES APB/register window without an observed authorization, debug, privilege, or lock guard.",
+      "vulnerability_category": "read/expose / AES key_in/key_big and inter_state; plaintext p_c is also readable / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software-visible APB/register bus master through ariane_peripherals AES window Operation: read/expose Object: AES key_in/key_big and inter_state; plaintext p_c is also readable Expected guard: Key and intermediate AES state readback should be blocked or mediated by explicit privilege/debug authorization/lock policy; only non-secret status/ciphertext should be software-readable unless intentionally guarded. Observed behavior: aes_wrapper always_comb read mux returns key_big[191:0] in six 32-bit slices and inter_state[127:0] in four 32-bit slices. key_big is directly assigned from key_in. external_bus_io.ready is always 1 and error is always 0. No guard beyond address decode is shown in aes_wrapper. ariane_peripherals connects AES AXI/APB path to aes_wrapper and connects key_in to key_reg_out[0] from rom2. Path: AXI/APB -> ariane_peripherals aes AXI port -> axi2apb_64_32 -> apb_to_reg i_apb_to_reg_aes -> aes_wrapper external_bus_io.rdata Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Any requester able to reach the AES MMIO window can read the AES key and internal AES intermediate state, compromising cryptographic secrecy and potentially enabling extraction of fuse-derived keys.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Address case numeric values for read mux are inferred from line positions/fact layer but complete non-truncated read case text was not available. Upstream SoC policy may restrict AES window through axi_node access_ctrl; however no guard exists within aes_wrapper itself.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "AES start, plaintext, and state registers are writable from the software-visible AES register bus with no local authorization, lock, busy, or active-operation guard observed.",
+      "vulnerability_category": "write/configure/trigger / AES control start and data/state input registers p_c[0:3], state[0:3] / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software-visible APB/register bus master Operation: write/configure/trigger Object: AES control start and data/state input registers p_c[0:3], state[0:3] Expected guard: Writes configuring cryptographic operation state or triggering AES should be limited to authorized software context or protected by peripheral access-control/lock policy, with address decode preventing unintended writes. Observed behavior: aes_wrapper write always block checks only rst_ni and external_bus_io.write, then decodes external_bus_io.addr[6:2]. Cases 0,1-4,16-19 update start, p_c[3:0], and state[3:0] directly from external_bus_io.wdata. No local privilege, lock, ct_valid/busy, or authorization condition is present. ariane_peripherals wires aes AXI/APB signals into this register bus. Path: AXI/APB -> ariane_peripherals AES bridge -> apb_to_reg -> aes_wrapper external_bus_io.write/address decode -> start/p_c/state -> AES core Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthorized software that can reach the AES window can trigger operations or alter plaintext/state inputs, potentially disrupting cryptographic operation or influencing sensitive AES processing.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No full evidence for upstream access_ctrl settings or software policy; no complete AES core busy/start behavior was provided.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "Visible testharness wires JTAG/DMI debug into dm_top with AXI master connectivity and core debug request, without observed authentication or lifecycle/test-mode guard in the wrapper.",
+      "vulnerability_category": "read/write/control via debug / SoC memory/peripheral address space including bootrom, rom2, AES registers, debug window, and privileged core control state reachable through debug module/fabric / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG/DMI debug requester Operation: read/write/control via debug Object: SoC memory/peripheral address space including bootrom, rom2, AES registers, debug window, and privileged core control state reachable through debug module/fabric Expected guard: JTAG/DMI debug access should be mediated by debug authentication/authorization, lifecycle/test mode, or access-control policy before issuing core debug requests or AXI transactions. Observed behavior: ariane_testharness declares JTAG/DMI handshake signals, instantiates dm_top, and connects dmi_req_valid/debug_req/debug_resp to dm_top. dm_top outputs debug_req_core and ndmreset and has AXI master request/response ports connected to slave[1] via axi_master_connect. No authentication signal, key comparison, lifecycle state, or test_en enable guard is visible in the provided wrapper evidence. Path: SimJTAG/dmi_jtag/SimDTM -> DMI request signals -> dm_top -> debug_req_core and dm_axi_m_req -> axi_master_connect -> slave[1] -> axi_node_intf_wrap -> master peripheral/memory windows Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "If JTAG/DMI sources are active, debug can request core debug entry/reset and can act as an AXI master into the SoC fabric, potentially reaching protected memory/peripherals depending on downstream access_ctrl.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "dm_top internals and JTAG/SimDTM connection details were not fully provided; authentication could exist inside uninspected modules, though no wrapper guard is visible.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "Debug module can drive ndmreset into main reset generation, and reset behavior leaves ROM2 secure_reg reloaded with key material while AES key readback path remains wired; no wrapper-level authorization for debug reset is observed.",
+      "vulnerability_category": "reset/override / resettable protected state including AES state registers, key exposure path, debug control, and peripheral configuration / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG/DMI debug requester or test harness reset logic Operation: reset/override Object: resettable protected state including AES state registers, key exposure path, debug control, and peripheral configuration Expected guard: Debug-triggered reset should be authorized or limited to debug lifecycle and should not leave keys/access-control state in unsafe or observable residue condition. Observed behavior: dm_top outputs ndmreset without visible authentication in wrapper. rstgen_main generates ndmreset_n from rst_ni & ~ndmreset. ROM2 secure_reg loads key constants from mem on reset and feeds key_reg_out to AES key input and jtag_key/access_ctrl_reg outputs. AES wrapper exposes key via readback when reset releases. Path: DMI/JTAG -> dm_top ndmreset_o -> rstgen rst_ni input rst_ni & ~ndmreset -> ndmreset_n -> core/axi/peripheral reset paths Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An unauthenticated debug reset may reset system state and restore/re-expose key material through existing software-visible paths, potentially bypassing runtime clearing or policy state.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Whether ariane_peripherals rst_ni is ndmreset_n in all integration contexts is partially truncated around its instantiation. dm_top internal authorization and reset policy were not inspected.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "ROM2 contains key material and access-control constants, is readable and writable through an AXI memory path, and exports key/access-control values to other logic without local privilege or lock guard.",
+      "vulnerability_category": "read/write/expose / rom2 contents, secure_reg key material, jtag_key, access_ctrl_reg/key-location related outputs / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software-visible AXI/register bus master Operation: read/write/expose Object: rom2 contents, secure_reg key material, jtag_key, access_ctrl_reg/key-location related outputs Expected guard: ROM-resident key locations or protected constants should be read-only and only exposed to authorized requesters; write inputs to ROM should be ignored or rejected with error. Observed behavior: rom2 mem includes AES key, JTAG key, and access-control constants. secure_reg is assigned from mem on reset. Read requests select secure_reg[raddr_q] to rdata_o. Write requests update secure_reg[...] directly with wdata_i. ariane_peripherals connects rom2_fuse AXI through axi2mem to rom2 and assigns jtag_key/access_ctrl_reg from key_reg_out; AES key_in is key_reg_out[0]. No rom2-local authorization, lock, or write rejection is observed. Path: AXI requester -> ariane_peripherals rom2_fuse AXI port -> axi2mem i_axi2rom2 -> rom2 req/we/addr/wdata/rdata/secure_reg -> jtag_key/access_ctrl_reg/AES key Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "A requester with access to ROM2 can read secret keys/access-control configuration and overwrite secure registers, potentially changing AES keys, JTAG key material, or fabric access-control policy.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Upstream access_ctrl may restrict ROM2 for some privilege/requester combinations, but ROM2 itself does not enforce immutability or authorization.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "bootrom write enable is not ignored; bus writes through we_i update the bootrom mem array. Reads are range-limited to zero for raddr_q >= RomSize, but writes are not rejected locally.",
+      "vulnerability_category": "read/write / bootrom mem contents and rdata_o / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "bootrom/bootrom.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "bootrom/bootrom.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "bootrom/bootrom.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "bootrom/bootrom.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: SoC bus requester via bootrom interface Operation: read/write Object: bootrom mem contents and rdata_o Expected guard: Boot ROM should be immutable after synthesis and writes through we_i should be ignored/rejected; reads should be limited to intended boot address range. Observed behavior: bootrom always_ff on clk_i checks req_i. If !we_i, it captures raddr_q from addr_i; else it writes mem[addr slice] <= wdata_i. rdata_o returns mem[raddr_q] if raddr_q < RomSize else 0. testharness connects axi2mem we_o to bootrom we_i; no local write rejection or error signal exists at bootrom. Path: SoC AXI/fabric -> master[ROM] -> axi2mem i_axi2rom -> bootrom req_i/we_i/addr_i/wdata_i/rdata_o Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "A requester with write access to the ROM window can modify boot code/data in simulation/RTL, undermining boot immutability and potentially changing trusted boot contents.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Upstream axi_node/access_ctrl may prevent writes by some requesters; axi2mem write response/error behavior not shown. Hardware synthesis treatment of initialized logic array may differ from true ROM macro.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

@@ -96,6 +96,18 @@ class FactLayer(BaseModel):
     csr_facts: list[CSRFacts] = Field(default_factory=list)
 
 
+class PermissionSemanticLabels(BaseModel):
+    """LLM-produced semantic labels without deterministic static facts."""
+
+    asset_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    subject_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    operation_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    guard_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    state_lifecycle_facts: list[dict[str, Any]] = Field(default_factory=list)
+    path_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    summary: str = ""
+
+
 class PermissionFactLayer(BaseModel):
     """Permission-oriented fact layer consumed by obligation planning."""
 
@@ -160,6 +172,7 @@ class ObligationAnalysisRecords(BaseModel):
     scope_id: str = ""
     obligations: list[AnalysisObligation] = Field(default_factory=list)
     inspection_records: list[InspectionRecord] = Field(default_factory=list)
+    tool_observations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class MissingEvidenceRequest(BaseModel):

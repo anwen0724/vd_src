@@ -1,0 +1,315 @@
+{
+  "scope_id": "ariane_soc_debug_analysis",
+  "obligations": [
+    {
+      "obligation_id": "OBLI-001",
+      "reason": "The debug module (dm_top) contains an AXI master that can issue read/write transactions to the entire SoC address map. Without address-firewall or access-control logic, a debugger could reach protected memory/peripheral regions (e.g., boot ROM, crypto wrappers, lock registers) and bypass CPU privilege checks, PMP enforcement, or lock-bit protections.",
+      "subject": "Debug module AXI master (dm_top / i_axi_master_dm)",
+      "operation": "Read / Write",
+      "object": "Any memory-mapped protected asset (boot ROM, CSR set, peripheral registers, crypto engines, lock/configuration bits)",
+      "expected_guard": "Debug transactions must be restricted by an address-range filter, debug-auth state, or privilege-de-escalation logic. At minimum, the debug master should not be able to access sensitive address ranges that are only accessible to M-mode or that hold security-critical data.",
+      "candidate_path": "dmi_jtag → dmi_cdc → dm_csrs → dm_top → AXI master interface (ariane_axi.master) → AXI interconnect → slave ports (e.g., bootrom, clint, PLIC, SPI, Ethernet, crypto peripherals). Check whether any address decode or firewall IP sits between the debug master and the slaves, and whether the debug master can read/write to ROM or lock-bit registers.",
+      "state_conditions_to_check": [
+        "test_en / testmode_i assertion",
+        "dmactive (debug module active)",
+        "debug_req_valid / debug_req_ready handshake",
+        "any debug-authentication state (e.g., unlock token)",
+        "lock-bit values on protected registers",
+        "lifecycle state (boot complete, secure lock)"
+      ],
+      "required_evidence_slots": [
+        "Address decode logic for the debug maste's AXI port",
+        "Any firewall IP or default-slave settings",
+        "Bus error responses for invalid debug accesses",
+        "Documentation of debug access policy (if any)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_top.sv",
+        "src/debug/dm_csrs.sv",
+        "fpga/src/ariane_xilinx.sv",
+        "tb/ariane_testharness.sv",
+        "top-level AXI interconnect configuration"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Without detailed RTL, it is unknown whether any firewall exists. If none, the debugger has full visibility; if a firewall is present, its correctness must be analysed."
+    },
+    {
+      "obligation_id": "OBLI-002",
+      "reason": "The signal `test_en` (or `testmode_i` in many debug blocks) is often used to bypass normal security checks for manufacturing test. If `test_en` can be asserted post-production, it could disable debug authentication, lock checking, or privilege enforcement, allowing unauthorized access to protected assets.",
+      "subject": "Test logic driven by `test_en` / `testmode_i`",
+      "operation": "Bypass authentication/authorization checks",
+      "object": "Debug interface, protected CSRs, lock mechanisms, or any security-sensitive state",
+      "expected_guard": "`test_en` must be permanently disabled in production devices (e.g., fused off) or require an authenticated unlock sequence. Critically, security-critical checks (debug auth, lock-bit write-protection) must not be overridden by `test_en` except under strictly controlled conditions.",
+      "candidate_path": "`test_en` signal (ariane_xilinx) → `testmode_i` input of dm_csrs, dmi_jtag, dmi_jtag_tap. Examine how `testmode_i` is used in those modules—does it gate authentication handshakes, skip lock checks, or widen access rights?",
+      "state_conditions_to_check": [
+        "test_en value (0/1)",
+        "Fuse value (if present) that disables test permanently",
+        "Lifecycle state (e.g., manufacturing vs. deployed)",
+        "Any test-mode lock register"
+      ],
+      "required_evidence_slots": [
+        "How `test_en` is generated and controlled (pin, fuse, register)",
+        "All sites where `testmode_i` is used in debug modules",
+        "Logic that explicitly bypasses security checks when `testmode_i` is high"
+      ],
+      "files_or_modules_to_inspect": [
+        "fpga/src/ariane_xilinx.sv (test_en signal)",
+        "src/debug/dm_csrs.sv",
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "It is unknown whether `testmode_i` actually overrides security; this must be confirmed by examining the synthesizable RTL."
+    },
+    {
+      "obligation_id": "OBLI-003",
+      "reason": "The boot ROM (instances `i_bootrom` and `rom2`) is expected to be immutable. If a write operation from any bus master (especially the debug master) is not blocked, an attacker could corrupt the boot firmware and bypass secure boot. The `rom2` module has a `we_i` input; if that is not tied to 0 at the interconnect level, writes may be accepted.",
+      "subject": "Bus master (CPU or debug AXI master)",
+      "operation": "Write to ROM address space",
+      "object": "Boot ROM contents / ROM control registers",
+      "expected_guard": "The ROM interface must reject write transactions. In `rom2.sv`, `we_i` should be forced low by the address decoder or interconnect glue. For the bootrom, the bus slave should return an error on write or simply ignore the write strobe. No write-capable path should exist to the ROM region, regardless of master privilege.",
+      "candidate_path": "Debug master AXI → interconnect → slave bootrom / rom2. Check the driving of `we_i` in `rom2` and whether the bootrom instance supports any write enable. Verify the address decoder for the ROM region does not generate a write enable when the debug master is the requester.",
+      "state_conditions_to_check": [
+        "we_i signal value in rom2",
+        "Address decoder logic for ROM region (hits on debug address)",
+        "Write strobe generation in AXI-to-APB or native bus bridge",
+        "Test mode or debug active"
+      ],
+      "required_evidence_slots": [
+        "Assignment of `we_i` in the instantiation of rom2 or its wrapper",
+        "RTL of bootrom (if provided) to check write support",
+        "Address map / decode logic for ROM",
+        "Bus response on a write attempt (error, silent drop)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "openpiton/serpent_peripherals.sv (bootrom instantiation)",
+        "fpga/src/ariane_xilinx.sv (bootrom instantiation)",
+        "AXI interconnect configuration files"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "rom2 module has `we_i`—if unused, it may default to write-disabled; but the actual instantiation must be verified."
+    },
+    {
+      "obligation_id": "OBLI-004",
+      "reason": "The debug module can assert `ndmreset` (non-debug-module reset) via `ndmreset_o` from `dm_csrs`. This reset may clear security state such as lock bits, lifecycle counters, or secret keys, effectively allowing an adversary to bypass security through a reset attack.",
+      "subject": "Debug module (`dm_csrs`) asserting ndmreset",
+      "operation": "Reset",
+      "object": "Security-relevant state (lock bits, lifecycle FSM, secure boot status, key registers, access-control policy)",
+      "expected_guard": "`ndmreset` should not affect security-critical state. Either (a) security state uses a dedicated reset domain not driven by `ndmreset`, (b) those registers are sticky and not cleared by any software/debug reset, or (c) resetting them requires additional privilege or an authenticated command.",
+      "candidate_path": "`ndmreset_o` from dm_csrs → top-level reset generator (`i_rstgen_main`) → various peripherals and CPU reset. Identify which flip-flops are reset by `ndmreset` and whether they hold lock bits, lifecycle, or key material.",
+      "state_conditions_to_check": [
+        "ndmreset assertion (debug module initiated)",
+        "Lock-bit values before/after ndmreset",
+        "Lifecycle state (e.g., manufacturing → user) after reset",
+        "Any reset-separator logic that excludes security domains"
+      ],
+      "required_evidence_slots": [
+        "Reset tree connectivity (ndmreset distribution)",
+        "List of registers in the design that are reset by ndmreset",
+        "Documentation or RTL showing which resets are used for security state"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv (ndmreset_o output)",
+        "fpga/src/ariane_xilinx.sv (ndmreset / ndmreset_n usage, i_rstgen_main)",
+        "openpiton/serpent_peripherals.sv (ndmreset_o usage)",
+        "Any security-sensitive module (crypto, lock control)"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "The impact depends on what security state is actually reset by `ndmreset`. This must be traced in the design."
+    },
+    {
+      "obligation_id": "OBLI-005",
+      "reason": "The CSR register file holds critical processor state (MSTATUS, MIE, MEPC, SATP, PMP, etc.). Accesses from the CPU are gated by the current privilege mode. However, the debug interface (DMI) can halt the hart and perform abstract commands, potentially writing to any CSR without going through the privilege checks. This could allow a debugger to modify security-enforcing CSRs (e.g., SATP to redirect page tables, PMP to open memory access) and bypass all OS or hypervisor protections.",
+      "subject": "Debug DMI interface (via `dm_csrs` / abstract command execution)",
+      "operation": "Write to CSR registers",
+      "object": "Sensitive CSRs: SATP, MSTATUS, MIE, PMP, debug CSRs (if writable from debug), etc.",
+      "expected_guard": "Either (a) abstract command execution must honour the same privilege checks as CPU CSR instructions when the hart is halted in a non-M-mode state, (b) debug access to CSRs is prohibited unless the debugger has been authenticated and the CPU is in a secure halted state, or (c) a restricted set of CSRs is accessible from the debug interface.",
+      "candidate_path": "DMI request → dm_csrs → abstract command processing → GPR access → CSR instruction execution (via program buffer) → csr_regfile write. Examine whether dm_csrs imposes any privilege mask on abstract commands, and whether the csr_regfile performs privilege checks based on the effective privilege during debug.",
+      "state_conditions_to_check": [
+        "dmactive",
+        "debug_req / hart halted",
+        "Current CPU privilege mode when halted",
+        "Abstract command type (Access Register, Quick Access)",
+        "CSR write permissions bits"
+      ],
+      "required_evidence_slots": [
+        "Abstract command execution logic in dm_csrs",
+        "CSR write path in csr_regfile and any privilege checks for debug writes",
+        "Documentation of debug-mode CSR accessibility"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/csr_regfile.sv",
+        "src/debug/dm_top.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "The RISC-V Debug specification allows full access in halt state; however, secure systems often implement additional guards. The obligation is to verify whether such guards exist."
+    },
+    {
+      "obligation_id": "OBLI-006",
+      "reason": "Lock bits for write protection may be implemented in the CPU’s CSR domain (e.g., a register that locks write access to a peripheral). If the lock checking logic is only present in the CPU write path but not in the debug AXI path, then the debug module can bypass the lock and write directly to the protected registers. This would render the lock ineffective.",
+      "subject": "Debug AXI master (via `i_axi_slave_connect_rev` or other direct bus access)",
+      "operation": "Write to locked registers",
+      "object": "Any register protected by a lock bit (e.g., clock-gate control, power-management, security configuration, cryptographic control registers)",
+      "expected_guard": "The lock enforcement must be in the common path of all bus masters, for example at the register bank’s bus interface or in the address decoder. No alias path should exist that omits the lock check.",
+      "candidate_path": "Compare the CPU CSR/MMIO write path (with lock check) against the debug master → AXI → slave connect → register bus path. Determine whether the lock-bit logic is placed after the bus interconnect and applies to all incoming write requests.",
+      "state_conditions_to_check": [
+        "Lock bit value",
+        "Bus master ID (debug vs. CPU)",
+        "Address decode alias that bypasses the lock"
+      ],
+      "required_evidence_slots": [
+        "Location of lock-bit checking logic (CPU-only vs. bus firewall)",
+        "Topology of the bus fabric showing all register paths",
+        "Lock register RTL"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_top.sv (i_axi_slave_connect_rev)",
+        "openpiton/serpent_peripherals.sv (apb_to_reg instances)",
+        "Any module containing lock registers and their write enables"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Locks may not be present in this design; if they are, their placement must be analysed. The obligation is to search for such a bypass risk."
+    },
+    {
+      "obligation_id": "OBLI-007",
+      "reason": "The JTAG tap (`dmi_jtag_tap`) provides shift/update/capture DR signals that could be used to scan out internal registers or secret key material if the JTAG chain includes security-sensitive flip-flops. Even though this is a DMI-style tap, a malicious scan pattern could read back DMI status/data registers that indirectly expose protected state.",
+      "subject": "JTAG user via TAP (TDI/TDO)",
+      "operation": "Read (scan out) internal state",
+      "object": "Any internal register or signal connected to the JTAG scan chain or accessible via the DMI register file.",
+      "expected_guard": "The DMI JTAG chain must not contain raw security state. DFT insertion should be disabled in production (`test_en` low). The DMI register (DTMCS, DMI) should not directly expose internal bus data in a way that leaks secrets without authentication.",
+      "candidate_path": "tck_i/tms_i/td_i → dmi_jtag_tap FSM → shift DR → DMI read/write registers → td_o. If DMI reads can return full bus data without authentication, the chain effectively becomes a side-channel.",
+      "state_conditions_to_check": [
+        "testmode_i",
+        "DMI access enable (dmi_access_o, dtmcs_select_o)",
+        "Any authentication status in DTMCS"
+      ],
+      "required_evidence_slots": [
+        "dmi_jtag_tap RTL (capture/shift/update DR logic)",
+        "DMI register connections (dmi_tdi_o, dmi_tdo_i)",
+        "Absence/presence of DFT that includes secret registers"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dmi_jtag.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "DMI is not a traditional scan chain; however, if TDO exposes DMI response data without protocol-level protection, it could leak information. This must be verified."
+    },
+    {
+      "obligation_id": "OBLI-008",
+      "reason": "After boot completes, the boot ROM should ideally become invisible to any bus master other than the CPU (if at all) to prevent extraction of boot code, which may contain hard-coded keys, configuration secrets, or secure boot logic. The debug module, if not blocked, could read the ROM contents and leak this sensitive information.",
+      "subject": "Debug AXI master",
+      "operation": "Read",
+      "object": "Boot ROM contents (code, embedded keys)",
+      "expected_guard": "A hardware lock or address re-mapping mechanism should hide the boot ROM from the debug bus after boot, or the ROM should be placed in a memory region that is filtered out for debug accesses. Either ROM reads return zero/errors, or the address range is remapped to a dummy slave.",
+      "candidate_path": "Debug master → AXI → bootrom slave. Check if the bootrom is only visible during early boot (e.g., via a register that changes the address decoder) and whether the debug master is also subject to that filtering.",
+      "state_conditions_to_check": [
+        "Lifecycle state (boot complete)",
+        "Any lock bit that disables ROM visibility",
+        "Address decoder configuration (e.g., remap register)"
+      ],
+      "required_evidence_slots": [
+        "Address map for boot ROM and how it changes after boot",
+        "Lock register or remap mechanism",
+        "Whether debug accesses are subject to the same remap"
+      ],
+      "files_or_modules_to_inspect": [
+        "fpga/src/ariane_xilinx.sv (bootrom and address decode)",
+        "openpiton/serpent_peripherals.sv (bootrom)",
+        "src/rom2/rom2.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "It is not known whether such a protection exists; many simple SoCs keep the ROM always readable. The obligation is to check if any readout risk exists."
+    },
+    {
+      "obligation_id": "OBLI-009",
+      "reason": "The `serpent_peripherals` module uses `apb_to_reg` bridges to expose registers for interrupts (CLINT, PLIC) and peripherals (UART, SPI, Ethernet). These registers control interrupt routing, timer configurations, and I/O. If the debug AXI master can access the APB bus without restriction, it could manipulate interrupt lines (trigger spurious interrupts, disable critical ones) or reconfigure peripherals to disrupt operation or create a denial-of-service, potentially bypassing software access controls.",
+      "subject": "Debug AXI master",
+      "operation": "Write to APB peripheral registers",
+      "object": "CLINT registers, PLIC registers, peripheral configuration registers (UART, SPI, Ethernet)",
+      "expected_guard": "The APB space should be partitioned; debug access to interrupt-controller registers should be prohibited unless authenticated, or at minimum the debug bus should not be able to write to those registers when the system is in a secure state (e.g., after boot). Alternatively, a bus firewall can block debug transactions to these addresses.",
+      "candidate_path": "Debug master → AXI interconnect → APB bridge → `apb_to_reg` instances → peripheral registers. Verify whether any address-selective firewall exists that blocks debug requests to these registers.",
+      "state_conditions_to_check": [
+        "debug_req / dmactive",
+        "test_en",
+        "Any peripheral protection lock (e.g., lock register for CLINT or PLIC)"
+      ],
+      "required_evidence_slots": [
+        "APB bus address decode for the debug path",
+        "Any firewall configuration registers",
+        "Interrupt routing documentation"
+      ],
+      "files_or_modules_to_inspect": [
+        "openpiton/serpent_peripherals.sv",
+        "fpga/src/ariane_xilinx.sv (AXI-to-APB bridge)"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Simple SoCs rarely include such firewalls, making this a likely open path."
+    },
+    {
+      "obligation_id": "OBLI-010",
+      "reason": "The top-level `ariane_xilinx` includes an `xdma_0` (PCIe DMA engine) that can act as a bus master. Without proper IOMMU or address-range protection, a malicious PCIe endpoint could use DMA to read/write arbitrary physical memory, including CPU-private memory, secure monitor areas, or memory-mapped CSRs, bypassing all PMP and privilege restrictions that apply only to CPU accesses.",
+      "subject": "PCIe DMA master (`xdma_0`)",
+      "operation": "Read / Write to system memory",
+      "object": "System DRAM, internal SRAM, peripherals, CSR memory regions",
+      "expected_guard": "The DMA engine must be constrained to a predefined address window, or an IOMMU must translate/validate addresses. At minimum, the interconnect should refuse DMA transactions to protected ranges. If none, PCIe has unrestricted memory access.",
+      "candidate_path": "pci_exp pins → xdma_0 → AXI master port → interconnect → DDR controller / internal slaves. Check address range limitations set in xdma configuration or firewall.",
+      "state_conditions_to_check": [
+        "DMA enable register",
+        "Any PCIe BAR configuration that defines accessible memory windows",
+        "Firewall / IOMMU enable"
+      ],
+      "required_evidence_slots": [
+        "xdma configuration registers (BARs, control bits)",
+        "Interconnect access control for DMA port",
+        "Documentation of DMA address map"
+      ],
+      "files_or_modules_to_inspect": [
+        "fpga/src/ariane_xilinx.sv (xdma instantiation)"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Without source for xdma, we cannot confirm restrictions; the obligation is to verify the integration parameters."
+    }
+  ]
+}

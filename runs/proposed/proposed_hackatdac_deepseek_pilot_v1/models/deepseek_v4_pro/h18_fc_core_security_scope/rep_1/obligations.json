@@ -1,0 +1,288 @@
+{
+  "scope_id": "RTL_Permission_Module2",
+  "obligations": [
+    {
+      "obligation_id": "OBLG-001",
+      "reason": "Debug unit may have pathways to read/write CSRs without proper privilege or authentication checks.",
+      "subject": "zeroriscy_debug_unit",
+      "operation": "read/write CSR registers",
+      "object": "security-critical CSRs (e.g., mstatus, mie, secure interrupt control)",
+      "expected_guard": "debug authentication/lock and/or privileged mode check before performing CSR accesses",
+      "candidate_path": "debug_unit commands -> cs_registers write/read data path",
+      "state_conditions_to_check": [
+        "debug_mode active",
+        "debug_req asserted",
+        "debug_authorised",
+        "csr_wr/rd enable"
+      ],
+      "required_evidence_slots": [
+        "debug_unit CSR access muxes",
+        "privilege level comparison",
+        "debug lock signal"
+      ],
+      "files_or_modules_to_inspect": [
+        "zeroriscy_debug_unit.sv",
+        "zeroriscy_cs_registers.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm exact debug commands and if they traverse the regular CSR write path without privilege checks."
+    },
+    {
+      "obligation_id": "OBLG-002",
+      "reason": "test_mode_i in interrupt controller might bypass secure-mode gating for interrupt routing, allowing non-secure code to influence secure interrupts.",
+      "subject": "test_mode_i (external pin)",
+      "operation": "override interrupt security routing",
+      "object": "core_irq_sec_o (secure interrupt output) or interrupt enable/ACK logic",
+      "expected_guard": "test_mode_i shall not affect security-critical signals unless in a debug/test state with proper authentication",
+      "candidate_path": "test_mode_i -> combinational logic controlling irq_sec or irq routing",
+      "state_conditions_to_check": [
+        "test_mode_i active",
+        "core_secure_mode_i state",
+        "interrupt signals"
+      ],
+      "required_evidence_slots": [
+        "logic influenced by test_mode_i",
+        "how irq_sec_o is computed",
+        "any qualification by core_secure_mode_i"
+      ],
+      "files_or_modules_to_inspect": [
+        "apb_interrupt_cntrl.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "The netlist may not have test_mode_i connected; need to check actual usage inside the module."
+    },
+    {
+      "obligation_id": "OBLG-003",
+      "reason": "BIST interfaces (bist_en, bist_result) might allow reading internal state (e.g., memory, register contents) bypassing normal access controls during functional mode if not gated by a security lock.",
+      "subject": "Bus master or debug entity with access to BIST control",
+      "operation": "enable BIST and read bist_result registers",
+      "object": "internal memory/register states",
+      "expected_guard": "BIST enable must be locked or tied low in functional mode, or require a secure key/lifecycle state",
+      "candidate_path": "bist_en signal -> bist engine -> bist_result output visible on bus",
+      "state_conditions_to_check": [
+        "bist_en toggling",
+        "bist_result read paths",
+        "any security lock signal"
+      ],
+      "required_evidence_slots": [
+        "bist_en source (tie-off or register)",
+        "destination of bist_result",
+        "access control on BIST registers"
+      ],
+      "files_or_modules_to_inspect": [
+        "pulp_interfaces.sv",
+        "any module instantiating BIST control"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "BIST might be permanently disabled in synthesis; need to verify configuration."
+    },
+    {
+      "obligation_id": "OBLG-004",
+      "reason": "Cache bypass and flush operations may reveal stale secure data or break confidentiality if not restricted to trusted masters.",
+      "subject": "bus master (e.g., DMA, untrusted core)",
+      "operation": "assert bypass_req or flush_req",
+      "object": "cache lines potentially containing secure data",
+      "expected_guard": "bypass/flush requests must be qualified by security attribute or privilege level",
+      "candidate_path": "bypass_req/flush_req inputs -> cache controller -> memory bus",
+      "state_conditions_to_check": [
+        "bypass_req assertion",
+        "security attribute of requesting master",
+        "cache state machine"
+      ],
+      "required_evidence_slots": [
+        "bypass_req gating logic",
+        "security sideband signals",
+        "cache flush address range"
+      ],
+      "files_or_modules_to_inspect": [
+        "pulp_interfaces.sv",
+        "any cache controller module"
+      ],
+      "knowledge_used": [
+        "Crypto/Secret State Exposure",
+        "Fabric/Address Map/DMA/PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Cache module not explicitly listed; assuming presence based on interface ports."
+    },
+    {
+      "obligation_id": "OBLG-005",
+      "reason": "Interrupt control registers (enable, priority, etc.) in apb_interrupt_cntrl may lack write-lock bits, allowing untrusted code to reconfigure interrupts after secure initialization, potentially hijacking secure interrupts.",
+      "subject": "APB bus master writing to interrupt controller registers",
+      "operation": "write to interrupt enable / priority / routing registers",
+      "object": "interrupt configuration registers",
+      "expected_guard": "lock bit per register or bank that is set once after secure boot and prevents further writes, or a privilege check on APB writes",
+      "candidate_path": "APB write decoder -> register update logic",
+      "state_conditions_to_check": [
+        "presence of lock registers",
+        "lock set/clear conditions",
+        "reset default of lock bits"
+      ],
+      "required_evidence_slots": [
+        "register map definitions",
+        "lock bit logic",
+        "how APB writes are gated"
+      ],
+      "files_or_modules_to_inspect": [
+        "apb_interrupt_cntrl.sv"
+      ],
+      "knowledge_used": [
+        "Lock/Sticky Bit/Write Protection",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to review actual register implementation for lock mechanisms."
+    },
+    {
+      "obligation_id": "OBLG-006",
+      "reason": "fc_demux address decoding may not enforce secure/non-secure partitioning; a master could access memory regions designated for secure-only via the demux without proper attributes.",
+      "subject": "bus master (e.g., core instruction or data bus)",
+      "operation": "send memory request to address range mapped to secure region",
+      "object": "secure memory/peripherals",
+      "expected_guard": "address range check or security attribute comparison, preventing non-secure accesses from reaching secure slaves",
+      "candidate_path": "address decode logic within fc_demux -> slave selection",
+      "state_conditions_to_check": [
+        "address decode ranges",
+        "security attribute signals on bus",
+        "slave select generation"
+      ],
+      "required_evidence_slots": [
+        "address map definitions",
+        "decode enable signals",
+        "security attribute propagation"
+      ],
+      "files_or_modules_to_inspect": [
+        "fc_demux.sv",
+        "soc_bus_defines.sv",
+        "pulp_soc_defines.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Depends on if security attribute is implemented on the bus; need to verify bus protocol."
+    },
+    {
+      "obligation_id": "OBLG-007",
+      "reason": "CSRs like mstatus, mie, mtvec, etc. may be writable from user-mode without privilege escalation, allowing reconfiguration of critical machine-level controls.",
+      "subject": "unprivileged software (user-mode)",
+      "operation": "write CSR instructions",
+      "object": "machine-mode CSRs",
+      "expected_guard": "privilege level check (e.g., PRIV_LVL_M) before allowing writes",
+      "candidate_path": "decoder -> cs_registers write enable logic",
+      "state_conditions_to_check": [
+        "current privilege level",
+        "CSR address decode",
+        "write enable generation"
+      ],
+      "required_evidence_slots": [
+        "privilege level signal",
+        "CSR write enable logic",
+        "illegal instruction detection"
+      ],
+      "files_or_modules_to_inspect": [
+        "zeroriscy_cs_registers.sv",
+        "zeroriscy_id_stage.sv",
+        "zeroriscy_decoder.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Standard RISC-V CSR access controls; verify implementation does not deviate."
+    },
+    {
+      "obligation_id": "OBLG-008",
+      "reason": "Register file contents may persist after reset, allowing one security domain to read residual data from another domain after a reset event.",
+      "subject": "code executing after reset",
+      "operation": "read x registers before explicit write",
+      "object": "register file entries",
+      "expected_guard": "full zeroing of register file upon reset deassertion, or architectural guarantee of no persistence",
+      "candidate_path": "reset sequence to register file",
+      "state_conditions_to_check": [
+        "reset value logic",
+        "register file initialization",
+        "lack of clear-on-reset"
+      ],
+      "required_evidence_slots": [
+        "register file reset logic",
+        "no initialization loop",
+        "flop reset values"
+      ],
+      "files_or_modules_to_inspect": [
+        "zeroriscy_register_file.sv",
+        "zeroriscy_register_file_ff.sv"
+      ],
+      "knowledge_used": [
+        "Reset/Lifecycle/State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "May be acceptable if software convention; still a confidentiality risk."
+    },
+    {
+      "obligation_id": "OBLG-009",
+      "reason": "Load-store unit may perform memory accesses based solely on virtual address without physical memory protection (PMP) checks, allowing access to protected regions.",
+      "subject": "CPU performing load/store instructions",
+      "operation": "memory read/write to protected address",
+      "object": "protected memory region (e.g., secure firmware, key storage)",
+      "expected_guard": "PMP check or memory protection unit gating before granting bus access",
+      "candidate_path": "lsu address -> bus request generation",
+      "state_conditions_to_check": [
+        "PMP configuration registers",
+        "address comparison logic",
+        "bus request enable"
+      ],
+      "required_evidence_slots": [
+        "PMP module existence and connection",
+        "lsu bus request gating signals"
+      ],
+      "files_or_modules_to_inspect": [
+        "zeroriscy_load_store_unit.sv",
+        "any PMP module (not listed, perhaps in core integration)"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "PMP might be present but not visible in this file list; need to check integration."
+    },
+    {
+      "obligation_id": "OBLG-010",
+      "reason": "The interrupt controller's secure mode routing may be flawed: if core_secure_mode_i is used to determine irq_sec_o, an attacker could manipulate acknowledge handshake or interrupt IDs to cause a non-secure interrupt to be treated as secure, or vice versa.",
+      "subject": "non-secure code/events",
+      "operation": "generate interrupt while secure mode is active or manipulate state",
+      "object": "secure interrupt output (irq_sec_o)",
+      "expected_guard": "irq_sec_o should only be asserted for interrupts configured as secure and while in secure mode, with state locked during service",
+      "candidate_path": "interrupt generation logic to irq_sec_o output",
+      "state_conditions_to_check": [
+        "secure interrupt configuration bits",
+        "core_secure_mode_i timing",
+        "interrupt acknowledge sequence"
+      ],
+      "required_evidence_slots": [
+        "register mapping for secure flags",
+        "combinational logic for irq_sec_o",
+        "state machine for interrupt handling"
+      ],
+      "files_or_modules_to_inspect": [
+        "apb_interrupt_cntrl.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Debug/JTAG/Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "Assumes secure interrupt feature exists; need to check actual secure interrupt architecture."
+    }
+  ]
+}

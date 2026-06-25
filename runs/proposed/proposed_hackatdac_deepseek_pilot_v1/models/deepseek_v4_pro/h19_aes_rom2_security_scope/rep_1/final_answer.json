@@ -1,0 +1,420 @@
+{
+  "analysis_summary": "The proposed method produced 6 finding(s) from 8 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "No authentication guard exists. The debug master can read and write bootrom freely, violating the expected protection.",
+      "vulnerability_category": "read / write / bootrom memory (mem array) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "bootrom/bootrom.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "bootrom/bootrom.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug master (i_dmi_jtag / i_SimDTM / i_dm_top) Operation: read / write Object: bootrom memory (mem array) Expected guard: Debug access to bootrom should require authentication (e.g., jtag_key check) or be blocked entirely. Observed behavior: Bootrom is fully readable and writable. When req_i && we_i, mem[addr] <= wdata_i executes unconditionally without any authentication, lock, or write-protect. No jtag_key check exists in the path. Path: debug_req_valid → i_dm_top → dm_axi_m_req → i_axi_master_dm → slave[1] → axi_node_intf_wrap (i_axi_xbar) → master[ROM=10] → i_axi2rom → rom_req, rom_we, rom_wdata → i_bootrom (bootrom.sv) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debug master can read or corrupt bootrom contents, violating ROM integrity and potentially allowing early-boot code injection or exfiltration.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "None. The entire path is visible and confirms absence of authentication.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "The AES key is fully readable by any bus master, violating the expected write-only or protected key storage requirement.",
+      "vulnerability_category": "read / AES encryption key (key_in → key_big[191:0]) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master (CPU, debug, etc.) Operation: read Object: AES encryption key (key_in → key_big[191:0]) Expected guard: Key registers should be write-only or require a lock/authentication for readback. Observed behavior: The full 192-bit AES key is exposed on the bus read data path at addresses 16–21 (aes_wrapper.sv lines 129–139). There is no lock bit, no write-only attribute, and no privilege check inside the AES wrapper. Path: AXI/APB read → reg_bus_aes → external_bus_io.rdata assignment = key_big[191:160, 159:128, 127:96, 95:64, 63:32, 31:0] Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Any bus master that can access the AES base address (0x1010_0000) can extract the full encryption key, completely compromising AES-encrypted data.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "None.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "rom2 lacks any write-protect mechanism, allowing unauthorized modification of critical secrets and access control data.",
+      "vulnerability_category": "write / rom2 secure_reg contents (JTAG key, AES key, access control registers) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master connected to rom2 Operation: write Object: rom2 secure_reg contents (JTAG key, AES key, access control registers) Expected guard: Write operations to rom2 must be blocked by a lock bit, privilege mechanism, or internal write-protect. Observed behavior: rom2.sv (lines 39-40) writes wdata_i into secure_reg[addr] unconditionally when req_i and we_i are asserted. No internal write-protect signal, lock bit, or address decode ignore exists. The source code comment (line 30) explicitly states 'We can read and write initial 64 bits.' Path: AXI → master[ROM2] → i_axi2rom2 → rom2_we, rom2_wdata → i_rom2 (rom2.sv) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker can overwrite the JTAG key (secure_reg[1]), AES key (secure_reg[0]), and access control registers (secure_reg[2], secure_reg[3]), enabling full system compromise, debug unlock, and privilege escalation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "None; RTL explicitly confirms writability.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "The jtag_key is readable by software through rom2's read data path, violating the expected non-readable property.",
+      "vulnerability_category": "read / jtag_key (31-bit value from rom2 secure_reg[1][31:0]) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master with access to rom2 Operation: read Object: jtag_key (31-bit value from rom2 secure_reg[1][31:0]) Expected guard: jtag_key should be non-readable by software; only hardware debug logic should use it. Observed behavior: jtag_key is derived from rom2 secure_reg[1] (ariane_peripherals.sv line 215). rom2.sv line 47 assigns rdata_o = secure_reg[raddr_q], making the entire secure_reg, including location 1, readable via normal AXI reads to rom2. There is no write-only attribute or access protection on jtag_key's storage. Path: AXI read to rom2 (master[ROM2]) → i_axi2rom2 → rom2_rdata → rdata_o = secure_reg[raddr_q]; jtag_key = key_reg_out[1][31:0] Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Software can read the JTAG authentication key, bypassing the intended hardware-only restriction and enabling unauthorized debug access.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "None; the read path of rom2 is clear.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "Intermediate AES state is fully readable, violating best practices for cryptographic IP isolation.",
+      "vulnerability_category": "read / AES intermediate state (inter_state) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master Operation: read Object: AES intermediate state (inter_state) Expected guard: Intermediate state should not be readable, or only readable when encryption is not in progress, ideally with a lock. Observed behavior: The AES wrapper's read path (lines 141-147) unconditionally provides inter_state[127:0] sliced into 32-bit chunks on external_bus_io.rdata. There is no lock bit, no condition on encryption active (ct_valid/start), and no restricted address visibility. Path: AXI/APB read → reg_bus_aes → external_bus_io.rdata = inter_state[...] (addresses 22-25) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker can read intermediate cryptographic state, potentially enabling advanced side-channel or differential analysis that weakens the encryption.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "None; the read-back is unconditional.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "AES configuration registers are writable during active operation without any lock, allowing operational corruption.",
+      "vulnerability_category": "write / AES configuration registers (p_c, state, start) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master Operation: write Object: AES configuration registers (p_c, state, start) Expected guard: A lock bit should prevent writes to these registers when start=1 or ct_valid=0 (operation in progress). Observed behavior: The AES wrapper's write logic (lines 61-99) accepts writes to start, p_c[0..3], and state[0..3] whenever external_bus_io.write is asserted and address matches. There is no check of AES busy state (start, ct_valid) and no lock register. Writes during an active operation can corrupt the plaintext/key/state and potentially leak information. Path: AXI/APB write → reg_bus_aes → external_bus_io.write + addr → registers start, p_c, state updated unconditionally. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker can disrupt an ongoing AES operation, possibly causing incorrect ciphertext, fault attacks, or information leakage, and overwrite configuration mid-operation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "None; the write enable conditions are clearly visible.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

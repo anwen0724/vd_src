@@ -1,0 +1,926 @@
+{
+  "analysis_summary": "The proposed method produced 8 finding(s) from 8 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "The debug interface is memory-mapped through fc_subsystem apb2per_debug_i to zeroriscy core debug signals without an observed authentication/authorization guard; zeroriscy_debug_unit grants debug requests and allows always-accessible debug register reads/writes, while protected GPR/CSR/PC operations are only gated by debug_halted_o rather than by an authorization check at the APB/debug boundary.",
+      "vulnerability_category": "read/write debug registers; request GPR, CSR, and jump/PC debug operations / debug settings/state, register file, CSR state, PC/jump control / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: APB/debug requester via apb_slave_debug and apb2per_debug_i Operation: read/write debug registers; request GPR, CSR, and jump/PC debug operations Object: debug settings/state, register file, CSR state, PC/jump control Expected guard: debug entry and debug operations should be mediated by explicit debug authorization/authentication or a trusted debug-mode state before protected core state is exposed or modified Observed behavior: fc_subsystem connects apb_slave_debug through apb2per_debug_i directly to debug_req/debug_addr/debug_we/debug_wdata/debug_rdata. zeroriscy_debug_unit asserts debug_gnt_o for many accesses, including invalid accesses; debug registers at address class 6'b00_0000 are always accessible, while CSR/GPR/DNPC paths are guarded only by debug_halted_o. No auth/secure/lifecycle signal was observed in the debug unit ports or at the APB bridge. Path: fc_subsystem.apb_slave_debug -> apb2per_debug_i -> debug_req/debug_addr/debug_we/debug_wdata -> core debug port -> zeroriscy_debug_unit -> settings_o/regfile_* / csr_* / jump_req_o Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An APB-accessible requester able to reach apb_slave_debug can manipulate debug configuration and, once the core is halted, read/write GPRs/CSRs or redirect execution without a separate debug authorization decision, potentially compromising core control-flow and architectural state.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Exact reset/write logic for all always-accessible debug settings is partially truncated; exact SoC-level APB access policy to apb_slave_debug is not provided.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "potential_warning",
+      "summary": "CSR module decodes fixed CSR addresses and updates mstatus/mepc/mcause/performance counters based on csr_op_i/csr_we_int/is_* signals. The observed port list includes csr_access_i, csr_addr_i, csr_op_i, exception save/restore inputs, but no current privilege input; comments indicate mstatus is always M-mode. Unknown/default CSR addresses read as zero/no update. No explicit illegal-access output was observed in the provided snippets.",
+      "vulnerability_category": "CSR read/write/configure / mstatus, mtvec, mepc, mcause, mhartid, performance counter CSRs / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: CPU software executing CSR instructions and debug CSR port Operation: CSR read/write/configure Object: mstatus, mtvec, mepc, mcause, mhartid, performance counter CSRs Expected guard: CSR reads and writes that affect privilege/security state, exception/interrupt state, or debug state should be gated by legal CSR address, access type, current privilege/debug mode, and read-only/write permissions Observed behavior: CSR module decodes fixed CSR addresses and updates mstatus/mepc/mcause/performance counters based on csr_op_i/csr_we_int/is_* signals. The observed port list includes csr_access_i, csr_addr_i, csr_op_i, exception save/restore inputs, but no current privilege input; comments indicate mstatus is always M-mode. Unknown/default CSR addresses read as zero/no update. No explicit illegal-access output was observed in the provided snippets. Path: decoder/id_stage CSR instruction path and debug CSR port -> zeroriscy_cs_registers csr_access_i/csr_addr_i/csr_op_i -> CSR state registers Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If untrusted or lower-privilege software can execute CSR instructions in this core configuration, it could alter interrupt enable, exception PC/cause, or performance counter state without a privilege/access-permission check; however the evidence also suggests a machine-mode-only implementation, so the permission boundary is not established.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need decoder/id_stage evidence for illegal CSR instruction handling and whether any non-machine/user privilege mode exists. Need complete CSR module around access qualification and reset values.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "potential_warning",
+      "summary": "fc_subsystem instantiates separate fc_demux blocks for instruction and data paths. fc_demux itself routes the slave request to master_port0 or master_port1 based on a single port_sel_i and handshake state; no address-range, privilege, or security-mode guard is present inside fc_demux. Address-map include files define multiple SoC/FC/APB/L2/SCM ranges and aliases, but the provided evidence does not show the derivation of port_sel_i or whether upstream address decode enforces the policy.",
+      "vulnerability_category": "read/write/fetch route / TCDM/L2/SCM/peripheral address regions and demux outputs / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_demux.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_demux.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_demux.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "rtl/includes/soc_bus_defines.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "rtl/includes/pulp_soc_defines.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_demux.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_demux.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_demux.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "rtl/includes/soc_bus_defines.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "rtl/includes/pulp_soc_defines.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: fabric-controller core instruction/data bus master Operation: read/write/fetch route Object: TCDM/L2/SCM/peripheral address regions and demux outputs Expected guard: address decode and security/privilege attributes should consistently restrict instruction and data accesses to protected regions or peripherals, with no alternate demux output bypassing the intended range or mode check Observed behavior: fc_subsystem instantiates separate fc_demux blocks for instruction and data paths. fc_demux itself routes the slave request to master_port0 or master_port1 based on a single port_sel_i and handshake state; no address-range, privilege, or security-mode guard is present inside fc_demux. Address-map include files define multiple SoC/FC/APB/L2/SCM ranges and aliases, but the provided evidence does not show the derivation of port_sel_i or whether upstream address decode enforces the policy. Path: core_instr_bus/core_data_bus -> fc_demux_instr_i/fc_demux_data_i -> l2_* or scm_l2_* master ports Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If port_sel_i can select protected/alternate targets without a consistent address/security check, instruction or data transactions could be routed through an unintended alias or bypass path to protected memory/peripherals; the provided evidence does not prove such reachability.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need full fc_subsystem lines deriving is_scm_instr_req/is_scm_data_req/port_sel_i and any upstream fabric security checks; protected regions/security attributes are not defined in the provided evidence.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "potential_warning",
+      "summary": "zeroriscy_load_store_unit exposes data_req_o, data_addr_o, data_we_o, byte enables, write data, read data, and error inputs. Observed LSU snippets show data alignment/misalignment and sign-extension behavior, not address-range/PMP/security checks. fc_subsystem connects core data bus signals to downstream demux/fabric; bus address ranges are defined in includes. No PMP-like module or privilege/security input was observed in the LSU snippets.",
+      "vulnerability_category": "load/store read/write / data memory and memory-mapped protected regions / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/zero-riscy/zeroriscy_load_store_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_load_store_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_load_store_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_load_store_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "rtl/includes/soc_bus_defines.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/zero-riscy/zeroriscy_load_store_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_load_store_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_load_store_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_load_store_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "rtl/includes/soc_bus_defines.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: CPU load/store unit Operation: load/store read/write Object: data memory and memory-mapped protected regions Expected guard: load and store requests to protected address regions should be mediated by address-range/PMP-like checks, privilege/security mode, and operation type before issuing bus requests Observed behavior: zeroriscy_load_store_unit exposes data_req_o, data_addr_o, data_we_o, byte enables, write data, read data, and error inputs. Observed LSU snippets show data alignment/misalignment and sign-extension behavior, not address-range/PMP/security checks. fc_subsystem connects core data bus signals to downstream demux/fabric; bus address ranges are defined in includes. No PMP-like module or privilege/security input was observed in the LSU snippets. Path: EX stage address/data -> zeroriscy_load_store_unit -> data bus signals -> fc_subsystem core_data_bus -> fc_demux_data_i/fabric Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If the downstream fabric does not enforce permissions, CPU stores/loads may be issued to any mapped MMIO or memory address generated by software, including protected regions; however the provided evidence does not establish the intended protected-region policy or whether downstream fabric denies accesses.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need full LSU request-generation logic and downstream fabric/error response policy. No PMP/security mode evidence was provided.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "apb_interrupt_cntrl exposes interrupt mask/int/ack/FIFO registers over APB and drives security-relevant core_irq_sec_o plus fetch/clock outputs, but the observed register read/write decode is gated only by APB psel/penable/pwrite and address decode, with no secure-mode/lock authorization; fetch_en_o and core_clock_en_o are hardwired enabled.",
+      "vulnerability_category": "MMIO read/write/configure/trigger interrupt state / interrupt mask/int/ack/FIFO state, core_irq_sec_o, fetch_en_o, core_clock_en_o / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: APB/MMIO software and event sources Operation: MMIO read/write/configure/trigger interrupt state Object: interrupt mask/int/ack/FIFO state, core_irq_sec_o, fetch_en_o, core_clock_en_o Expected guard: writes or events that alter secure interrupt attribution, fetch enable, or core clocking should be gated by authorized APB access, secure mode/lifecycle state, or lock/protection bits Observed behavior: Module defines APB slave, event inputs, core_secure_mode_i, core_irq_sec_o, core_clock_en_o, and fetch_en_o. APB write/read are derived directly from psel/penable/pwrite. Read path returns r_int/r_ack/r_mask/r_fifo_event. pready is always 1 and pslverr always 0. core_clock_en_o and fetch_en_o are tied to 1'b1. No lock bit, secure-mode check, or APB authorization guard is visible in the provided snippets. Path: fc_subsystem apb_slave_eu -> apb_interrupt_cntrl APB slave -> interrupt registers/events -> core_irq_req_o/core_irq_sec_o/fetch_en_o/core_clock_en_o Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Any requester able to access the APB interrupt controller can change interrupt mask/pending/ack state and observe FIFO/event status without an in-module authorization check; hardwired fetch/clock enables also prevent secure software from disabling core fetch/clock through this block, potentially undermining intended lifecycle or secure interrupt control.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Write-update logic for r_mask/r_int/r_ack and exact core_irq_sec_o computation is partly truncated; SoC-level APB access restrictions outside this module are unknown.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "potential_warning",
+      "summary": "Static facts and interface snippets show test_mode/test_en ports and CLKGATE_CONFIG_BUS, MMU_CONFIG_BUS, BIST_BUS, cache control, bypass, and flush signals. fc_subsystem passes test_en_i to riscv_core and fc_hwpe; apb_interrupt_cntrl has test_mode_i. The provided scope does not show implementation logic that uses these test/bypass/BIST controls or an authorization/lifecycle guard.",
+      "vulnerability_category": "test enable, bypass, flush, BIST configure/observe, clock-gate control / memory/test-visible state, cache/TCDM control, core clock/fetch control, HWPE test mode / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: test/BIST/bypass/clock-gate interface Operation: test enable, bypass, flush, BIST configure/observe, clock-gate control Object: memory/test-visible state, cache/TCDM control, core clock/fetch control, HWPE test mode Expected guard: test, BIST, bypass, and clock-gate controls should only affect protected memories or core operation under authorized test/lifecycle mode and should not expose or modify memory contents in normal operation Observed behavior: Static facts and interface snippets show test_mode/test_en ports and CLKGATE_CONFIG_BUS, MMU_CONFIG_BUS, BIST_BUS, cache control, bypass, and flush signals. fc_subsystem passes test_en_i to riscv_core and fc_hwpe; apb_interrupt_cntrl has test_mode_i. The provided scope does not show implementation logic that uses these test/bypass/BIST controls or an authorization/lifecycle guard. Path: test_en_i/test_mode_i and interface-defined BIST/bypass/clkgate signals -> core/HWPE/memory/control modules, exact connected enforcement path not shown Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If these interfaces are driven in normal operation without lifecycle authorization, they could alter clocking, bypass cache/TCDM paths, initiate BIST, or expose test result state; however the observed evidence only proves signal/interface presence, not an unguarded active path in this scope.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need connected modules implementing BIST, bypass, cache/private, and clkgate policies. Interface definitions alone do not prove access or lack of guard.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F7",
+      "status": "potential_warning",
+      "summary": "debug_unit reset initializes stall_cs to RUNNING, debug cause to HALT, single-step hit to 0, address/data/state/select/request flops to zero, settings_q to zero. apb_interrupt_cntrl hardwires fetch_en_o and core_clock_en_o to 1. Controller and IF-stage FSMs exist with fetch_enable_i and PC control, but their transition details are largely truncated. No complete evidence shows unsafe residual permissions across reset/exception/debug transitions.",
+      "vulnerability_category": "reset/mode transition/trigger fetch or debug action / PC/fetch state, debug state, interrupt/fetch enable state / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_controller.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_if_stage.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_controller.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_if_stage.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: core control FSM, debug unit, interrupt controller Operation: reset/mode transition/trigger fetch or debug action Object: PC/fetch state, debug state, interrupt/fetch enable state Expected guard: reset, halt, exception, interrupt, and debug mode transitions should clear or correctly gate stale protected state and should not leave debug/fetch controls enabled without authorization Observed behavior: debug_unit reset initializes stall_cs to RUNNING, debug cause to HALT, single-step hit to 0, address/data/state/select/request flops to zero, settings_q to zero. apb_interrupt_cntrl hardwires fetch_en_o and core_clock_en_o to 1. Controller and IF-stage FSMs exist with fetch_enable_i and PC control, but their transition details are largely truncated. No complete evidence shows unsafe residual permissions across reset/exception/debug transitions. Path: zeroriscy_controller/zeroriscy_if_stage/zeroriscy_debug_unit/apb_interrupt_cntrl -> PC/fetch/debug outputs Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Unsafe reset or transition gating could leave debug/fetch controls enabled or stale control-flow state reachable after reset/halt/interrupt; the provided evidence shows some safe debug reset defaults but is insufficient to prove or disprove lifecycle permission failure.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need full controller/IF-stage state transition logic, interrupt acknowledge behavior, and reset assignments for APB interrupt registers/core_irq_sec_o.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F8",
+      "status": "confirmed_finding",
+      "summary": "fc_hwpe exposes an APB-configured hardware accelerator wrapper with TCDM master ports, but the observed wrapper passes APB configuration directly through apb2per to mac_top_wrap and connects accelerator TCDM requests to fabric master ports without an observed address-range/security/permission guard.",
+      "vulnerability_category": "accelerator-triggered read/write/configure / memory regions reachable via l2_hwpe_master / hwacc_xbar_master TCDM ports / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_hwpe.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_hwpe.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_hwpe.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_hwpe.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_hwpe.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_hwpe.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_hwpe.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_hwpe.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: HWPE / hardware accelerator master configured by APB software Operation: accelerator-triggered read/write/configure Object: memory regions reachable via l2_hwpe_master / hwacc_xbar_master TCDM ports Expected guard: hardware accelerator requests should be constrained by address-range/security policy and should not gain broader memory access than the CPU or configured permissions allow Observed behavior: fc_subsystem instantiates fc_hwpe with APB slave hwpe config and l2_hwpe_master array. fc_hwpe converts APB config to periph_* signals via apb2per and instantiates mac_top_wrap, connecting tcdm_req/tcdm_add/tcdm_wen/tcdm_be/tcdm_wdata/tcdm_rdata. No range check, security mode, privilege attribute, or lock of configuration while transfers are active was observed in fc_hwpe snippets. Path: fc_subsystem.apb_slave_hwpe -> fc_hwpe.apb2per -> mac_top_wrap config -> tcdm_* signals -> hwacc_xbar_master/l2_hwpe_master Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An APB requester that can program HWPE may cause the accelerator to generate memory reads/writes on its master ports without an in-wrapper permission check, potentially bypassing CPU-side access controls or reaching memory regions not intended for accelerator access if the downstream fabric does not constrain it.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The snippet is truncated before hwacc_xbar_master assignments and mac_top_wrap policy; downstream fabric address restrictions are unknown.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

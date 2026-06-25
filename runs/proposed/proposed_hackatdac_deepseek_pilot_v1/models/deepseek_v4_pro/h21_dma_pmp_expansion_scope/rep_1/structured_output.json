@@ -1,0 +1,439 @@
+{
+  "analysis_summary": "The proposed method produced 5 finding(s) from 6 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "Critical violation: dm_slave_req is completely unguarded by jtag_unlock; any JTAG/DTM activity can access debug module without authentication.",
+      "vulnerability_category": "Read/write requests through dm_slave_req, dm_slave_we, dm_slave_addr, dm_slave_wdata, dm_slave_rdata / Debug module registers; indirectly system memory/peripherals accessible via hart debug control / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Declaration of jtag_unlock signal",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "jtag_unlock_o connection from i_dmi_jtag",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Declaration of dm_slave_req signal",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Connection of dm_slave_req to i_dm_top slave_req_i",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "i_dm_axi2mem drives dm_slave_req directly from dm_master",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Sole consumer of jtag_unlock is reglk_wrapper, no gating on DM slave interface",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug slave interface (i_dmi_jtag / i_dm_top) via dm_slave_req Operation: Read/write requests through dm_slave_req, dm_slave_we, dm_slave_addr, dm_slave_wdata, dm_slave_rdata Object: Debug module registers; indirectly system memory/peripherals accessible via hart debug control Expected guard: dm_slave_req must be gated by jtag_unlock == 1; only authenticated debug sessions should assert the slave request Observed behavior: dm_slave_req is driven directly from i_dm_axi2mem (line 406) into i_dm_top (line 367) without any qualification by jtag_unlock; jtag_unlock is connected only to i_reglk_wrapper (line 1820) and does not appear in the dm_slave path Path: dm_master (from i_debug_axilite_bridge) → i_dm_axi2mem → dm_slave_req → i_dm_top.slave_req_i; jtag_unlock from i_dmi_jtag → jtag_unlock wire → i_reglk_wrapper only Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "A debugger can access the debug module slave port and control harts without completing the authentication handshake, bypassing the entire jtag_unlock security mechanism",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Exact internal use of testmode_i within i_dmi_jtag and i_dm_top not visible; full verification of jtag_unlock generation is needed.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Critical: core_lock_reg provides no protection; DMA can be reprogrammed at any time. The lock implementation is fundamentally broken.",
+      "vulnerability_category": "Write to start_reg, length_reg, source_addr_lsb_reg, source_addr_msb_reg, dest_addr_lsb_reg, dest_addr_msb_reg, done_reg / DMA configuration registers in dma_wrapper / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "en = en_acct && acct_ctrl_i, not using core_lock_reg",
+          "supports_claim": ""
+        },
+        {
+          "file": "dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Write enable gate: en && we",
+          "supports_claim": ""
+        },
+        {
+          "file": "dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Non-sticky core_lock_reg write: unlocks on any non-zero write",
+          "supports_claim": ""
+        },
+        {
+          "file": "dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "reglk_ctrl_i input declared but unused inside module",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master writing to DMA configuration registers via AXI Operation: Write to start_reg, length_reg, source_addr_lsb_reg, source_addr_msb_reg, dest_addr_lsb_reg, dest_addr_msb_reg, done_reg Object: DMA configuration registers in dma_wrapper Expected guard: Writes must be gated by core_lock_reg == UNLOCKED; core_lock_reg must be sticky and not re-writable while locked Observed behavior: All DMA register writes are qualified only by en = en_acct && acct_ctrl_i (line 92) and en && we (line 117); core_lock_reg is not in the write-enable chain. Furthermore, core_lock_reg write logic (line 129) is not sticky: (wdata==0) ? 0 : ((core_lock_reg==0) ? wdata : 0) allows unlocking by any non-zero write. Path: axi_lite_interface → en_acct → en = en_acct && acct_ctrl_i → en && we → register write; core_lock_reg is a separately addressed register with no influence on other registers Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "DMA configuration registers are freely writable regardless of lock state; an attacker can reprogram DMA transfers even after software believes the DMA is locked",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Whether reglk_ctrl_i from riscv_peripherals is intended to serve as lock; currently unconnected. No testmode influence on DMA locks detected.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "High-severity: privilege escalation via inadvertent sharing of access control bits due to a coding error.",
+      "vulnerability_category": "Setting acc_ctrl[4*4+i] bits / Effective access control for peripheral 5 (PKT) via acc_ctrl_c[priv_lvl_i][5] / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "acc_ctrl_c assignment with OR of peripheral 4 bits for j==5",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "i_pkt_wrapper uses acc_ctrl_c[priv_lvl_i][5] as access control input",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Software/hardware writing to acc_ctrl bits of peripheral 4 (HMAC) Operation: Setting acc_ctrl[4*4+i] bits Object: Effective access control for peripheral 5 (PKT) via acc_ctrl_c[priv_lvl_i][5] Expected guard: acc_ctrl_c[i][5] must depend solely on acc_ctrl[5*4+i]; no OR with any other peripheral's bits Observed behavior: Line 222: assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]); therefore acc_ctrl_c[i][5] = acc_ctrl[5*4+i] | acc_ctrl[4*4+i]. acc_ctrl_c[priv_lvl_i][5] is used by i_pkt_wrapper (line 1627). Path: Continuous assignment in generate block (line 222) → acc_ctrl_c → i_pkt_wrapper.acct_ctrl_i → access control for PKT peripheral Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Escalation of privilege: granting access to HMAC (peripheral 4) automatically grants the same privilege-level access to PKT (peripheral 5); can compromise PKT (fuse/security asset) protection",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Intent of OR combination unclear; whether it is a bug or deliberate shared access for PKT requires design spec confirmation.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "High risk: DMA PMP enforcement is weakened by an unconditional allow path and lacks configuration stability during transfer; can lead to violation of memory protection policies.",
+      "vulnerability_category": "DMA memory read/write accesses with PMP enforcement / Memory regions restricted by PMP rules / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "dma.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "dma.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "dma.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "dma.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "CHECK_LOAD state with (we_flag && length_d == 3) bypass and unconditional allow logic",
+          "supports_claim": ""
+        },
+        {
+          "file": "dma.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "CTRL_LOAD sets pmp_allow_new = 1 unconditionally",
+          "supports_claim": ""
+        },
+        {
+          "file": "dma.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "PMP configuration registers directly updated from external inputs without locking",
+          "supports_claim": ""
+        },
+        {
+          "file": "dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "pmpcfg_i/pmpaddr_i passed through to dma module without lock or gating",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: DMA PMP check FSM (CTRL_CHECK_LOAD / CTRL_CHECK_STORE) and debug/test interfaces Operation: DMA memory read/write accesses with PMP enforcement Object: Memory regions restricted by PMP rules Expected guard: PMP allow must be continuously re-evaluated per transaction; no unconditional bypass; PMP configuration must not change during active transfer; debug/test must not override allow Observed behavior: In CHECK_LOAD state (line 203-220): pmp_allow_new = (pmp_allow_reg && (pmp_data_allow || (pmp_check_ctr_reg == length_d))) || (we_flag && length_d == 3). The term (we_flag && length_d == 3) unconditionally sets allow when length is 3 and we_flag is high, which could be used to bypass PMP for specific workloads. In CTRL_LOAD state (line 244-256): pmp_allow_new = 1 is set unconditionally before moving to CHECK_STORE. This means once load is committed, PMP allow is forced to 1 for the store phase, negating store-side PMP checks. No locking of PMP configuration registers during transfer; they are external inputs wired directly to the pmp module. Path: dma.sv: FSM states CHECK_LOAD, CTRL_LOAD, CHECK_STORE → pmp_allow_new/pmp_allow_reg → valid generation; external pmpcfg_i/pmpaddr_i directly connect to pmp module Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Potential PMP bypass: DMA can perform unauthorized memory accesses by exploiting unconditional allow or length=3 we_flag path; store phase runs without PMP re-validation",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Exact scenario where we_flag is asserted; whether it is a legitimate test mode or can be abused. No evidence of PMP config locking during transfer.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "potential_warning",
+      "summary": "No direct bypass observed in riscv_peripherals, but risk remains due to unknown submodule behavior. Full verification requires analyzing submodules and confirming testmode disable in production.",
+      "vulnerability_category": "Assertion of testmode during operation / All protected assets (bootrom, crypto, DMA, lock bits) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "testmode_i input declaration",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "testmode_i connected to i_dmi_jtag",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "testmode_i connected to i_dm_top",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "testmode_i connected to i_clint",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "testmode_i not used in dma_wrapper, dma, or any lock/access control logic",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: testmode_i global input Operation: Assertion of testmode during operation Object: All protected assets (bootrom, crypto, DMA, lock bits) Expected guard: testmode_i must not override any security-critical signals; if it does, it must be disabled in secure lifecycle states via fuse or physical strap Observed behavior: testmode_i is connected to i_dmi_jtag (line 278), i_dm_top (line 361), and i_clint (line 613). It is NOT connected to bootrom logic, DMA wrapper, reglk_ctrl, or acc_ctrl assignments in visible RTL. No evidence of testmode overriding locks or access controls in riscv_peripherals.sv. Path: testmode_i input → i_dmi_jtag, i_dm_top, i_clint (direct port connections); no further fanout found in riscv_peripherals Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Within the visible periphery, testmode does not directly bypass security; however, internal behavior of dmi_jtag and dm_top under testmode is unknown and could provide indirect bypass. Without lifecycle/fuse control, testmode remains a potential risk if those submodules weaken security in test mode.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Internal logic of i_dmi_jtag, i_dm_top, and i_clint under testmode is not available; lifecycle/efuse control is not verified.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

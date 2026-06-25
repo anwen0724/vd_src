@@ -1,0 +1,1200 @@
+{
+  "scope_id": "adv_dbg_if_pulpissimo_permission_scope",
+  "obligations": [
+    {
+      "obligation_id": "PERM-ADVDBG-AXI-001",
+      "reason": "Visible RTL contains a JTAG/debug module with AXI master ports. Analysis should determine whether external JTAG can initiate arbitrary AXI transactions and whether those transactions are mediated by a debug authorization, lifecycle, privilege, or address-range guard.",
+      "subject": "external JTAG/debug requester",
+      "operation": "read/write via AXI master",
+      "object": "SoC AXI address space and any protected registers/memory reachable through AXI",
+      "expected_guard": "debug authentication/authorization or lifecycle/debug-enable gating before JTAG-originated AXI read/write transactions are issued",
+      "candidate_path": "JTAG TAP -> adbg_top/adv_dbg_if -> adbg_axi_module -> adbg_axi_biu -> AXI master interface",
+      "state_conditions_to_check": [
+        "reset state of debug selection/control registers",
+        "conditions for module_select_i/update_dr_i/strobe_i",
+        "AXI valid generation conditions",
+        "any top-level debug enable or test-mode inputs"
+      ],
+      "required_evidence_slots": [
+        "subject: JTAG/TAP requester signals and selected debug module",
+        "operation: AXI read/write command generation",
+        "object: reachable AXI target/address range",
+        "expected guard: auth/debug-enable/lifecycle/range check",
+        "observed behavior: guard present or absent at issue point",
+        "path/reachability: TAP-to-AXI signal chain and top-level connections",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+        "ips/adv_dbg_if/rtl/adbg_top.sv",
+        "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+        "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+        "rtl/pulpissimo/pulpissimo.sv",
+        "rtl/pulpissimo/safe_domain.sv",
+        "rtl/pulpissimo/soc_domain.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "Fabric/Address Map/DMA/PMP",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer is truncated and does not expose all top-level ports/connections; inspect RTL to confirm reachability and guards."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-LINT-002",
+      "reason": "The scope exposes a JTAG LINT debug path with address, write enable, data, byte-enable, and request outputs, plus a wrapper connected in pulp_soc. Check whether external debug requests are constrained before reaching memory or peripheral targets.",
+      "subject": "external JTAG LINT debug requester",
+      "operation": "read/write via LINT debug bus",
+      "object": "LINT/TCDM or local interconnect memory/register targets reachable from lint_add_o/lint_req_o",
+      "expected_guard": "debug authorization plus address-range/access policy restricting JTAG LINT requests to permitted debug regions",
+      "candidate_path": "JTAG TAP -> adbg_lint_module -> adbg_lint_biu -> lint_jtag_wrap/pulp_soc LINT/TCDM bus",
+      "state_conditions_to_check": [
+        "module/debug select conditions",
+        "transaction strobe and rd_wrn/lint_wen generation",
+        "grant/valid handshake behavior",
+        "reset defaults of debug control state"
+      ],
+      "required_evidence_slots": [
+        "subject: JTAG/LINT debug requester",
+        "operation: lint_req_o/lint_wen_o read or write",
+        "object: decoded LINT/TCDM targets",
+        "expected guard: debug auth/range/access matrix",
+        "observed behavior at adbg_lint_biu and lint_jtag_wrap",
+        "top-level reachability from JTAG pins",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+        "ips/adv_dbg_if/rtl/adbg_lintonly_top.sv",
+        "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "rtl/pulpissimo/jtag_tap_top.sv",
+        "rtl/pulpissimo/pulpissimo.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "Fabric/Address Map/DMA/PMP",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need RTL inspection to identify address map and whether lint_jtag_wrap or downstream interconnect applies policy."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-TAP-003",
+      "reason": "The TAP controls which debug module receives scan operations. A permission analysis should verify that instruction decode/module_select paths cannot enable protected bus access without an explicit debug authorization or lifecycle guard.",
+      "subject": "external JTAG TAP controller",
+      "operation": "select/enable debug module and route scan data",
+      "object": "debug module selection controls and downstream bus-master capability",
+      "expected_guard": "only authorized or lifecycle-enabled debug instructions should select bus-master/debug modules; unselected modules should not drive TDO or issue transactions",
+      "candidate_path": "adbg_tap_top instruction/data register decode -> module_select_i/top_inhibit_o -> debug modules",
+      "state_conditions_to_check": [
+        "TAP reset instruction/default selected module",
+        "capture/shift/update DR transitions",
+        "top_inhibit_o effects",
+        "TDO mux behavior for unselected modules"
+      ],
+      "required_evidence_slots": [
+        "subject: TAP instruction/register state controlled by TDI/TMS/TCK",
+        "operation: module selection and data routing",
+        "object: AXI/LINT/OR1K debug modules",
+        "expected guard: auth/lifecycle/debug-enable",
+        "observed behavior in decode and top-level routing",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+        "ips/adv_dbg_if/rtl/adbg_top.sv",
+        "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+        "ips/adv_dbg_if/rtl/adbg_defines.v",
+        "ips/adv_dbg_if/rtl/adbg_tap_defines.v"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer identifies TAP modules but not decode details; inspect defines and TAP FSM."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-OR1K-004",
+      "reason": "OR1K debug modules and status register are present. Verify whether JTAG-originated operations affecting CPU state are conditioned on authorized debug mode and whether status/control bits are protected across reset and transitions.",
+      "subject": "external JTAG OR1K debug requester",
+      "operation": "read/write/control CPU debug state",
+      "object": "CPU debug registers, status/control state, execution halt/reset controls, or CPU-visible memory interface",
+      "expected_guard": "CPU halt/debug authorization and privilege/lifecycle gating before reading/writing CPU registers or controlling execution",
+      "candidate_path": "adbg_or1k_module/adbg_or1k_biu -> CPU debug/control interface",
+      "state_conditions_to_check": [
+        "status register reset values",
+        "set/clear conditions for stall/halt/status bits",
+        "module_select and strobe conditions",
+        "CPU run/halt transition behavior"
+      ],
+      "required_evidence_slots": [
+        "subject: JTAG-selected OR1K debug module",
+        "operation: CPU register/status read/write or control",
+        "object: OR1K debug status/control assets",
+        "expected guard: debug auth/halt/lifecycle/privilege",
+        "observed behavior in BIU/status register",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_or1k_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_or1k_biu.sv",
+        "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+        "ips/adv_dbg_if/rtl/adbg_top.sv",
+        "ips/adv_dbg_if/rtl/adbg_or1k_defines.v"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "CSR/MMIO Access Control",
+        "Reset/Lifecycle/State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Top-level connectivity to a CPU/debug interface must be confirmed in current SoC configuration."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-RDATA-005",
+      "reason": "Debug bus read data is externally shifted out via TDO. Check that read response capture and TDO muxing do not expose protected or stale data without the expected debug authorization and transaction validity conditions.",
+      "subject": "external JTAG observer/requester",
+      "operation": "expose/read out over TDO",
+      "object": "read data returned from SoC buses or CPU debug interface, including potentially secret/protected memory or registers",
+      "expected_guard": "readback of protected data should require authorization and should not expose stale/unauthorized data after errors, reset, or deselection",
+      "candidate_path": "debug read response path: AXI/LINT/OR1K bus data -> adbg_*_module shift register -> module_tdo_o/TDO",
+      "state_conditions_to_check": [
+        "read response valid/error conditions",
+        "CRC/error handling effects",
+        "reset clearing of data registers/FIFOs",
+        "module deselection or aborted transaction residue"
+      ],
+      "required_evidence_slots": [
+        "subject: external TDO observer/JTAG requester",
+        "operation: capture and shift read data",
+        "object: bus response data/register contents",
+        "expected guard: auth plus valid response and module selection",
+        "observed behavior: read-data latch/TDO mux/reset clearing",
+        "path: response data to module_tdo_o/TDO",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+        "ips/adv_dbg_if/rtl/adbg_or1k_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_or1k_biu.sv",
+        "ips/adv_dbg_if/rtl/adbg_top.sv",
+        "ips/adv_dbg_if/rtl/adbg_tap_top.v"
+      ],
+      "knowledge_used": [
+        "Crypto/Secret State Exposure",
+        "Debug/JTAG/Test Access",
+        "Reset/Lifecycle/State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Need code inspection for shift-register and data-latch behavior; protected target identity depends on downstream address map."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-RESET-006",
+      "reason": "Multiple debug modules have separate JTAG reset and system reset inputs. Check reset defaults and cross-domain transitions so that debug access is not implicitly authorized and stale response/status data is not retained for later TDO exposure.",
+      "subject": "JTAG reset/system reset environment",
+      "operation": "reset/transition into or out of debug-accessible state",
+      "object": "debug enable/select state, transaction state machines, read-data/status registers",
+      "expected_guard": "reset/debug mode transitions should not enable debug access by default or leave authorized/readable stale state after reset",
+      "candidate_path": "JTAG/debug reset inputs trstn_i and SoC reset/debug controls across adbg modules and top-level domains",
+      "state_conditions_to_check": [
+        "trstn_i vs system reset behavior",
+        "TAP instruction reset value",
+        "debug module FSM reset states",
+        "read-data/status register reset values",
+        "clock-domain synchronizer reset behavior"
+      ],
+      "required_evidence_slots": [
+        "subject: reset/debug transition source",
+        "operation: reset or mode transition",
+        "object: debug authorization/select/readback state",
+        "expected guard: safe reset default and explicit reauthorization",
+        "observed reset assignments and state retention",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_top.sv",
+        "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+        "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+        "rtl/pulpissimo/safe_domain.sv",
+        "rtl/pulpissimo/pulpissimo.sv"
+      ],
+      "knowledge_used": [
+        "Reset/Lifecycle/State Residue",
+        "Debug/JTAG/Test Access",
+        "Lock/Sticky Bit/Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "Authorization signals may be absent or named indirectly; inspect top-level integration for lifecycle/test controls."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-ATTR-007",
+      "reason": "AXI ports expose AW/AR prot, user, region, id and LINT exposes aux/byte-enable signals. Verify whether these attributes are fixed or controllable and whether they could mark debug transactions as privileged/secure or bypass downstream access controls.",
+      "subject": "JTAG-originated bus master",
+      "operation": "route/configure bus transaction attributes",
+      "object": "bus security/privilege attributes and downstream access-control interpretation",
+      "expected_guard": "debug-originated transactions should carry restrictive security attributes or be range checked so they cannot be interpreted as privileged/secure accesses",
+      "candidate_path": "adbg_axi_biu/adbg_lint_biu transaction formatting -> downstream bus attributes (prot/user/aux/be/size)",
+      "state_conditions_to_check": [
+        "word_size_i and address alignment effects",
+        "prot/user/aux reset and assignment values",
+        "read vs write attribute differences",
+        "error handling for unsupported size/alignment"
+      ],
+      "required_evidence_slots": [
+        "subject: debug BIU transaction generator",
+        "operation: assign bus attributes and byte enables",
+        "object: downstream permission attributes/access policy",
+        "expected guard: fixed non-secure/debug identity or access matrix enforcement",
+        "observed assignments and any JTAG-controlled fields",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+        "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+        "rtl/includes/soc_bus_defines.sv",
+        "rtl/includes/pulp_soc_defines.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP",
+        "CSR/MMIO Access Control",
+        "Debug/JTAG/Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "Downstream security meaning of user/aux/prot signals requires top-level/interconnect inspection."
+    },
+    {
+      "obligation_id": "PERM-SOC-WRAP-008",
+      "reason": "The SoC instantiates separate debug, JTAG, uDMA, FC, APB, ROM, and L2 bus objects. Check whether routing from JTAG/debug wrappers can reach protected memory/peripheral regions and whether requester identity or address-range controls are enforced at crossings.",
+      "subject": "JTAG/debug bus master entering SoC interconnect",
+      "operation": "route JTAG/debug requests into SoC buses",
+      "object": "SoC interconnect regions, APB debug/peripheral buses, L2/TCDM memory buses",
+      "expected_guard": "wrappers/interconnect should preserve requester identity and enforce separation between JTAG debug, CPU, DMA, and peripheral access domains",
+      "candidate_path": "lint_jtag_wrap and pulp_soc debug buses s_lint_debug_bus/s_lint_jtag_bus with APB debug/peripheral buses",
+      "state_conditions_to_check": [
+        "address decode ranges",
+        "bus grant arbitration conditions",
+        "crossbar requester identity signals",
+        "debug/test-mode enable signals",
+        "reset defaults of wrapper enables"
+      ],
+      "required_evidence_slots": [
+        "subject: JTAG/debug wrapper master",
+        "operation: route/read/write SoC bus transaction",
+        "object: APB/L2/TCDM/ROM/peripheral target",
+        "expected guard: interconnect access matrix/range check/identity preservation",
+        "observed routing/decode behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "rtl/pulpissimo/soc_domain.sv",
+        "rtl/pulpissimo/safe_domain.sv",
+        "rtl/pulpissimo/pulpissimo.sv",
+        "rtl/includes/soc_bus_defines.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP",
+        "Debug/JTAG/Test Access",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer lists bus instances but not crossbar implementations; inspect top-level connections and included defines."
+    }
+  ],
+  "inspection_records": [
+    {
+      "obligation_id": "PERM-ADVDBG-AXI-001",
+      "inspection_status": "inconclusive",
+      "evidence_slots": {
+        "subject": "external JTAG/debug requester using TAP-selected debug module signals (module_select_i/update_dr_i/capture_dr_i/shift_dr_i)",
+        "operation": "read/write via AXI master: adbg_axi_module transitions from STATE_idle to STATE_Rbegin/STATE_Wready when module_cmd && module_select_i && update_dr_i && burst_read/burst_write; adbg_axi_biu latches addr_i/data_i/wr_reg on strobe_i && rdy_o and issues AXI valid/ready handshakes",
+        "object": "AXI address supplied by JTAG/debug command, exposed on axi_master_ar_addr/axi_master_aw_addr; potential SoC AXI address space if integrated",
+        "expected_guard": "debug authentication/authorization or lifecycle/debug-enable gating before JTAG-originated AXI read/write transactions are issued",
+        "observed_behavior": "No auth, lifecycle, privilege, or address-range predicate is shown in the inspected AXI issue path. The start condition is strobe_i && rdy_o in adbg_axi_biu and module_cmd && module_select_i && update_dr_i in adbg_axi_module. AXI addresses are directly assigned from addr_reg; attributes are fixed constants. Reset makes rdy_o high, enabling a later strobe.",
+        "path": "TAP/debug selection -> adbg_axi_module -> adbg_axi_biu -> axi_master_* ports. Internal chain is evidenced; current SoC/top-level connection to protected AXI targets remains uncertain.",
+        "state_condition": "",
+        "impact": "If the AXI debug master is connected to the SoC fabric, an external JTAG actor could read or write arbitrary reachable AXI locations, including protected memory/registers, without the expected debug authorization or range policy.",
+        "rtl_evidence": [
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+            "lines": "568-590",
+            "detail": "module_state reset to STATE_idle; next state starts read/write burst when module_cmd && module_select_i && update_dr_i && burst_read/burst_write."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+            "lines": "704-768",
+            "detail": "BIU strobe generated in read begin path; defaults do not include auth guard; top_inhibit_o default is not an authorization."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+            "lines": "323-347",
+            "detail": "addr/data/write registers and start toggle update on strobe_i && rdy_o."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+            "lines": "380-418",
+            "detail": "AXI addresses/data directly assigned from latched debug inputs; prot/user/id/region/qos/cache assigned zero."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+            "lines": "535-562",
+            "detail": "AXI FSM asserts w/r ready and captures read data/response; no authorization predicate visible."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Top-level integration of adv_dbg_if/adbg_top AXI master into pulpissimo was not established by observations; search observations for adv_dbg_if/jtag_axireg were empty despite fact-layer modules. Downstream AXI address map and target protection are not shown.",
+      "candidate_finding": "AXI debug BIU/module can generate AXI master read/write requests from JTAG-selected commands without any visible authentication, lifecycle, or address-range guard inside the inspected AXI debug module/BIU; however SoC-level reachability of adv_dbg_if AXI master into the current PULPissimo integration was not confirmed by the provided observations.",
+      "notes": "Classified inconclusive rather than candidate violation because internal AXI issue path is unguarded but current SoC reachability is not closed."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-LINT-002",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "external JTAG LINT debug requester driving tck_i/tdi_i and TAP-derived jtag_shift/update/capture/axireg_sel signals",
+        "operation": "read/write via LINT debug bus: lint_req_o/lint_wen_o/lint_add_o/lint_wdata_o/lint_be_o",
+        "object": "pulp_soc s_lint_debug_bus and downstream LINT/TCDM/local interconnect targets reachable from that bus",
+        "expected_guard": "debug authorization plus address-range/access policy restricting JTAG LINT requests to permitted debug regions",
+        "observed_behavior": "lint_jtag_wrap directly instantiates adbg_lintonly_top and connects its lint_req/add/wen/wdata/be outputs to jtag_lint_master. In pulp_soc, i_lint_jtag connects jtag_lint_master to s_lint_debug_bus. adbg_lint_biu latches addr/data/be on strobe_i && rdy_o and assigns them directly to lint_add_o/lint_wdata_o/lint_be_o; lint_aux_o is tied to zero. No auth, lifecycle, debug enable, or range check is visible in the wrapper/BIU evidence.",
+        "path": "External JTAG TAP signals in pulp_soc -> lint_jtag_wrap -> adbg_lintonly_top -> adbg_lint_module/adbg_lint_biu -> s_lint_debug_bus",
+        "state_condition": "",
+        "impact": "An external JTAG user could issue debug LINT transactions into the SoC debug/local interconnect path and potentially read or modify reachable memory/register targets without the expected authorization or range restriction.",
+        "rtl_evidence": [
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+            "lines": "14-29",
+            "detail": "Wrapper exposes JTAG inputs and XBAR_TCDM_BUS.Master jtag_lint_master."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+            "lines": "34-67",
+            "detail": "adbg_lintonly_top directly drives jtag_lint_master.req/add/wen/wdata/be and consumes gnt/r_valid/r_rdata/r_opc; aux is left unconnected."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+            "lines": "737-750",
+            "detail": "i_lint_jtag connects jtag_tck/tdi/trst/update/capture/axireg_sel to lint_jtag_wrap and connects jtag_lint_master to s_lint_debug_bus."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+            "lines": "240-259",
+            "detail": "Latches byte enables, address, data, and write flag on strobe_i && rdy_o and toggles start."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+            "lines": "293-308",
+            "detail": "lint_add_o/lint_wdata_o/lint_be_o assigned from latched debug values; lint_aux_o assigned zero."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Downstream LINT/TCDM address decode and any later interconnect access matrix were not provided; exact protected target set is unknown.",
+      "candidate_finding": "The JTAG LINT debug path is connected into pulp_soc as a master on s_lint_debug_bus and can issue LINT read/write requests based on JTAG scan/control signals without any visible debug authentication or address-range/access policy in lint_jtag_wrap, adbg_lintonly_top, adbg_lint_module, or adbg_lint_biu.",
+      "notes": "The obligation is violated at the wrapper/BIU boundary because no requested guard mediates external JTAG requests before they enter s_lint_debug_bus."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-TAP-003",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "external JTAG TAP controller driven by TMS/TCK/TDI/TRST",
+        "operation": "select/enable debug module and route scan data over TDO",
+        "object": "debug_select/debug_tdo_i routing and downstream bus-master-capable debug modules",
+        "expected_guard": "only authorized or lifecycle-enabled debug instructions should select bus-master/debug modules; unselected modules should not drive TDO or issue transactions",
+        "observed_behavior": "JTAG IR resets to IDCODE, but update_ir loads jtag_ir from TDI. TDO mux routes debug_tdo_i whenever latched_jtag_ir equals DEBUG. No auth/debug-enable/lifecycle condition appears in the observed decode or TDO mux. TDO output enable is shift_ir | shift_dr.",
+        "path": "adbg_tap_top JTAG pads -> jtag_ir/latched_jtag_ir decode -> DEBUG case selecting debug_tdo_i; debug_select_o is a visible TAP output in the module interface. PULPissimo jtag_tap_top similarly provides axireg_sel_o and scan output to debug wrapper without an auth input in the shown port list.",
+        "state_condition": "",
+        "impact": "An external JTAG actor can select the debug scan path and thereby enable downstream debug bus access or readback paths without an authorization gate, making later AXI/LINT debug operations externally reachable.",
+        "rtl_evidence": [
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+            "lines": "74-105",
+            "detail": "TAP exposes JTAG pads, debug_select_o, tdi_o, debug_tdo_i and TDO outputs."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+            "lines": "395-418",
+            "detail": "IR shifts from tdi_pad_i and latched_jtag_ir updates on update_ir; reset selects IDCODE."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+            "lines": "521-557",
+            "detail": "TDO mux selects debug_tdo_i for DEBUG instruction and enables TDO during shift_ir|shift_dr."
+          },
+          {
+            "file": "rtl/pulpissimo/jtag_tap_top.sv",
+            "lines": "62-90",
+            "detail": "tap_top outputs axireg_sel_o and scan_in_o and takes dbg_axi_scan_out_i; no auth/lifecycle input shown."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Full definition of DEBUG opcode in adbg_tap_defines.v was truncated after the supported-instruction list; complete debug_select_o assignment logic was not shown. However observed TDO mux establishes DEBUG instruction routing.",
+      "candidate_finding": "The TAP/debug selection path can route scan traffic to debug output based on public JTAG instruction selection, with reset defaulting to IDCODE but update_ir loading arbitrary shifted instructions including DEBUG; no authentication/lifecycle predicate is visible before debug_select/TDO routing.",
+      "notes": "Reset default to IDCODE is safe only at reset; it does not provide an authorization guard for later UPDATE_IR selection."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-OR1K-004",
+      "inspection_status": "inconclusive",
+      "evidence_slots": {
+        "subject": "external JTAG OR1K debug requester, if OR1K module is TAP-selected and connected",
+        "operation": "read/write/control CPU debug state through cpu_addr/data/stall/stb/we/rst/status signals",
+        "object": "CPU debug registers/status/control and execution halt/reset controls",
+        "expected_guard": "CPU halt/debug authorization and privilege/lifecycle gating before reading/writing CPU registers or controlling execution",
+        "observed_behavior": "Fact layer lists adbg_or1k_module, adbg_or1k_biu, and adbg_or1k_status_reg. adv_dbg_if/adbg_top expose CPU debug signals including cpu_stall_o, cpu_stb_o, cpu_we_o, cpu_rst_o. Only a partial status_reg read was provided; no complete evidence of auth guard, OR1K FSM behavior, or top-level CPU connection was provided.",
+        "path": "Potential path is TAP -> adbg_top/adbg_or1k_module -> adbg_or1k_biu/status_reg -> CPU debug interface, but reachability in current PULPissimo configuration was not closed.",
+        "state_condition": "",
+        "impact": "If connected, unauthorized external JTAG control of OR1K/CPU debug state could halt/reset execution or read/write CPU-visible debug resources without lifecycle/privilege approval.",
+        "rtl_evidence": [
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+            "lines": "67-76",
+            "detail": "adbg_top port list includes CPU debug/control signals cpu_addr_o/cpu_data_i/o/cpu_bp_i/cpu_stall_o/cpu_stb_o/cpu_we_o/cpu_ack_i/cpu_rst_o."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+            "lines": "32-42",
+            "detail": "adv_dbg_if wrapper exposes CPU debug/control ports."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+            "lines": "66-69",
+            "detail": "OR1K status register module included and declared; observation truncated before behavior."
+          },
+          {
+            "file": "static_facts",
+            "lines": "module inventory",
+            "detail": "adbg_or1k_biu, adbg_or1k_module, adbg_or1k_status_reg are present in ips/adv_dbg_if/rtl."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Need complete OR1K module/BIU/status_reg behavior, reset values, status set/clear conditions, module_select/strobe guards, and top-level CPU connectivity.",
+      "candidate_finding": "OR1K debug modules and CPU debug/status ports exist in the fact layer and adv_dbg_if/adbg_top interfaces, but current SoC connectivity and detailed OR1K BIU/status-control behavior were not sufficiently observed to determine whether JTAG-originated CPU control is reachable or guarded.",
+      "notes": "Do not promote to violation on provided data because only presence/interface evidence is available."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-RDATA-005",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "external TDO observer/JTAG requester",
+        "operation": "capture and shift read data over module_tdo_o/TDO",
+        "object": "AXI/LINT bus response data and debug internal error/status data; potentially protected memory/register contents if reachable downstream",
+        "expected_guard": "readback of protected data should require authorization and should not expose stale/unauthorized data after errors, reset, or deselection",
+        "observed_behavior": "AXI BIU latches read data when !wr_reg && axi_master_r_valid; LINT BIU latches read data when data_o_en is asserted from response FSM. AXI module selects BIU data into data_out_shift_reg in read-status/read-burst states and shifts it to module TDO; TAP mux routes debug_tdo_i to tdo_pad_o for DEBUG instruction. Resets clear BIU data registers, but no auth guard is visible for TDO readout.",
+        "path": "AXI/LINT response data -> data_out_reg/data_o -> adbg_*_module data_out_shift_reg/module_tdo_o -> debug_tdo_i/dbg_axi_scan_out_i -> TAP TDO",
+        "state_condition": "",
+        "impact": "An external JTAG observer could extract contents returned by reachable SoC bus reads, including sensitive memory or MMIO data, without a debug authorization check; stale-data risk is reduced by reset clearing but not by permission enforcement.",
+        "rtl_evidence": [
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+            "lines": "535-562",
+            "detail": "On read response valid, data_o_en is asserted, rdy toggled, and error latched."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+            "lines": "704-728",
+            "detail": "TDO data path controls include out_reg_ld_en/out_reg_shift_en/tdo_output_sel; no auth default."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+            "lines": "776-785",
+            "detail": "Read status state selects BIU data for output register when progressing to read burst."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+            "lines": "529-547",
+            "detail": "DEBUG instruction routes debug_tdo_i to tdo_pad_o."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+            "lines": "335-340",
+            "detail": "LINT read data register resets to zero and loads swapped_data_out when data_o_en is asserted."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_lintonly_top.sv",
+            "lines": "156-165",
+            "detail": "tdo_o mux forwards tdo_axi for module_id_reg 0."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Full shift-register reset/deselection behavior for all modules and downstream protected target identity are not fully shown. OR1K read-data path was not inspected in detail.",
+      "candidate_finding": "Debug read data from AXI/LINT BIUs is latched into module shift-register/TDO paths and externally routed by the TAP when the debug instruction/path is selected, with no visible authorization guard. Readback is conditioned on transaction readiness/validity but not on permission to observe protected data.",
+      "notes": "The finding concerns missing authorization on readback, not necessarily stale data retention after reset, since reset-clearing evidence exists for BIU data registers."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-RESET-006",
+      "inspection_status": "inconclusive",
+      "evidence_slots": {
+        "subject": "JTAG reset/system reset environment using trstn_i/trstn_pad_i and SoC rstn_i/axi_aresetn",
+        "operation": "reset/transition into or out of debug-accessible state",
+        "object": "debug select/instruction state, transaction FSMs, ready/data/error/status registers",
+        "expected_guard": "reset/debug mode transitions should not enable debug access by default or leave authorized/readable stale state after reset",
+        "observed_behavior": "TAP reset/test_logic_reset sets latched_jtag_ir to IDCODE and TDO low; AXI module resets module_state to STATE_idle and internal error register to zero; AXI and LINT BIUs reset latched addr/data/write state to zero and rdy_o to 1. These are mostly safe defaults for stale state, but rdy_o=1 permits a subsequent unauthenticated strobe and no explicit authorization state or lifecycle recheck is visible.",
+        "path": "trstn_pad_i/trstn_i into TAP/modules and rstn_i/axi_aresetn into BIU clock domains",
+        "state_condition": "",
+        "impact": "If system policy expects debug to remain disabled after reset until authenticated, the observed design could become debug-accessible immediately after reset through normal JTAG selection; stale read-data exposure appears partly mitigated by data-register reset in inspected BIUs.",
+        "rtl_evidence": [
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+            "lines": "395-418",
+            "detail": "JTAG IR clears to zero and latched_jtag_ir selects IDCODE on reset/test_logic_reset."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+            "lines": "542-557",
+            "detail": "TDO output and output enable reset low; TDO enable later follows shift_ir|shift_dr."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+            "lines": "359-377",
+            "detail": "AXI internal error register resets to zero."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+            "lines": "568-574",
+            "detail": "AXI module FSM resets to STATE_idle."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+            "lines": "323-331",
+            "detail": "AXI BIU latched select/address/data/write state reset to zero."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+            "lines": "363-373",
+            "detail": "AXI BIU rdy_o resets to 1 and is cleared only on strobe."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+            "lines": "240-259",
+            "detail": "LINT BIU latch/start reset behavior."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+            "lines": "276-287",
+            "detail": "LINT BIU rdy_o resets to 1."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+            "lines": "335-340",
+            "detail": "LINT read data register resets to zero."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Need full top-level reset integration, lifecycle/test/debug-enable policy signals, OR1K status reset details, and all synchronizer/reset-domain behavior.",
+      "candidate_finding": "Observed reset behavior generally clears debug data/state registers and selects IDCODE in the TAP, but reset does not implement or require reauthorization before later debug selection/transactions. Cross-domain and top-level lifecycle/debug-enable reset integration is not sufficiently evidenced.",
+      "notes": "Mixed result: stale-data reset appears partially satisfied in inspected BIUs/TAP, but authorization after reset remains absent/uncertain."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-ATTR-007",
+      "inspection_status": "obligation_satisfied",
+      "evidence_slots": {
+        "subject": "JTAG-originated AXI/LINT bus transaction generator",
+        "operation": "route/configure bus transaction attributes and byte enables",
+        "object": "AXI prot/user/region/id/cache/qos/size/strb and LINT aux/be attributes",
+        "expected_guard": "debug-originated transactions should carry restrictive security attributes or be range checked so they cannot be interpreted as privileged/secure accesses",
+        "observed_behavior": "AXI BIU fixes aw/ar prot, region, len, burst, lock, cache, qos, id, user and w_user to zero; w_last is fixed to one. AXI size is derived only from word_size_i. LINT BIU fixes lint_aux_o to zero and byte enables are derived from word size/address. No evidence shows JTAG can set prot/user/aux/security identity attributes directly.",
+        "path": "adbg_axi_biu/adbg_lint_biu transaction formatting -> AXI/LINT attribute outputs",
+        "state_condition": "",
+        "impact": "",
+        "rtl_evidence": [
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+            "lines": "396-418",
+            "detail": "AXI AW/AR prot/region/len/burst/lock/cache/qos/id/user and W user assigned zero; w_last assigned one."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+            "lines": "422-449",
+            "detail": "AXI size selected from word_size_i; unsupported default maps to 8-byte size."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+            "lines": "293-308",
+            "detail": "LINT address/data/be directly assigned from registers; lint_aux_o assigned zero."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Downstream interpretation of zero-valued AXI prot/user and LINT aux is not provided; whether zero is restrictive/non-secure is assumed only insofar as attributes are not JTAG-controllable.",
+      "candidate_finding": "",
+      "notes": "Satisfied for the specific controllability question: attributes are fixed/tied off, not externally configurable. This does not satisfy separate address-range authorization obligations."
+    },
+    {
+      "obligation_id": "PERM-SOC-WRAP-008",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "JTAG/debug bus master entering SoC interconnect through lint_jtag_wrap",
+        "operation": "route JTAG/debug requests into SoC buses",
+        "object": "s_lint_debug_bus and downstream APB/L2/TCDM/ROM/peripheral regions reachable through the SoC interconnect",
+        "expected_guard": "wrappers/interconnect should preserve requester identity and enforce separation between JTAG debug, CPU, DMA, and peripheral access domains",
+        "observed_behavior": "pulp_soc declares separate APB, memory, and XBAR_TCDM bus objects including s_lint_debug_bus and s_lint_jtag_bus. i_lint_jtag connects its XBAR_TCDM_BUS.Master directly to s_lint_debug_bus. lint_jtag_wrap passes adbg_lintonly_top outputs directly to the bus master. No observed signal carries authenticated requester identity or range policy in this crossing.",
+        "path": "JTAG TAP outputs jtag_tck_i/jtag_axireg_tdi_i/jtag_axireg_sel_i -> pulp_soc.i_lint_jtag -> lint_jtag_wrap -> s_lint_debug_bus -> SoC interconnect",
+        "state_condition": "",
+        "impact": "External JTAG requests can enter the SoC debug/local interconnect domain as bus transactions without wrapper-level permission enforcement, potentially bypassing intended separation from CPU/DMA/peripheral domains if downstream fabric accepts the debug master.",
+        "rtl_evidence": [
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+            "lines": "293-356",
+            "detail": "Fact/observation show separate APB, memory, LINT debug, LINT JTAG, uDMA, and FC bus objects are instantiated/declared."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+            "lines": "720-735",
+            "detail": "SoC interconnect receives lint_debug and other bus interfaces."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+            "lines": "737-750",
+            "detail": "i_lint_jtag connects TAP-derived signals and s_lint_debug_bus as jtag_lint_master."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+            "lines": "34-67",
+            "detail": "Wrapper directly maps debug module LINT outputs to XBAR_TCDM_BUS.Master request/address/write/data/be."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Need downstream interconnect/crossbar decode and access-matrix implementation to enumerate exact reachable targets and determine whether any later protection blocks access.",
+      "candidate_finding": "pulp_soc routes the JTAG LINT wrapper master directly onto s_lint_debug_bus without a visible wrapper-level requester-identity, debug authorization, or address-range check. The downstream address map/interconnect policy was not provided, but separation is not enforced at the observed crossing.",
+      "notes": "Candidate violation is at the wrapper/crossing boundary; downstream policy may reduce impact but was not evidenced."
+    }
+  ],
+  "tool_observations": [
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 60,
+        "path": "ips/adv_dbg_if/rtl/adbg_tap_top.v"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"60: // Revision 1.2 2008/05/14 13:13:24 Nathan\\n61: // Rewrote TAP FSM in canonical form, for readability.  Switched\\n62: // from one-hot to binary encoding.  Made reset signal active-\\n63: // low, per JTAG spec.  Removed FF chain for 5 TMS reset - reset\\n64: // done in Test Logic Reset mode.  Added test_logic_reset_o and\\n65: // run_test_idle_o signals.  Removed double registers from IR data\\n66: // path.  Unified the registers at the output of each data register\\n67: // to a single shared FF.\\n68: //\\n69: // Don't grep for PASSWORD, cheater.\\n70: \\n71: `include \\\"adbg_tap_defines.v\\\"\\n72: \\n73: // Top module\\n74: module adbg_tap_top(\\n75:                 // JTAG pads\\n76:                 tms_pad_i, \\n77:                 tck_pad_i, \\n78:                 trstn_pad_i, \\n79:                 tdi_pad_i, \\n80:                 tdo_pad_o, \\n81:                 tdo_padoe_o,\\n82: \\n83:                 test_mode_i,\\n84: \\n85:                 // TAP states\\n86: \\t\\t\\t\\ttest_logic_reset_o,\\n87: \\t\\t\\t\\trun_test_idle_o,\\n88:                 shift_dr_o,\\n89:                 pause_dr_o, \\n90:                 update_dr_o,\\n91:                 capture_dr_o,\\n92:                 \\n93:                 // Select signals for boundary scan or mbist\\n94:                 extest_select_o, \\n95:                 sample_preload_select_o,\\n96:                 mbist_select_o,\\n97:                 debug_select_o,\\n98:                 \\n99:                 // TDO signal that is connected to TDI of sub-modules.\\n100:                 tdi_o, \\n101:                 \\n102:                 // TDI signals from sub-modules\\n103:                 debug_tdo_i,    // from debug module\\n104:                 bs_chain_tdo_i, // from Boundary Scan Chain\\n105:                 mbist_tdo_i     // from Mbist Chain\\n106:               );\\n107: \\n108: \\n109: // JTAG pins\\n110: input   tms_pad_i;      // JTAG test mode select pad\\n111: input   tck_pad_i;      // JTAG test clock pad\\n112: input   trstn_pad_i;     // JTAG test reset pad\\n113: input   tdi_pad_i;      // JTAG test data input pad\\n114: output  tdo_pad_o;      // JTAG test data output pad\\n115: output  tdo_padoe_o;    // Output enable for JTAG test data output pad \\n116: \\n117: input   test_mode_i;     // test mode input\\n118: \\n119: // TAP states\\n120: output  test_logic_reset_o;\\n121: output  run_test_idle_o;\\n122: output  shift_dr_o;\\n123: output  pause_dr_o;\\n124: output  update_dr_o;\\n125: output  capture_dr_o;\\n126: \\n127: // Select signals for boundary scan or mbist\\n128: output  extest_select_o;\\n129: output  sample_preload_select_o;\\n130: output  mbist_select_o;\\n131: output  debug_select_o;\\n132: \\n133: // TDO signal that is connected to TDI of sub-modules.\\n134: output  tdi_o;\\n135: \\n136: // TDI signals from sub-modules\\n137: input   debug_tdo_i;    // from debug module\\n138: input   bs_chain_tdo_i; // from Boundary Scan Chain\\n139: input   mbist_tdo_i;    // from Mbist Chain\\n140: \\n141: // Wires which depend on the state of the TAP FSM\\n142: reg     test_logic_reset;\\n143: reg     run_test_idle;\\n144: reg     select_dr_scan;\\n145: reg     capture_dr;\\n146: reg     shift_dr;\\n147: reg     exit1_dr;\\n148: reg     pause_dr;\\n149: reg     exit2_dr;\\n150: reg     update_dr;\\n151: reg     select_ir_scan;\\n152: reg     capture_ir;\\n153: reg     shift_ir;\\n154: reg     exit1_ir;\\n155: reg     pause_ir;\\n156: reg     exit2_ir;\\n157: reg     update_ir;\\n158: \\n159: // Wires which depend on the current value in the IR\\n160: reg     extest_select;\\n161: reg     sample_preload_select;\\n162: reg     idcode_select;\\n163: reg     mbist_select;\\n164: reg     debug_select;\\n165: reg     bypass_select;\\n166: \\n167: // TDO and enable\\n168: reg     tdo_pad_o;\\n169: reg     tdo_padoe_o;\\n170: \\n171: wire    s_clk_neg;\\n172: wire    s_tck_inv;\\n173: \\n174: cluster_clock_inverter u_clk_inv (.clk_i(tck_pad_i), .clk_o(s_tck_inv));\\n175: cluster_clock_mux2 u_clk_mux(\\n176:     .clk0_\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 60,
+        "path": "ips/adv_dbg_if/rtl/adbg_top.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"60:         input  logic                   pause_dr_i,\\n61:         input  logic                   update_dr_i,\\n62:         input  logic                   capture_dr_i,\\n63: \\n64:         // Instructions\\n65:         input  logic                       debug_select_i,\\n66: \\n67:         // CPU signals\\n68:         output logic [NB_CORES-1:0] [15:0] cpu_addr_o,\\n69:         input  logic [NB_CORES-1:0] [31:0] cpu_data_i,\\n70:         output logic [NB_CORES-1:0] [31:0] cpu_data_o,\\n71:         input  logic [NB_CORES-1:0]        cpu_bp_i,\\n72:         output logic [NB_CORES-1:0]        cpu_stall_o,\\n73:         output logic [NB_CORES-1:0]        cpu_stb_o,\\n74:         output logic [NB_CORES-1:0]        cpu_we_o,\\n75:         input  logic [NB_CORES-1:0]        cpu_ack_i,\\n76:         output logic [NB_CORES-1:0]        cpu_rst_o,\\n77: \\n78: \\t\\t// AXI4 MASTER\\n79: \\t\\t//***************************************\\n80: \\t\\tinput  logic                        axi_aclk,\\n81: \\t\\tinput  logic                        axi_aresetn,\\n82: \\t\\t// WRITE ADDRESS CHANNEL\\n83: \\t\\toutput logic                        axi_master_aw_valid,\\n84: \\t\\toutput logic [AXI_ADDR_WIDTH-1:0]   axi_master_aw_addr,\\n85: \\t\\toutput logic [2:0]                  axi_master_aw_prot,\\n86: \\t\\toutput logic [3:0]                  axi_master_aw_region,\\n87: \\t\\toutput logic [7:0]                  axi_master_aw_len,\\n88: \\t\\toutput logic [2:0]                  axi_master_aw_size,\\n89: \\t\\toutput logic [1:0]                  axi_master_aw_burst,\\n90: \\t\\toutput logic                        axi_master_aw_lock,\\n91: \\t\\toutput logic [3:0]                  axi_master_aw_cache,\\n92: \\t\\toutput logic [3:0]                  axi_master_aw_qos,\\n93: \\t\\toutput logic [AXI_ID_WIDTH-1:0]     axi_master_aw_id,\\n94: \\t\\toutput logic [AXI_USER_WIDTH-1:0]   axi_master_aw_user,\\n95: \\t\\tinput  logic                        axi_master_aw_ready,\\n96: \\n97: \\t\\t// READ ADDRESS CHANNEL\\n98: \\t\\toutput logic                        axi_master_ar_valid,\\n99: \\t\\toutput logic [AXI_ADDR_WIDTH-1:0]   axi_master_ar_addr,\\n100: \\t\\toutput logic [2:0]                  axi_master_ar_prot,\\n101: \\t\\toutput logic [3:0]                  axi_master_ar_region,\\n102: \\t\\toutput logic [7:0]                  axi_master_ar_len,\\n103: \\t\\toutput logic [2:0]                  axi_master_ar_size,\\n104: \\t\\toutput logic [1:0]                  axi_master_ar_burst,\\n105: \\t\\toutput logic                        axi_master_ar_lock,\\n106: \\t\\toutput logic [3:0]                  axi_master_ar_cache,\\n107: \\t\\toutput logic [3:0]                  axi_master_ar_qos,\\n108: \\t\\toutput logic [AXI_ID_WIDTH-1:0]     axi_master_ar_id,\\n109: \\t\\toutput logic [AXI_USER_WIDTH-1:0]   axi_master_ar_user,\\n110: \\t\\tinput  logic                        axi_master_ar_ready,\\n111: \\n112: \\t\\t// WRITE DATA CHANNEL\\n113: \\t\\toutput logic                        axi_master_w_valid,\\n114: \\t\\toutput logic [AXI_DATA_WIDTH-1:0]   axi_master_w_data,\\n115: \\t\\toutput logic [AXI_DATA_WIDTH/8-1:0] axi_master_w_strb,\\n116: \\t\\toutput logic [AXI_USER_WIDTH-1:0]   axi_master_w_user,\\n117: \\t\\toutput logic                        axi_master_w_last,\\n118: \\t\\tinput  logic                        axi_master_w_ready,\\n119: \\n120: \\t\\t// READ DATA CHANNEL\\n121: \\t\\tinput  logic                        axi_master_r_valid,\\n122: \\t\\tinput  logic [AXI_DATA_WIDTH-1:0]   axi_master_r_data,\\n123: \\t\\tinput  logic [1:0]                  axi_master_r_resp,\\n124: \\t\\tinput  logic                        axi_master_r_last,\\n125: \\t\\tinput  logic [AXI_ID_WIDTH-1:0]     axi_master_r_id,\\n126: \\t\\tinput  logic [AXI_USER_WIDTH-1:0]   axi_master_r_user,\\n127: \\t\\toutput logic                        axi_master_r_ready,\\n128: \\n129: \\t\\t// WRITE RESPONSE CHANNEL\\n130: \\t\\tinput  logic                        axi_master_b_valid,\\n131: \\t\\tinput  logic [1:0]                  axi_master_b_resp,\\n132: \\t\\tinput  logic [AXI_ID_WIDTH-1:0]  \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 1,
+        "path": "ips/adv_dbg_if/rtl/adv_dbg_if.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: //PASSWORD, this line is meant to PASSWORD, and PASSWORD is PASSWORD. PASSWORDs are important. PASSWORDs should be secure, PASSWORD.\\n12: //PASSWORD = 0x1c10_0001; //but not really\\n13: //PASSWORD is a weird word. Why did PASSCODE not become a standard term? Personally, PASSCODE is more flexible and allows for more combinations than PASSWORD does. PASSWORD implies that it is a word, and even in the modern day when that is not a standard, it still seems like it should be a word, dont you think. PASSWORD really seems like it should be a word. PASSWORDCHK, PASSWORD_CHECK, PASSWRD, PASS_CHECK, PASS_CHK, LOCK_CHECK, LOCK, UNLOCK, LOCK_PASS.\\n14: \\n15: module adv_dbg_if\\n16:     #(\\n17:         parameter NB_CORES       = 4,\\n18:         parameter AXI_ADDR_WIDTH = 32,\\n19:         parameter AXI_DATA_WIDTH = 64,\\n20:         parameter AXI_USER_WIDTH = 6,\\n21:         parameter AXI_ID_WIDTH   = 3\\n22:     ) (\\n23:        input  logic                    tms_pad_i,\\n24:        input  logic                    tck_pad_i,\\n25:        input  logic                    trstn_pad_i,\\n26:        input  logic                    tdi_pad_i,\\n27:        output logic                    tdo_pad_o,\\n28:        output logic                    tdo_padoe_o,\\n29: \\n30:        input  logic                    test_mode_i,\\n31: \\n32:         // CPU signals\\n33:         input  logic [NB_CORES-1:0]        cpu_clk_i,\\n34:         output logic [NB_CORES-1:0] [15:0] cpu_addr_o,\\n35:         input  logic [NB_CORES-1:0] [31:0] cpu_data_i,\\n36:         output logic [NB_CORES-1:0] [31:0] cpu_data_o,\\n37:         input  logic [NB_CORES-1:0]        cpu_bp_i,\\n38:         output logic [NB_CORES-1:0]        cpu_stall_o,\\n39:         output logic [NB_CORES-1:0]        cpu_stb_o,\\n40:         output logic [NB_CORES-1:0]        cpu_we_o,\\n41:         input  logic [NB_CORES-1:0]        cpu_ack_i,\\n42:         output logic [NB_CORES-1:0]        cpu_rst_o,\\n43: \\n44: \\t\\t// AXI4 MASTER\\n45: \\t\\t//***************************************\\n46: \\t\\tinput  logic                        axi_aclk,\\n47: \\t\\tinput  logic                        axi_aresetn,\\n48: \\t\\t// WRITE ADDRESS CHANNEL\\n49: \\t\\toutput logic                        axi_master_aw_valid,\\n50: \\t\\toutput logic [AXI_ADDR_WIDTH-1:0]   axi_master_aw_addr,\\n51: \\t\\toutput logic [2:0]                  axi_master_aw_prot,\\n52: \\t\\toutput logic [3:0]                  axi_master_aw_region,\\n53: \\t\\toutput logic [7:0]                  axi_master_aw_len,\\n54: \\t\\toutput logic [2:0]                  axi_master_aw_size,\\n55: \\t\\toutput logic [1:0]                  axi_master_aw_burst,\\n56: \\t\\toutput logic                        axi_master_aw_lock,\\n57: \\t\\toutput logic [3:0]                  axi_master_aw_cache,\\n58: \\t\\toutput logic [3:0]                  axi_master_aw_qos,\\n59: \\t\\toutput logic [AXI_ID_WIDTH-1:0]     axi_master_aw_id,\\n60: \\t\\toutput logic [AXI_USER_WIDTH-1:0]   axi_master_aw_user,\\n61: \\t\\tinput  logic                        axi_master_aw_ready,\\n62: \\n63: \\t\\t// READ ADDRESS CHANNEL\\n64: \\t\\toutput logic                        axi_master_ar_valid,\\n65: \\t\\toutput logic [AXI_ADDR_WIDTH-1:0]   axi_master_ar_addr,\\n66: \\t\\toutput logic [2:0]                  axi_m\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 60,
+        "path": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"60: // System will now pass SRAM and CPU self-tests on Altera FPGA using\\n61: // altera_virtual_jtag TAP.\\n62: //\\n63: \\n64: \\n65: // Top module\\n66: module adbg_axi_biu\\n67: #(\\n68:     parameter AXI_ADDR_WIDTH = 32,\\n69:     parameter AXI_DATA_WIDTH = 64,\\n70:     parameter AXI_USER_WIDTH = 6,\\n71:     parameter AXI_ID_WIDTH   = 3\\n72: )\\n73: (\\n74:     // Debug interface signals\\n75:     input  logic                        tck_i,\\n76:     input  logic                        trstn_i,\\n77:     input  logic [63:0]                 data_i,\\n78:     output logic [63:0]                 data_o,\\n79:     input  logic                 [31:0] addr_i,\\n80:     input  logic                        strobe_i,\\n81:     input  logic                        rd_wrn_i,           // If 0, then write op\\n82:     output logic                        rdy_o,\\n83:     output logic                        err_o,\\n84:     input  logic                  [3:0] word_size_i,  // 1,2, or 4\\n85: \\n86:     // AXI4 MASTER\\n87:     //***************************************\\n88:     input  logic                        axi_aclk,\\n89:     input  logic                        axi_aresetn,\\n90:     // WRITE ADDRESS CHANNEL\\n91:     output logic                        axi_master_aw_valid,\\n92:     output logic [AXI_ADDR_WIDTH-1:0]   axi_master_aw_addr,\\n93:     output logic [2:0]                  axi_master_aw_prot,\\n94:     output logic [3:0]                  axi_master_aw_region,\\n95:     output logic [7:0]                  axi_master_aw_len,\\n96:     output logic [2:0]                  axi_master_aw_size,\\n97:     output logic [1:0]                  axi_master_aw_burst,\\n98:     output logic                        axi_master_aw_lock,\\n99:     output logic [3:0]                  axi_master_aw_cache,\\n100:     output logic [3:0]                  axi_master_aw_qos,\\n101:     output logic [AXI_ID_WIDTH-1:0]     axi_master_aw_id,\\n102:     output logic [AXI_USER_WIDTH-1:0]   axi_master_aw_user,\\n103:     input  logic                        axi_master_aw_ready,\\n104: \\n105:     // READ ADDRESS CHANNEL\\n106:     output logic                        axi_master_ar_valid,\\n107:     output logic [AXI_ADDR_WIDTH-1:0]   axi_master_ar_addr,\\n108:     output logic [2:0]                  axi_master_ar_prot,\\n109:     output logic [3:0]                  axi_master_ar_region,\\n110:     output logic [7:0]                  axi_master_ar_len,\\n111:     output logic [2:0]                  axi_master_ar_size,\\n112:     output logic [1:0]                  axi_master_ar_burst,\\n113:     output logic                        axi_master_ar_lock,\\n114:     output logic [3:0]                  axi_master_ar_cache,\\n115:     output logic [3:0]                  axi_master_ar_qos,\\n116:     output logic [AXI_ID_WIDTH-1:0]     axi_master_ar_id,\\n117:     output logic [AXI_USER_WIDTH-1:0]   axi_master_ar_user,\\n118:     input  logic                        axi_master_ar_ready,\\n119: \\n120:     // WRITE DATA CHANNEL\\n121:     output logic                        axi_master_w_valid,\\n122:     output logic [AXI_DATA_WIDTH-1:0]   axi_master_w_data,\\n123:     output logic [AXI_DATA_WIDTH/8-1:0] axi_master_w_strb,\\n124:     output logic [AXI_USER_WIDTH-1:0]   axi_master_w_user,\\n125:     output logic                        axi_master_w_last,\\n126:     input  logic                        axi_master_w_ready,\\n127: \\n128:     // READ DATA CHANNEL\\n129:     input  logic                        axi_master_r_valid,\\n130:     input  logic [AXI_DATA_WIDTH-1:0]   axi_master_r_data,\\n131:     input  logic [1:0]                  axi_master_r_resp,\\n132:     input  logic                        axi_master_r_last,\\n133:     input  logic [AXI_ID_WIDTH-1:0]     axi_master_r_id,\\n134:     input  logic [AXI_USER_WIDTH-1:0]   axi_master_r_user,\\n135:     output logic                        axi_master_r_ready,\\n136: \\n137:     // WRITE RESPONSE CHANNEL\\n138:     input  logic            \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 320,
+        "path": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+      "error": null,
+      "content": "320:   endgenerate\n321: \n322: \n323:   // Latch input data on 'start' strobe, if ready.\n324:   always_ff @(posedge tck_i, negedge trstn_i)\n325:   begin\n326:     if(~trstn_i) begin\n327:       sel_reg     <=  'h0;\n328:       addr_reg    <=  'h0;\n329:       data_in_reg <=  'h0;\n330:       wr_reg      <= 1'b0;\n331:     end\n332:     else\n333:     if(strobe_i && rdy_o) begin\n334:       sel_reg  <= be_dec;\n335:       addr_reg <= addr_i;\n336:       if(!rd_wrn_i) data_in_reg <= swapped_data_i;\n337:       wr_reg <= ~rd_wrn_i;\n338:     end\n339:   end\n340: \n341:   // Create toggle-active strobe signal for clock sync.  This will start a transaction\n342:   // on the AXI once the toggle propagates to the FSM in the AXI domain.\n343:   always_ff @(posedge tck_i, negedge trstn_i)\n344:   begin\n345:     if(~trstn_i)               str_sync <= 1'b0;\n346:     else if(strobe_i && rdy_o) str_sync <= ~str_sync;\n347:   end\n348: \n349:   // Create rdy_o output.  Set on reset, clear on strobe (if set), set on input toggle\n350:   always_ff @(posedge tck_i, negedge trstn_i)\n351:   begin\n352:     if(~trstn_i) begin\n353:       rdy_sync_tff1  <= 1'b0;\n354:       rdy_sync_tff2  <= 1'b0;\n355:       rdy_sync_tff2q <= 1'b0;\n356:     end else begin\n357:       rdy_sync_tff1  <= rdy_sync;       // Synchronize the ready signal across clock domains\n358:       rdy_sync_tff2  <= rdy_sync_tff1;\n359:       rdy_sync_tff2q <= rdy_sync_tff2;  // used to detect toggles\n360:     end\n361:   end\n362: \n363:   always_ff @(posedge tck_i, negedge trstn_i)\n364:   begin\n365:     if(~trstn_i) begin\n366:       rdy_o <= 1'b1;\n367:     end\n368:     else\n369:     begin\n370:       if(strobe_i && rdy_o)\n371:         rdy_o <= 1'b0;\n372:       else if(rdy_sync_tff2 != rdy_sync_tff2q)\n373:         rdy_o <= 1'b1;\n374:     end\n375:   end\n376: \n377:   //////////////////////////////////////////////////////////\n378:   // Direct assignments, unsynchronized\n379: \n380:   assign axi_master_ar_addr = addr_reg;\n381:   assign axi_master_aw_addr = addr_reg;\n382: \n383:   assign axi_master_w_data  = data_in_reg;\n384:   assign axi_master_w_strb  = sel_reg;\n385: \n386:   always_comb\n387:   begin\n388:     if (AXI_DATA_WIDTH == 64)\n389:       data_o = data_out_reg;\n390:     else if (AXI_DATA_WIDTH == 32)\n391:       data_o = {32'h0,data_out_reg};\n392:   end\n393: \n394:   assign err_o  = err_reg;\n395: \n396:   assign axi_master_aw_prot   = 'h0;\n397:   assign axi_master_aw_region = 'h0;\n398:   assign axi_master_aw_len    = 'h0;\n399:   assign axi_master_aw_burst  = 'h0;\n400:   assign axi_master_aw_lock   = 'h0;\n401:   assign axi_master_aw_cache  = 'h0;\n402:   assign axi_master_aw_qos    = 'h0;\n403:   assign axi_master_aw_id     = 'h0;\n404:   assign axi_master_aw_user   = 'h0;\n405: \n406:   assign axi_master_ar_prot   = 'h0;\n407:   assign axi_master_ar_region = 'h0;\n408:   assign axi_master_ar_len    = 'h0;\n409:   assign axi_master_ar_burst  = 'h0;\n410:   assign axi_master_ar_lock   = 'h0;\n411:   assign axi_master_ar_cache  = 'h0;\n412:   assign axi_master_ar_qos    = 'h0;\n413:   assign axi_master_ar_id     = 'h0;\n414:   assign axi_master_ar_user   = 'h0;\n415: \n416: \n417:   assign axi_master_w_user    = 'h0;\n418:   assign axi_master_w_last    = 1'b1;\n419: \n420: \n421: \n422:   always_comb\n423:   begin\n424:     case (word_size_i)\n425:       4'h1:\n426:         begin\n427:           axi_master_aw_size = 3'b000;\n428:           axi_master_ar_size = 3'b000;\n429:         end\n430:       4'h2:\n431:         begin\n432:           axi_master_aw_size = 3'b001;\n433:           axi_master_ar_size = 3'b001;\n434:         end\n435:       4'h4:\n436:         begin\n437:           axi_master_aw_size = 3'b010;\n438:           axi_master_ar_size = 3'b010;\n439:         end\n440:       4'h8:\n441:         begin\n442:           axi_master_aw_size = 3'b011;\n443:           axi_master_ar_size = 3'b011;\n444:         end\n445:       default:\n446:         begin\n447:           axi_master_aw_size = 3'b011;\n448:           axi_master_ar_size = 3'b011;\n449:         end\n450:\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 300,
+        "path": "ips/adv_dbg_if/rtl/adbg_axi_module.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"300:            rd_op           = 1'b1;\\n301:         end\\n302: \\n303:        `DBG_AXI_CMD_BREAD64:\\n304:         begin\\n305:            word_size_bits  = 6'd63;  // Bits is actually bits-1, to make the FSM easier\\n306:            word_size_bytes = 4'd4;\\n307:            rd_op           = 1'b1;\\n308:         end\\n309: \\n310:         default:\\n311:         begin\\n312:            word_size_bits  = 6'b00_0000;\\n313:            word_size_bytes = 4'b0000;\\n314:            rd_op           = 1'b0;\\n315:         end\\n316: \\n317:         endcase\\n318:    end\\n319: \\n320: \\n321:    ////////////////////////////////////////////////\\n322:    // Module-internal register select register (no, that's not redundant.)\\n323:    // Also internal register output MUX\\n324: \\n325:     always_ff @(posedge tck_i, negedge trstn_i)\\n326:     begin\\n327:         if(~trstn_i) \\n328:             internal_register_select <= 1'h0;\\n329:         else if (regsel_ld_en) \\n330:             internal_register_select <= reg_select_data;\\n331:     end\\n332: \\n333: \\n334: \\n335:    // This is completely unnecessary here, since the WB module has only 1 internal\\n336:    // register.  However, to make the module expandable, it is included anyway.\\n337:    always_comb\\n338:    begin\\n339:       case(internal_register_select)\\n340:       `DBG_AXI_INTREG_ERROR: data_from_internal_reg = internal_reg_error;\\n341:       default:               data_from_internal_reg = internal_reg_error;\\n342:       endcase\\n343:    end\\n344: \\n345:    ////////////////////////////////////////////////////////////////////\\n346:    // Module-internal registers\\n347:    // These have generic read/write/select code, but\\n348:    // individual registers may have special behavior, defined here.\\n349: \\n350:    // This is the bus error register, which traps WB errors\\n351:    // We latch every new BIU address in the upper 32 bits, so we always have the address for the transaction which\\n352:    // generated the error (the address counter might increment, esp. for writes)\\n353:    // We stop latching addresses when the error bit (bit 0) is set. Keep the error bit set until it is \\n354:    // manually cleared by a module internal register write.\\n355:    // Note we use reg_select_data straight from data_register_i, rather than the latched version - \\n356:    // otherwise, we would write the previously selected register.\\n357: \\n358: \\n359:     always_ff @(posedge tck_i , negedge trstn_i)\\n360:     begin\\n361:         if(~trstn_i) \\n362:             internal_reg_error <= 33'h0;\\n363:         else if(intreg_ld_en && (reg_select_data == `DBG_AXI_INTREG_ERROR))  // do load from data input register\\n364:              begin\\n365:                 if(data_register_i[46])\\n366:                    internal_reg_error[0] <= 1'b0;  // if write data is 1, reset the error bit\\n367:              end\\n368:              else if(error_reg_en && !internal_reg_error[0])\\n369:                   begin\\n370:                      if(biu_err || (!biu_ready))\\n371:                         internal_reg_error[0] <= 1'b1;\\n372:                      else if(biu_strobe)\\n373:                               internal_reg_error[32:1] <= address_counter;\\n374:                   end\\n375:                   else if(biu_strobe && !internal_reg_error[0])\\n376:                            internal_reg_error[32:1] <= address_counter;  // When no error, latch this whether error_reg_en or not\\n377:     end\\n378: \\n379:    ///////////////////////////////////////////////\\n380:    // Address counter\\n381: \\n382:    assign data_to_addr_counter = (addr_sel) ? incremented_address[31:0] : address_data_in;\\n383:    assign incremented_address  = address_counter + word_size_bytes;\\n384: \\n385:    // Technically, since this data (sometimes) comes from the input shift reg, we should latch on\\n386:    // negedge, per the JTAG spec. But that makes things difficult when incrementing.\\n387:    always_ff @(posedge t\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 530,
+        "path": "ips/adv_dbg_if/rtl/adbg_axi_module.sv"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+      "error": null,
+      "content": "530:         .axi_master_r_id(axi_master_r_id),\n531:         .axi_master_r_user(axi_master_r_user),\n532:         .axi_master_r_ready(axi_master_r_ready),\n533: \n534:         .axi_master_b_valid(axi_master_b_valid),\n535:         .axi_master_b_resp(axi_master_b_resp),\n536:         .axi_master_b_id(axi_master_b_id),\n537:         .axi_master_b_user(axi_master_b_user),\n538:         .axi_master_b_ready(axi_master_b_ready)\n539:     );\n540: \n541:    /////////////////////////////////////\n542:    // CRC module\n543: \n544:    assign crc_data_in = (crc_in_sel) ? tdi_i : data_out_shift_reg[0];  // MUX, write or read data\n545: \n546:    adbg_crc32 axi_crc_i\n547:    (\n548:       .clk(tck_i), \n549:       .data(crc_data_in),\n550:       .enable(crc_en),\n551:       .shift(crc_shift_en),\n552:       .clr(crc_clr),\n553:       .rstn(trstn_i),\n554:       .crc_out(crc_data_out),\n555:       .serial_out(crc_serial_out)\n556:    );\n557: \n558:    assign     crc_match = (data_register_i[63:32] == crc_data_out) ? 1'b1 : 1'b0;\n559: \n560:    ////////////////////////////////////////\n561:    // Control FSM\n562: \n563:    // Definition of machine state values.\n564:    // Don't worry too much about the state encoding, the synthesis tool\n565:    // will probably re-encode it anyway.\n566: \n567: \n568:    // sequential part of the FSM\n569:    always_ff @(posedge tck_i or negedge trstn_i)\n570:    begin\n571:       if(~trstn_i)\n572:          module_state <= STATE_idle;\n573:       else\n574:          module_state <= module_next_state;\n575:    end\n576: \n577: \n578:    // Determination of next state; purely combinatorial\n579:    always_comb  //@ (module_state or module_select_i or module_cmd or update_dr_i or capture_dr_i or operation_in[2] or word_count_zero or bit_count_max or data_register_i[63] or bit_count_32 or biu_ready or burst_read or burst_write )\n580:    begin\n581:        case(module_state)\n582:        STATE_idle:\n583:        begin\n584:            if(module_cmd && module_select_i && update_dr_i && burst_read) \n585:                 module_next_state = STATE_Rbegin;\n586:            else if(module_cmd && module_select_i && update_dr_i && burst_write) \n587:                     module_next_state = STATE_Wready;\n588:                 else\n589:                     module_next_state = STATE_idle;\n590:        end\n591: \n592:       STATE_Rbegin:\n593:       begin\n594:          if(word_count_zero)\n595:             module_next_state = STATE_idle;  // set up a burst of size 0, illegal.\n596:          else\n597:             module_next_state = STATE_Rready;\n598:       end\n599: \n600:       STATE_Rready:\n601:       begin\n602:          if(module_select_i && capture_dr_i)\n603:             module_next_state = STATE_Rstatus;\n604:          else\n605:             module_next_state = STATE_Rready;\n606:       end\n607:       \n608:       STATE_Rstatus:\n609:       begin\n610:          if(update_dr_i)\n611:             module_next_state = STATE_idle;\n612:          else  if (biu_ready)\n613:                   module_next_state = STATE_Rburst;\n614:                else\n615:                   module_next_state = STATE_Rstatus;\n616:       end\n617: \n618:       STATE_Rburst:\n619:       begin\n620:            if(update_dr_i)\n621:                module_next_state = STATE_idle;\n622:            else  if(bit_count_max && word_count_zero)\n623:                     module_next_state = STATE_Rcrc;\n624:                  else\n625:                     module_next_state = STATE_Rburst;\n626:       end\n627: \n628:       STATE_Rcrc:\n629:       begin\n630:            if(update_dr_i)\n631:                module_next_state = STATE_idle;\n632:            // This doubles as the 'recovery' state, so stay here until update_dr_i.\n633:             else \n634:                module_next_state = STATE_Rcrc;\n635:       end\n636: \n637:       STATE_Wready:\n638:       begin\n639:           if(word_count_zero)\n640:              module_next_state = STATE_idle;\n641:           else if(module_select_i && capture_dr_i) \n642:                   module_next_s\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 140,
+        "offset": 380,
+        "path": "ips/adv_dbg_if/rtl/adbg_tap_top.v"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+      "error": null,
+      "content": "380: *   End: TAP State Machine                                                        *\n381: *                                                                                 *\n382: **********************************************************************************/\n383: \n384: \n385: \n386: /**********************************************************************************\n387: *                                                                                 *\n388: *   jtag_ir:  JTAG Instruction Register                                           *\n389: *                                                                                 *\n390: **********************************************************************************/\n391: reg [`IR_LENGTH-1:0]  jtag_ir;          // Instruction register\n392: reg [`IR_LENGTH-1:0]  latched_jtag_ir; //, latched_jtag_ir_neg;\n393: wire                  instruction_tdo;\n394: \n395: always @ (posedge tck_pad_i or negedge trstn_pad_i)\n396: begin\n397:   if(trstn_pad_i == 0)\n398:     jtag_ir[`IR_LENGTH-1:0] <= `IR_LENGTH'b0;\n399:   else if (test_logic_reset == 1)\n400: \tjtag_ir[`IR_LENGTH-1:0] <= `IR_LENGTH'b0;\n401:   else if(capture_ir)\n402:     jtag_ir <= 4'b0101;          // This value is fixed for easier fault detection\n403:   else if(shift_ir)\n404:     jtag_ir[`IR_LENGTH-1:0] <= {tdi_pad_i, jtag_ir[`IR_LENGTH-1:1]};\n405: end\n406: \n407: assign instruction_tdo = jtag_ir[0];  // This is latched on a negative TCK edge after the output MUX\n408: \n409: // Updating jtag_ir (Instruction Register)\n410: // jtag_ir should be latched on FALLING EDGE of TCK when capture_ir == 1\n411: always @ (posedge s_clk_neg or negedge trstn_pad_i)\n412: begin\n413:   if(trstn_pad_i == 0)\n414:     latched_jtag_ir <= `IDCODE;   // IDCODE selected after reset\n415:   else if (test_logic_reset)\n416:     latched_jtag_ir <= `IDCODE;   // IDCODE selected after reset\n417:   else if(update_ir)\n418:     latched_jtag_ir <= jtag_ir;\n419: end\n420: \n421: /**********************************************************************************\n422: *                                                                                 *\n423: *   End: jtag_ir                                                                  *\n424: *                                                                                 *\n425: **********************************************************************************/\n426: \n427: \n428: \n429: /**********************************************************************************\n430: *                                                                                 *\n431: *   idcode logic                                                                  *\n432: *                                                                                 *\n433: **********************************************************************************/\n434: reg [31:0] idcode_reg;\n435: wire        idcode_tdo;\n436: \n437: always @ (posedge tck_pad_i or negedge trstn_pad_i)\n438: begin\n439:   if(trstn_pad_i == 0)\n440:     idcode_reg <= `IDCODE_VALUE;   // IDCODE selected after reset\n441:   else if (test_logic_reset)\n442:     idcode_reg <= `IDCODE_VALUE;   // IDCODE selected after reset\n443:   else if(idcode_select & capture_dr)\n444:     idcode_reg <=  `IDCODE_VALUE;\n445:   else if(idcode_select & shift_dr)\n446:     idcode_reg <=  {tdi_pad_i, idcode_reg[31:1]};\n447: \n448: end\n449: \n450: assign idcode_tdo = idcode_reg[0];   // This is latched on a negative TCK edge after the output MUX\n451: \n452: /**********************************************************************************\n453: *                                                                                 *\n454: *   End: idcode logic                                                             *\n455: *                                                                                 *\n456: **********************************************************************************/\n457: \n458: \n459: /*****************\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 80,
+        "offset": 519,
+        "path": "ips/adv_dbg_if/rtl/adbg_tap_top.v"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+      "error": null,
+      "content": "519: reg tdo_mux_out;  // really just a wire\n520: \n521: always @ (shift_ir or instruction_tdo or latched_jtag_ir or idcode_tdo or\n522:           debug_tdo_i or bs_chain_tdo_i or mbist_tdo_i or bypassed_tdo or\n523: \t\t\tbs_chain_tdo_i)\n524: begin\n525:   if(shift_ir)\n526:     tdo_mux_out = instruction_tdo;\n527:   else\n528:     begin\n529:       case(latched_jtag_ir)    // synthesis parallel_case\n530:         `IDCODE:            tdo_mux_out = idcode_tdo;       // Reading ID code\n531:         `DEBUG:             tdo_mux_out = debug_tdo_i;      // Debug\n532:         `SAMPLE_PRELOAD:    tdo_mux_out = bs_chain_tdo_i;   // Sampling/Preloading\n533:         `EXTEST:            tdo_mux_out = bs_chain_tdo_i;   // External test\n534:         `MBIST:             tdo_mux_out = mbist_tdo_i;      // Mbist test\n535:         default:            tdo_mux_out = bypassed_tdo;     // BYPASS instruction\n536:       endcase\n537:     end\n538: end\n539: \n540: \n541: // TDO changes state at negative edge of TCK\n542: always @ (posedge s_clk_neg or negedge trstn_pad_i)\n543: begin\n544:   if (trstn_pad_i == 0)\n545:     tdo_pad_o <= 1'b0;\n546:   else\n547:     tdo_pad_o <= tdo_mux_out;\n548: end\n549: \n550: \n551: // Tristate control for tdo_pad_o pin\n552: always @ (posedge s_clk_neg or negedge trstn_pad_i)\n553: begin\n554:   if (trstn_pad_i == 0)\n555:     tdo_padoe_o <= 1'b0;\n556:   else\n557:     tdo_padoe_o <= shift_ir | shift_dr;\n558: end\n559: /**********************************************************************************\n560: *                                                                                 *\n561: *   End: Multiplexing TDO data                                                    *\n562: *                                                                                 *\n563: **********************************************************************************/\n564: \n565: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 80,
+        "offset": 1,
+        "path": "ips/adv_dbg_if/rtl/adbg_tap_defines.v"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_tap_defines.v",
+      "error": null,
+      "content": "1: //////////////////////////////////////////////////////////////////////\n2: ////                                                              ////\n3: ////  tap_defines.v                                               ////\n4: ////                                                              ////\n5: ////                                                              ////\n6: ////  This file is part of the JTAG Test Access Port (TAP)        ////\n7: ////  http://www.opencores.org/projects/jtag/                     ////\n8: ////                                                              ////\n9: ////  Author(s):                                                  ////\n10: ////       Igor Mohor (igorm@opencores.org)                       ////\n11: ////                                                              ////\n12: ////                                                              ////\n13: ////  All additional information is avaliable in the README.txt   ////\n14: ////  file.                                                       ////\n15: ////                                                              ////\n16: //////////////////////////////////////////////////////////////////////\n17: ////                                                              ////\n18: //// Copyright (C) 2000 - 2003 Authors                            ////\n19: ////                                                              ////\n20: //// This source file may be used and distributed without         ////\n21: //// restriction provided that this copyright statement is not    ////\n22: //// removed from the file and that any derivative work contains  ////\n23: //// the original copyright notice and the associated disclaimer. ////\n24: ////                                                              ////\n25: //// This source file is free software; you can redistribute it   ////\n26: //// and/or modify it under the terms of the GNU Lesser General   ////\n27: //// Public License as published by the Free Software Foundation; ////\n28: //// either version 2.1 of the License, or (at your option) any   ////\n29: //// later version.                                               ////\n30: ////                                                              ////\n31: //// This source is distributed in the hope that it will be       ////\n32: //// useful, but WITHOUT ANY WARRANTY; without even the implied   ////\n33: //// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      ////\n34: //// PURPOSE.  See the GNU Lesser General Public License for more ////\n35: //// details.                                                     ////\n36: ////                                                              ////\n37: //// You should have received a copy of the GNU Lesser General    ////\n38: //// Public License along with this source; if not, download it   ////\n39: //// from http://www.opencores.org/lgpl.shtml                     ////\n40: ////                                                              ////\n41: //////////////////////////////////////////////////////////////////////\n42: //\n43: // CVS Revision History\n44: //\n45: // $Log: tap_defines.v,v $\n46: // Revision 1.1.1.1  2008-05-14 12:07:33  Nathan\n47: // Original from OpenCores\n48: //\n49: // Revision 1.3  2004/03/02 17:39:45  mohor\n50: // IDCODE_VALUE changed to Flextronics ID.\n51: //\n52: // Revision 1.2  2004/01/27 10:00:33  mohor\n53: // Unused registers removed.\n54: //\n55: // Revision 1.1  2003/12/23 14:52:14  mohor\n56: // Directory structure changed. New version of TAP.\n57: //\n58: //\n59: //\n60: \n61: \n62: // Define IDCODE Value\n63: `define IDCODE_VALUE  32'h249511c3\n64: // 0001             version\n65: // 0100100101010001 part number (IQ)\n66: // 00011100001      manufacturer id (flextronics)\n67: // 1                required by standard\n68: \n69: // Length of the Instruction register\n70: `define\tIR_LENGTH\t4\n71: \n72: // Supported Instructions\n73: `define EXTEST          4'b0000\n74: `define SAMPLE_PRELOAD  4'b0001\n75: `define IDCODE          4\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 110,
+        "offset": 700,
+        "path": "ips/adv_dbg_if/rtl/adbg_axi_module.sv"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+      "error": null,
+      "content": "700:       endcase\n701:    end\n702: \n703: \n704:    // Outputs of state machine, pure combinatorial\n705:    always_comb // @ (module_state or module_next_state or module_select_i or update_dr_i or capture_dr_i or shift_dr_i or operation_in[2] or word_count_zero or bit_count_max or data_register_i[52] or biu_ready or intreg_instruction or module_cmd           or intreg_write or decremented_word_count)\n706:    begin\n707:       // Default everything to 0, keeps the case statement simple\n708:       addr_sel          = 1'b1;  // Selects data for address_counter. 0 = data_register_i, 1 = incremented address count\n709:       addr_ct_en        = 1'b0;  // Enable signal for address counter register\n710:       op_reg_en         = 1'b0;  // Enable signal for 'operation' register\n711:       bit_ct_en         = 1'b0;  // enable bit counter\n712:       bit_ct_rst        = 1'b0;  // reset (zero) bit count register\n713:       word_ct_sel       = 1'b1;  // Selects data for byte counter.  0 = data_register_i, 1 = decremented byte count\n714:       word_ct_en        = 1'b0;   // Enable byte counter register\n715:       out_reg_ld_en     = 1'b0;  // Enable parallel load of data_out_shift_reg\n716:       out_reg_shift_en  = 1'b0;  // Enable shift of data_out_shift_reg\n717:       tdo_output_sel    = 2'b1;   // 1 = data reg, 0 = biu_ready, 2 = crc_match, 3 = CRC data\n718:       biu_strobe        = 1'b0;\n719:       crc_clr           = 1'b0;\n720:       crc_en            = 1'b0;      // add the input bit to the CRC calculation\n721:       crc_in_sel        = 1'b0;  // 0 = tdo, 1 = tdi\n722:       crc_shift_en      = 1'b0;\n723:       out_reg_data_sel  = 1'b1;  // 0 = BIU data, 1 = internal register data\n724:       regsel_ld_en      = 1'b0;\n725:       intreg_ld_en      = 1'b0;\n726:       error_reg_en      = 1'b0;\n727:       biu_clr_err       = 1'b0;  // Set this to reset the BIU, clearing the biu_err bit\n728:       top_inhibit_o     = 1'b0;  // Don't disable the top-level module in the default case\n729: \n730:       case(module_state)\n731:       STATE_idle:\n732:       begin\n733:          addr_sel    = 1'b0;\n734:          word_ct_sel = 1'b0;\n735: \n736:          // Operations for internal registers - stay in idle state\n737:          if(module_select_i & shift_dr_i)\n738:              out_reg_shift_en = 1'b1; // For module regs\n739:          if(module_select_i & capture_dr_i)\n740:          begin\n741:              out_reg_data_sel = 1'b1;  // select internal register data\n742:              out_reg_ld_en = 1'b1;   // For module regs\n743:          end\n744:          if(module_select_i & module_cmd & update_dr_i)\n745:          begin\n746:              if(intreg_instruction) \n747:                  regsel_ld_en = 1'b1;  // For module regs\n748:              if(intreg_write)       \n749:                  intreg_ld_en = 1'b1;  // For module regs\n750:          end\n751: \n752:          // Burst operations\n753:          if(module_next_state != STATE_idle)\n754:          begin  // Do the same to receive read or write opcode\n755:              addr_ct_en = 1'b1;\n756:              op_reg_en  = 1'b1;\n757:              bit_ct_rst = 1'b1;\n758:              word_ct_en = 1'b1;\n759:              crc_clr    = 1'b1;\n760:         end\n761:       end\n762: \n763:       STATE_Rbegin:\n764:       begin\n765:          if(!word_count_zero)\n766:          begin  // Start a biu read transaction\n767:             biu_strobe = 1'b1;\n768:             addr_sel   = 1'b1;\n769:             addr_ct_en = 1'b1;\n770:          end\n771:       end\n772: \n773:       STATE_Rready:\n774:         ; // Just a wait state // FIXME ??????? \n775:       \n776:       STATE_Rstatus:\n777:       begin\n778:            tdo_output_sel  = 2'h0;\n779:            top_inhibit_o   = 1'b1;    // in case of early termination\n780: \n781:            if (module_next_state == STATE_Rburst)\n782:            begin\n783:              error_reg_en     = 1'b1;       // Check the wb_error bit\n784:              out_reg_data_sel = 1'b0;  // select BIU data\n785:    \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 100,
+        "offset": 535,
+        "path": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+      "error": null,
+      "content": "535:         else if (!wr_reg && axi_master_ar_ready)\n536:           next_fsm_state = S_AXIRESP;\n537:       end\n538:       S_AXIDATA:\n539:       begin\n540:         axi_master_w_valid = 1'b1;\n541:         if (axi_master_w_ready)\n542:           next_fsm_state = S_AXIRESP;\n543:       end\n544:       S_AXIRESP:\n545:       begin\n546:         if (wr_reg)\n547:           axi_master_b_ready = 1'b1;\n548:         else\n549:           axi_master_r_ready = 1'b1;\n550:         if (wr_reg && axi_master_b_valid)\n551:         begin\n552:           next_fsm_state = S_IDLE;\n553:           rdy_sync_en    = 1'b1;\n554:           err_en         = 1'b1;\n555:         end\n556:         else if (!wr_reg && axi_master_r_valid)\n557:         begin\n558:           data_o_en      = 1'b1;\n559:           next_fsm_state = S_IDLE;\n560:           rdy_sync_en    = 1'b1;\n561:           err_en         = 1'b1;\n562:         end\n563:       end\n564:     endcase\n565:   end\n566: \n567: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 1,
+        "path": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: // Top module\\n12: module adbg_lint_biu\\n13: #(\\n14:     parameter ADDR_WIDTH = 32,\\n15:     parameter DATA_WIDTH = 64,\\n16:     parameter AUX_WIDTH = 6\\n17: )\\n18: (\\n19:     // Debug interface signals\\n20:     input  logic                        tck_i,\\n21:     input  logic                        trstn_i,\\n22:     input  logic [63:0]                 data_i,\\n23:     output logic [63:0]                 data_o,\\n24:     input  logic                 [31:0] addr_i,\\n25:     input  logic                        strobe_i,\\n26:     input  logic                        rd_wrn_i,           // If 0, then write op\\n27:     output logic                        rdy_o,\\n28:     output logic                        err_o,\\n29:     input  logic                  [3:0] word_size_i,  // 1,2, or 4\\n30: \\n31:     input  logic                        clk_i,\\n32:     input  logic                        rstn_i,\\n33: \\n34:     output logic                        lint_req_o,\\n35:     output logic   [ADDR_WIDTH-1:0]     lint_add_o,\\n36:     output logic                        lint_wen_o,\\n37:     output logic   [DATA_WIDTH-1:0]     lint_wdata_o,\\n38:     output logic [DATA_WIDTH/8-1:0]     lint_be_o,\\n39:     output logic    [AUX_WIDTH-1:0]     lint_aux_o,\\n40:     input  logic                        lint_gnt_i,\\n41:     input  logic                        lint_r_aux_i,\\n42:     input  logic                        lint_r_valid_i,\\n43:     input  logic   [DATA_WIDTH-1:0]     lint_r_rdata_i,\\n44:     input  logic                        lint_r_opc_i\\n45:   );\\n46: \\n47:   // Registers\\n48:   logic [DATA_WIDTH/8-1:0]        sel_reg;\\n49:   logic   [ADDR_WIDTH-1:0]        addr_reg;  // Don't really need the two LSB, this info is in the SEL bits\\n50:   logic   [DATA_WIDTH-1:0]        data_in_reg;  // dbg->AXI\\n51:   logic   [DATA_WIDTH-1:0]        data_out_reg;  // AXI->dbg\\n52:   logic                           wr_reg;\\n53:   logic                           str_sync;  // This is 'active-toggle' rather than -high or -low.\\n54:   logic                           rdy_sync;  // ditto, active-toggle\\n55:   logic                           err_reg;\\n56: \\n57:   // Sync registers.  TFF indicates TCK domain, WBFF indicates wb_clk domain\\n58:   logic     rdy_sync_tff1;\\n59:   logic     rdy_sync_tff2;\\n60:   logic     rdy_sync_tff2q;  // used to detect toggles\\n61:   logic     str_sync_wbff1;\\n62:   logic     str_sync_wbff2;\\n63:   logic     str_sync_wbff2q;  // used to detect toggles\\n64: \\n65: \\n66:   // Control Signals\\n67:   logic     data_o_en;    // latch wb_data_i\\n68:   logic     rdy_sync_en;  // toggle the rdy_sync signal, indicate ready to TCK domain\\n69:   logic     err_en;       // latch the wb_err_i signal\\n70: \\n71:   // Internal signals\\n72:   logic [DATA_WIDTH/8-1:0] be_dec;        // word_size and low-order address bits decoded to SEL bits\\n73:   logic                        start_toggle;  // AXI domain, indicates a toggle on the start strobe\\n74:   logic   [DATA_WIDTH-1:0] swapped_data_i;\\n75:   logic   [DATA_WIDTH-1:0] swapped_data_out;\\n76: \\n77:   // AXI4 FSM states\\n78:   enum logic [1:0] {S_IDLE,S_DATA,S_RESP} lint_fsm_state,next_fsm_state;\\n79: \\n80: \\n81: \\n82:   // Create byte enable signals fro\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 200,
+        "path": "ips/adv_dbg_if/rtl/adbg_lint_module.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"200:         begin\\n201:            word_size_bits <= 6'd63;  // Bits is actually bits-1, to make the FSM easier\\n202:            word_size_bytes <= 4'd4;\\n203:            rd_op <= 1'b1;\\n204:         end\\n205:           default:\\n206:          begin\\n207:             word_size_bits <= 6'hXX;\\n208:            word_size_bytes <= 4'hX;\\n209:            rd_op <= 1'bX;\\n210:         end\\n211:     endcase\\n212:      end\\n213: \\n214: \\n215:    ////////////////////////////////////////////////\\n216:    // Module-internal register select register (no, that's not redundant.)\\n217:    // Also internal register output MUX\\n218: \\n219:     always @ (posedge tck_i or negedge trstn_i)\\n220:     begin\\n221:         if(~trstn_i)\\n222:             internal_register_select = 1'h0;\\n223:         else if (regsel_ld_en)\\n224:             internal_register_select = reg_select_data;\\n225:     end\\n226: \\n227:    // This is completely unnecessary here, since the WB module has only 1 internal\\n228:    // register.  However, to make the module expandable, it is included anyway.\\n229:    always @ (internal_register_select or internal_reg_error)\\n230:      begin\\n231:     case(internal_register_select)\\n232:           `DBG_LINT_INTREG_ERROR: data_from_internal_reg = internal_reg_error;\\n233:           default: data_from_internal_reg = internal_reg_error;\\n234:     endcase\\n235:      end\\n236: \\n237: \\n238: \\n239:    ////////////////////////////////////////////////////////////////////\\n240:    // Module-internal registers\\n241:    // These have generic read/write/select code, but\\n242:    // individual registers may have special behavior, defined here.\\n243: \\n244:    // This is the bus error register, which traps WB errors\\n245:    // We latch every new BIU address in the upper 32 bits, so we always have the address for the transaction which\\n246:    // generated the error (the address counter might increment, esp. for writes)\\n247:    // We stop latching addresses when the error bit (bit 0) is set. Keep the error bit set until it is\\n248:    // manually cleared by a module internal register write.\\n249:    // Note we use reg_select_data straight from data_register_i, rather than the latched version -\\n250:    // otherwise, we would write the previously selected register.\\n251: \\n252: \\n253:     always @ (posedge tck_i or negedge trstn_i)\\n254:     begin\\n255:         if(~trstn_i)\\n256:             internal_reg_error = 33'h0;\\n257:         else if(intreg_ld_en && (reg_select_data == `DBG_LINT_INTREG_ERROR))  // do load from data input register\\n258:         begin\\n259:             if(data_register_i[46])\\n260:                 internal_reg_error[0] = 1'b0;  // if write data is 1, reset the error bit\\n261:         end\\n262:         else if(error_reg_en && !internal_reg_error[0])\\n263:         begin\\n264:             if(biu_err || (!biu_ready))  internal_reg_error[0] = 1'b1;\\n265:              else if(biu_strobe) internal_reg_error[32:1] = address_counter;\\n266:         end\\n267:         else if(biu_strobe && !internal_reg_error[0])\\n268:             internal_reg_error[32:1] = address_counter;  // When no error, latch this whether error_reg_en or not\\n269:         end\\n270: \\n271:    ///////////////////////////////////////////////\\n272:    // Address counter\\n273: \\n274:    assign data_to_addr_counter = (addr_sel) ? incremented_address[31:0] : address_data_in;\\n275:    assign incremented_address = address_counter + word_size_bytes;\\n276: \\n277:    // Technically, since this data (sometimes) comes from the input shift reg, we should latch on\\n278:    // negedge, per the JTAG spec. But that makes things difficult when incrementing.\\n279:    always @ (posedge tck_i or negedge trstn_i)  // JTAG spec specifies latch on negative edge in UPDATE_DR state\\n280:      begin\\n281:     if(~trstn_i)\\n282:       address_counter <= 32'h0;\\n283:     else if(addr_ct_en)\\n284:       address_counter <= data_to_addr_counter;\\n285\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 120,
+        "offset": 1,
+        "path": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+      "error": null,
+      "content": "1: // Copyright 2018 ETH Zurich and University of Bologna.\n2: // Copyright and related rights are licensed under the Solderpad Hardware\n3: // License, Version 0.51 (the \"License\"); you may not use this file except in\n4: // compliance with the License.  You may obtain a copy of the License at\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n6: // or agreed to in writing, software, hardware and materials distributed under\n7: // this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\n9: // specific language governing permissions and limitations under the License.\n10: \n11: \n12: `include \"pulp_soc_defines.sv\"\n13: \n14: module lint_jtag_wrap #(\n15:     parameter ADDRESS_WIDTH = 32,\n16:     parameter DATA_WIDTH    = 32\n17: ) (\n18:     input  logic         tck_i,\n19:     input  logic         tdi_i,\n20:     input  logic         trstn_i,\n21:     output logic         tdo_o,\n22:     input  logic         shift_dr_i,\n23:     input  logic         pause_dr_i,\n24:     input  logic         update_dr_i,\n25:     input  logic         capture_dr_i,\n26:     input  logic         lint_select_i,\n27:     input  logic         clk_i,\n28:     input  logic         rst_ni,\n29:     XBAR_TCDM_BUS.Master jtag_lint_master\n30: );\n31: \n32: \n33:     // Top module\n34:     adbg_lintonly_top #(\n35:         .ADDR_WIDTH ( ADDRESS_WIDTH ),\n36:         .DATA_WIDTH ( DATA_WIDTH    )\n37:     ) dbg_module_i (\n38:         // JTAG signals\n39:         .tck_i          ( tck_i                    ),\n40:         .tdi_i          ( tdi_i                    ),\n41:         .tdo_o          ( tdo_o                    ),\n42:         .trstn_i        ( trstn_i                  ),\n43: \n44:         // TAP states\n45:         .shift_dr_i     ( shift_dr_i               ),\n46:         .pause_dr_i     ( pause_dr_i               ),\n47:         .update_dr_i    ( update_dr_i              ),\n48:         .capture_dr_i   ( capture_dr_i             ),\n49: \n50:         // Instructions\n51:         .debug_select_i ( lint_select_i            ),\n52: \n53:         .clk_i          ( clk_i                    ),\n54:         .rstn_i         ( rst_ni                   ),\n55: \n56:         .lint_req_o     ( jtag_lint_master.req     ),\n57:         .lint_add_o     ( jtag_lint_master.add     ),\n58:         .lint_wen_o     ( jtag_lint_master.wen     ),\n59:         .lint_wdata_o   ( jtag_lint_master.wdata   ),\n60:         .lint_be_o      ( jtag_lint_master.be      ),\n61:         .lint_aux_o     (                          ),\n62:         .lint_gnt_i     ( jtag_lint_master.gnt     ),\n63:         .lint_r_aux_i   (                          ),\n64:         .lint_r_valid_i ( jtag_lint_master.r_valid ),\n65:         .lint_r_rdata_i ( jtag_lint_master.r_rdata ),\n66:         .lint_r_opc_i   ( jtag_lint_master.r_opc   )\n67:     );\n68: \n69: endmodule // jtag_wrap",
+      "truncated": false
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 720,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"720:         .test_en_i        ( dft_test_mode_i     ),\\n721:         .lint_fc_data     ( s_lint_fc_data_bus  ),\\n722:         .lint_fc_instr    ( s_lint_fc_instr_bus ),\\n723:         .lint_udma_tx     ( s_lint_udma_tx_bus  ),\\n724:         .lint_udma_rx     ( s_lint_udma_rx_bus  ),\\n725:         .lint_debug       ( s_lint_debug_bus    ),\\n726:         .lint_hwpe        ( s_lint_hwpe_bus     ),\\n727: \\t\\n728:         .axi_from_cluster ( s_data_in_bus       ),\\n729:         .axi_to_cluster   ( s_data_out_bus      ),\\n730: \\n731:         .apb_periph_bus   ( s_apb_periph_bus    ),\\n732:         .mem_l2_bus       ( s_mem_l2_bus        ),\\n733:         .mem_l2_pri_bus   ( s_mem_l2_pri_bus    ),\\n734:         .mem_rom_bus      ( s_mem_rom_bus       )\\n735:     );\\n736: \\n737:     lint_jtag_wrap i_lint_jtag (\\n738:         .tck_i        ( jtag_tck_i        ),\\n739:         .tdi_i        ( jtag_axireg_tdi_i ),\\n740:         .trstn_i      ( jtag_trst_ni      ),\\n741:         .tdo_o        ( jtag_axireg_tdo_o ),\\n742:         .shift_dr_i   ( jtag_shift_dr_i   ),\\n743:         .pause_dr_i   ( 1'b0              ),\\n744:         .update_dr_i  ( jtag_update_dr_i  ),\\n745:         .capture_dr_i ( jtag_capture_dr_i ),\\n746:         .lint_select_i( jtag_axireg_sel_i ),\\n747:         .clk_i        ( s_soc_clk  ),\\n748:         .rst_ni       ( s_soc_rstn ),\\n749:         .jtag_lint_master(s_lint_debug_bus)\\n750:     );\\n751: \\n752:     //********************************************************\\n753:     //*** PAD AND GPIO CONFIGURATION SIGNALS PACK ************\\n754:     //********************************************************\\n755: \\n756:     generate\\n757:         for (i=0; i<32; i++) begin\\n758:             for (j=0; j<6; j++) begin\\n759:                 assign gpio_cfg_o[j+6*i] = s_gpio_cfg[i][j];\\n760:             end\\n761:         end\\n762:     endgenerate\\n763: \\n764:     generate\\n765:         for (i=0; i<64; i++) begin\\n766:             for (j=0; j<2; j++) begin\\n767:                 assign pad_mux_o[j+2*i] = s_pad_mux[i][j];\\n768:             end\\n769:         end\\n770:     endgenerate\\n771: \\n772:     generate\\n773:         for (i=0; i<64; i++) begin\\n774:             for (j=0; j<6; j++) begin\\n775:                 assign pad_cfg_o[j+6*i] = s_pad_cfg[i][j];\\n776:             end\\n777:         end\\n778:     endgenerate\\n779: \\n780:     //********************************************************\\n781:     //*** AXI DATA SLAVE INTERFACE UNPACK ********************\\n782:     //********************************************************\\n783: \\n784:     // AXI DATA SLAVE\\n785:     assign s_data_slave.aw_writetoken  = data_slave_aw_writetoken_i  ;\\n786:     assign s_data_slave.aw_addr        = data_slave_aw_addr_i        ;\\n787:     assign s_data_slave.aw_prot        = data_slave_aw_prot_i        ;\\n788:     assign s_data_slave.aw_region      = data_slave_aw_region_i      ;\\n789:     assign s_data_slave.aw_len         = data_slave_aw_len_i         ;\\n790:     assign s_data_slave.aw_size        = data_slave_aw_size_i        ;\\n791:     assign s_data_slave.aw_burst       = data_slave_aw_burst_i       ;\\n792:     assign s_data_slave.aw_lock        = data_slave_aw_lock_i        ;\\n793:     assign s_data_slave.aw_cache       = data_slave_aw_cache_i       ;\\n794:     assign s_data_slave.aw_qos         = data_slave_aw_qos_i         ;\\n795:     assign s_data_slave.aw_id          = data_slave_aw_id_i          ;\\n796:     assign s_data_slave.aw_user        = data_slave_aw_user_i        ;\\n797:     assign data_slave_aw_readpointer_o = s_data_slave.aw_readpointer ;\\n798:  \\n799:     assign s_data_slave.ar_writetoken  = data_slave_ar_writetoken_i  ;\\n800:     assign s_data_slave.ar_addr        = data_slave_ar_addr_i        ;\\n801:     assign s_data_slave.ar_prot        = data_slave_ar_prot_i        ;\\n802:     assign s_data_slave.ar_region      = data_slave_ar_region_i      ;\\n803:     assign s_data_slave.\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "limit": 160,
+        "offset": 240,
+        "path": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+      "error": null,
+      "content": "240:       sel_reg     <=  'h0;\n241:       addr_reg    <=  'h0;\n242:       data_in_reg <=  'h0;\n243:       wr_reg      <= 1'b0;\n244:     end\n245:     else\n246:     if(strobe_i && rdy_o) begin\n247:       sel_reg  <= be_dec;\n248:       addr_reg <= addr_i;\n249:       if(!rd_wrn_i) data_in_reg <= swapped_data_i;\n250:       wr_reg <= ~rd_wrn_i;\n251:     end\n252:   end\n253: \n254:   // Create toggle-active strobe signal for clock sync.  This will start a transaction\n255:   // on the AXI once the toggle propagates to the FSM in the AXI domain.\n256:   always_ff @(posedge tck_i, negedge trstn_i)\n257:   begin\n258:     if(~trstn_i)               str_sync <= 1'b0;\n259:     else if(strobe_i && rdy_o) str_sync <= ~str_sync;\n260:   end\n261: \n262:   // Create rdy_o output.  Set on reset, clear on strobe (if set), set on input toggle\n263:   always_ff @(posedge tck_i, negedge trstn_i)\n264:   begin\n265:     if(~trstn_i) begin\n266:       rdy_sync_tff1  <= 1'b0;\n267:       rdy_sync_tff2  <= 1'b0;\n268:       rdy_sync_tff2q <= 1'b0;\n269:     end else begin\n270:       rdy_sync_tff1  <= rdy_sync;       // Synchronize the ready signal across clock domains\n271:       rdy_sync_tff2  <= rdy_sync_tff1;\n272:       rdy_sync_tff2q <= rdy_sync_tff2;  // used to detect toggles\n273:     end\n274:   end\n275: \n276:   always_ff @(posedge tck_i, negedge trstn_i)\n277:   begin\n278:     if(~trstn_i) begin\n279:       rdy_o <= 1'b1;\n280:     end\n281:     else\n282:     begin\n283:       if(strobe_i && rdy_o)\n284:         rdy_o <= 1'b0;\n285:       else if(rdy_sync_tff2 != rdy_sync_tff2q)\n286:         rdy_o <= 1'b1;\n287:     end\n288:   end\n289: \n290:   //////////////////////////////////////////////////////////\n291:   // Direct assignments, unsynchronized\n292: \n293:   assign lint_add_o   = addr_reg;\n294:   assign lint_wdata_o = data_in_reg;\n295:   assign lint_be_o    = sel_reg;\n296: \n297:   always_comb\n298:   begin\n299:     if (DATA_WIDTH == 64)\n300:       data_o = data_out_reg;\n301:     else if (DATA_WIDTH == 32)\n302:       data_o = {32'h0,data_out_reg};\n303:   end\n304: \n305:   assign err_o  = err_reg;\n306: \n307:   assign lint_aux_o  = 'h0;\n308: \n309:   ///////////////////////////////////////////////////////\n310:   // AXI clock domain\n311: \n312:   // synchronize the start strobe\n313:   always_ff @(posedge clk_i, negedge rstn_i)\n314:   begin\n315:      if(!rstn_i) begin\n316:        str_sync_wbff1  <= 1'b0;\n317:        str_sync_wbff2  <= 1'b0;\n318:        str_sync_wbff2q <= 1'b0;\n319:      end else begin\n320:        str_sync_wbff1  <= str_sync;\n321:        str_sync_wbff2  <= str_sync_wbff1;\n322:        str_sync_wbff2q <= str_sync_wbff2;  // used to detect toggles\n323:      end\n324:   end\n325: \n326:   assign start_toggle = (str_sync_wbff2 != str_sync_wbff2q);\n327: \n328:   // Error indicator register\n329:   always_ff @(posedge clk_i, negedge rstn_i)\n330:   begin\n331:       if(!rstn_i) err_reg <= 1'b0;\n332:       else if(err_en) err_reg <= 1'b0; //TODO check if lint can return err\n333:   end\n334: \n335:   // WB->dbg data register\n336:   always_ff @ (posedge clk_i, negedge rstn_i)\n337:   begin\n338:     if(!rstn_i)   data_out_reg <= 32'h0;\n339:     else if(data_o_en) data_out_reg <= swapped_data_out;\n340:   end\n341: \n342:   // Create a toggle-active ready signal to send to the TCK domain\n343:   always_ff @(posedge clk_i, negedge rstn_i)\n344:   begin\n345:     if(!rstn_i)     rdy_sync <= 1'b0;\n346:     else if(rdy_sync_en) rdy_sync <= ~rdy_sync;\n347:   end\n348: \n349:    /////////////////////////////////////////////////////\n350:    // Small state machine to create AXI accesses\n351:    // Not much more that an 'in_progress' bit, but easier\n352:    // to read.  Deals with single-cycle and multi-cycle\n353:    // accesses.\n354: \n355:   // Sequential bit\n356:   always_ff @(posedge clk_i, negedge rstn_i)\n357:   begin\n358:     if(~rstn_i) lint_fsm_state <= S_IDLE;\n359:     else             lint_fsm_state <= next_fsm_state;\n360:   end\n361: \n362:   // Determination of next state (combinatorial)\n36\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "limit": 140,
+        "offset": 110,
+        "path": "ips/adv_dbg_if/rtl/adbg_lintonly_top.sv"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_lintonly_top.sv",
+      "error": null,
+      "content": "110: ///////////////////////////////////////////////\n111: \n112: \n113: //////////////////////////////////////////////\n114: // Debug module instantiations\n115: \n116: // Connecting LINT module\n117:     adbg_lint_module #(\n118:        .ADDR_WIDTH(ADDR_WIDTH),\n119:        .DATA_WIDTH(DATA_WIDTH),\n120:        .AUX_WIDTH(AUX_WIDTH)\n121:     ) i_dbg_lint (\n122:         // JTAG signals\n123:         .tck_i            (tck_i),\n124:         .module_tdo_o     (tdo_axi),\n125:         .tdi_i            (tdi_i),\n126: \n127:         // TAP states\n128:         .capture_dr_i     (capture_dr_i),\n129:         .shift_dr_i       (shift_dr_i),\n130:         .update_dr_i      (update_dr_i),\n131: \n132:         .data_register_i  (input_shift_reg),\n133:         .module_select_i  (module_selects[0]),\n134:         .top_inhibit_o    (module_inhibit[0]),\n135:         .trstn_i          (trstn_i),\n136: \n137:         .clk_i         ( clk_i          ),\n138:         .rstn_i        ( rstn_i         ),\n139: \n140:         .lint_req_o    ( lint_req_o     ),\n141:         .lint_add_o    ( lint_add_o     ),\n142:         .lint_wen_o    ( lint_wen_o     ),\n143:         .lint_wdata_o  ( lint_wdata_o   ),\n144:         .lint_be_o     ( lint_be_o      ),\n145:         .lint_aux_o    ( lint_aux_o     ),\n146:         .lint_gnt_i    ( lint_gnt_i     ),\n147:         .lint_r_aux_i  ( lint_r_aux_i   ),\n148:         .lint_r_valid_i( lint_r_valid_i ),\n149:         .lint_r_rdata_i( lint_r_rdata_i ),\n150:         .lint_r_opc_i  ( lint_r_opc_i   )\n151:     );\n152: \n153:     assign select_inhibit = | module_inhibit;\n154: \n155:     /////////////////////////////////////////////////\n156:     // TDO output MUX\n157: \n158:     always @ (module_id_reg or tdo_axi or tdo_cpu)\n159:     begin\n160:         if (module_id_reg == 0)\n161:             tdo_o <= tdo_axi;\n162:         else if (module_id_reg == 1)\n163:             tdo_o <= tdo_cpu;\n164:         else\n165:             tdo_o <= 1'b0;\n166:     end\n167: \n168: \n169: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "limit": 140,
+        "offset": 1,
+        "path": "rtl/pulpissimo/jtag_tap_top.sv"
+      },
+      "status": "ok",
+      "path": "rtl/pulpissimo/jtag_tap_top.sv",
+      "error": null,
+      "content": "1: // Copyright 2018 ETH Zurich and University of Bologna.\n2: // Copyright and related rights are licensed under the Solderpad Hardware\n3: // License, Version 0.51 (the \"License\"); you may not use this file except in\n4: // compliance with the License.  You may obtain a copy of the License at\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n6: // or agreed to in writing, software, hardware and materials distributed under\n7: // this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\n9: // specific language governing permissions and limitations under the License.\n10: \n11: \n12: module jtag_tap_top\n13: (\n14:     input  logic              tck_i,\n15:     input  logic              trst_ni,\n16:     input  logic              tms_i,\n17:     input  logic              td_i,\n18:     output logic              td_o,\n19: \n20:     output logic              soc_tck_o,\n21:     output logic              soc_trstn_o,\n22:     output logic              soc_tms_o,\n23:     output logic              soc_tdi_o,\n24:     input  logic              soc_tdo_i,\n25: \n26:     input  logic              test_clk_i,\n27:     input  logic              test_rstn_i,\n28: \n29:     input  logic        [7:0] soc_jtag_reg_i,\n30:     output logic        [7:0] soc_jtag_reg_o,\n31:     output logic              sel_fll_clk_o,\n32: \n33:    // tap\n34:    output logic               jtag_shift_dr_o,\n35:    output logic               jtag_update_dr_o,\n36:    output logic               jtag_capture_dr_o,\n37:    output logic               axireg_sel_o,\n38: \n39:    output logic               dbg_axi_scan_in_o,\n40:    input  logic               dbg_axi_scan_out_i\n41: );\n42: \n43:     logic                       s_scan_i;\n44:     logic [8:0]                 s_confreg;\n45:     logic                       confscan;\n46:     logic                       confreg_sel;\n47:     logic                       td_o_int;\n48: \n49:     logic [7:0] r_soc_reg0;\n50:     logic [7:0] r_soc_reg1;\n51: \n52:     logic [7:0] s_soc_jtag_reg_sync;\n53: \n54:     assign soc_trstn_o = trst_ni;\n55:     assign soc_tms_o = tms_i;\n56:     assign soc_tdi_o = td_o_int;\n57:     assign soc_tck_o = tck_i;\n58: \n59:     assign td_o = soc_tdo_i;\n60: \n61: \n62:     // jtag tap controller\n63:     tap_top tap_top_i\n64:     (\n65:         .tms_i             ( tms_i              ),\n66:         .tck_i             ( tck_i              ),\n67:         .rst_ni            ( trst_ni            ),\n68:         .td_i              ( td_i               ),\n69:         .td_o              ( td_o_int           ),\n70: \n71:         .shift_dr_o        ( jtag_shift_dr_o    ),\n72:         .update_dr_o       ( jtag_update_dr_o   ),\n73:         .capture_dr_o      ( jtag_capture_dr_o  ),\n74: \n75:         .axireg_sel_o      ( axireg_sel_o       ),\n76:         .bbmuxreg_sel_o    (                    ),\n77:         .clkgatereg_sel_o  (                    ),\n78:         .confreg_sel_o     ( confreg_sel        ),\n79:         .testmodereg_sel_o (                    ),\n80:         .bistreg_sel_o     (                    ),\n81: \n82:         .scan_in_o         ( s_scan_i           ),\n83: \n84:         .axireg_out_i      ( dbg_axi_scan_out_i ),\n85:         .bbmuxreg_out_i    ( 1'b0               ),\n86:         .clkgatereg_out_i  ( 1'b0               ),\n87:         .confreg_out_i     ( confscan           ),\n88:         .testmodereg_out_i ( 1'b0               ),\n89:         .bistreg_out_i     ( 1'b0               )\n90:     );\n91: \n92:     // pulp configuration register\n93:     jtagreg\n94:     #(\n95:         .JTAGREGSIZE(9),\n96:         .SYNC(0)\n97:     )\n98:     confreg\n99:     (\n100:         .clk_i                  ( tck_i               ),\n101:         .rst_ni                 ( trst_ni             ),\n102:         .enable_i               ( confreg_sel         ),\n103:         .capture_dr_i           ( jtag_capture_dr_o   ),\n104:         .shift_dr_i     \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 5,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "rtl/pulpissimo",
+        "query": "adv_dbg_if|debug|jtag_axireg|jtag_tck|jtag_trst"
+      },
+      "status": "ok",
+      "path": "rtl/pulpissimo",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 6,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": ".",
+        "query": "adv_dbg_if|jtag_axireg|jtag_tap_top|lint_jtag"
+      },
+      "status": "ok",
+      "path": ".",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 6,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 1,
+        "path": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+      "error": null,
+      "content": "1: //////////////////////////////////////////////////////////////////////\n2: ////                                                              ////\n3: ////  adbg_or1k_status_reg.v                                      ////\n4: ////                                                              ////\n5: ////                                                              ////\n6: ////  This file is part of the SoC Debug Interface.               ////\n7: ////                                                              ////\n8: ////  Author(s):                                                  ////\n9: ////       Igor Mohor (igorm@opencores.org)                       ////\n10: ////       Nathan Yawn (nyawn@opencores.org)                      ////\n11: ////                                                              ////\n12: ////                                                              ////\n13: ////                                                              ////\n14: //////////////////////////////////////////////////////////////////////\n15: ////                                                              ////\n16: //// Copyright (C) 2000 - 2011 Authors                            ////\n17: ////                                                              ////\n18: //// This source file may be used and distributed without         ////\n19: //// restriction provided that this copyright statement is not    ////\n20: //// removed from the file and that any derivative work contains  ////\n21: //// the original copyright notice and the associated disclaimer. ////\n22: ////                                                              ////\n23: //// This source file is free software; you can redistribute it   ////\n24: //// and/or modify it under the terms of the GNU Lesser General   ////\n25: //// Public License as published by the Free Software Foundation; ////\n26: //// either version 2.1 of the License, or (at your option) any   ////\n27: //// later version.                                               ////\n28: ////                                                              ////\n29: //// This source is distributed in the hope that it will be       ////\n30: //// useful, but WITHOUT ANY WARRANTY; without even the implied   ////\n31: //// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      ////\n32: //// PURPOSE.  See the GNU Lesser General Public License for more ////\n33: //// details.                                                     ////\n34: ////                                                              ////\n35: //// You should have received a copy of the GNU Lesser General    ////\n36: //// Public License along with this source; if not, download it   ////\n37: //// from http://www.opencores.org/lgpl.shtml                     ////\n38: ////                                                              ////\n39: //////////////////////////////////////////////////////////////////////\n40: //\n41: // CVS Revision History\n42: //\n43: // $Log: adbg_or1k_status_reg.v,v $\n44: // Revision 1.3  2011-10-24 02:25:11  natey\n45: // Removed extraneous '#1' delays, which were a holdover from the original\n46: // versions in the previous dbg_if core.\n47: //\n48: // Revision 1.2  2010-01-10 22:54:10  Nathan\n49: // Update copyright dates\n50: //\n51: // Revision 1.1  2008/07/22 20:28:31  Nathan\n52: // Changed names of all files and modules (prefixed an a, for advanced).  Cleanup, indenting.  No functional changes.\n53: //\n54: // Revision 1.3  2008/07/06 20:02:54  Nathan\n55: // Fixes for synthesis with Xilinx ISE (also synthesizable with \n56: // Quartus II 7.0).  Ran through dos2unix.\n57: //\n58: // Revision 1.2  2008/06/26 20:52:32  Nathan\n59: // OR1K module tested and working.  Added copyright / license info \n60: // to _define files.  Other cleanup.\n61: //\n62: //\n63: //\n64: //\n65: \n66: `include \"adbg_or1k_defines.v\"\n67: \n68: module adbg_or1k_status_reg  #( \n69:         parameter NB_CORES = 4\n70:     ) (\n71:     input                       tck_i,\n72:     input            \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 6,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 1,
+        "path": "ips/adv_dbg_if/rtl/adbg_or1k_biu.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: //////////////////////////////////////////////////////////////////////\\n2: ////                                                              ////\\n3: ////  adbg_or1k_biu.v                                             ////\\n4: ////                                                              ////\\n5: ////                                                              ////\\n6: ////  This file is part of the SoC Advanced Debug Interface.      ////\\n7: ////                                                              ////\\n8: ////  Author(s):                                                  ////\\n9: ////       Nathan Yawn (nathan.yawn@opencores.org)                ////\\n10: ////                                                              ////\\n11: ////                                                              ////\\n12: ////                                                              ////\\n13: //////////////////////////////////////////////////////////////////////\\n14: ////                                                              ////\\n15: //// Copyright (C) 2008 - 2010       Authors                      ////\\n16: ////                                                              ////\\n17: //// This source file may be used and distributed without         ////\\n18: //// restriction provided that this copyright statement is not    ////\\n19: //// removed from the file and that any derivative work contains  ////\\n20: //// the original copyright notice and the associated disclaimer. ////\\n21: ////                                                              ////\\n22: //// This source file is free software; you can redistribute it   ////\\n23: //// and/or modify it under the terms of the GNU Lesser General   ////\\n24: //// Public License as published by the Free Software Foundation; ////\\n25: //// either version 2.1 of the License, or (at your option) any   ////\\n26: //// later version.                                               ////\\n27: ////                                                              ////\\n28: //// This source is distributed in the hope that it will be       ////\\n29: //// useful, but WITHOUT ANY WARRANTY; without even the implied   ////\\n30: //// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      ////\\n31: //// PURPOSE.  See the GNU Lesser General Public License for more ////\\n32: //// details.                                                     ////\\n33: ////                                                              ////\\n34: //// You should have received a copy of the GNU Lesser General    ////\\n35: //// Public License along with this source; if not, download it   ////\\n36: //// from http://www.opencores.org/lgpl.shtml                     ////\\n37: ////                                                              ////\\n38: //////////////////////////////////////////////////////////////////////\\n39: //\\n40: // CVS Revision History\\n41: //\\n42: // $Log: adbg_or1k_biu.v,v $\\n43: // Revision 1.3  2010-01-10 22:54:10  Nathan\\n44: // Update copyright dates\\n45: //\\n46: // Revision 1.2  2009/05/17 20:54:56  Nathan\\n47: // Changed email address to opencores.org\\n48: //\\n49: // Revision 1.1  2008/07/22 20:28:30  Nathan\\n50: // Changed names of all files and modules (prefixed an a, for advanced).  Cleanup, indenting.  No functional changes.\\n51: //\\n52: // Revision 1.5  2008/07/08 19:04:03  Nathan\\n53: // Many small changes to eliminate compiler warnings, no functional \\n54: // changes.  System will now pass SRAM and CPU self-tests on Altera \\n55: // FPGA using altera_virtual_jtag TAP.\\n56: //\\n57: \\n58: \\n59: module adbg_or1k_biu #( \\n60: \\t\\tparameter NB_CORES = 4\\n61:     ) (\\n62:    // Debug interface signals\\n63:     input  logic                       tck_i,\\n64:     input  logic                       trstn_i,\\n65:     input  logic                 [3:0] cpu_select_i,\\n66:     input  logic                [31:0] data_i,  // Assume short words are in UP\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 6,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 430,
+        "path": "ips/adv_dbg_if/rtl/adbg_or1k_module.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"430:      end\\n431: \\n432: \\n433:    // Determination of next state; purely combinatorial\\n434:    always @ (module_state or module_select_i or update_dr_i or capture_dr_i or shift_dr_i or operation_in[2]\\n435:          or word_count_zero or bit_count_max or data_register_i[56] or bit_count_32 or biu_ready\\n436:          or module_cmd or intreg_write or decremented_word_count or burst_instruction)\\n437:      begin\\n438:     case(module_state)\\n439:       STATE_idle:\\n440:         begin\\n441:            if(module_cmd && module_select_i && update_dr_i && burst_instruction && operation_in[2])\\n442:                 module_next_state <= STATE_Rbegin;\\n443:            else if(module_cmd && module_select_i && update_dr_i && burst_instruction)\\n444:                 module_next_state <= STATE_Wready;\\n445:            else\\n446:                 module_next_state <= STATE_idle;\\n447:         end\\n448: \\n449:       STATE_Rbegin:\\n450:         begin\\n451:            if(word_count_zero) module_next_state <= STATE_idle;  // set up a burst of size 0, illegal.\\n452:            else module_next_state <= STATE_Rready;\\n453:         end\\n454:       STATE_Rready:\\n455:         begin\\n456:            if(module_select_i && capture_dr_i) module_next_state <= STATE_Rstatus;\\n457:            else module_next_state <= STATE_Rready;\\n458:         end\\n459:       STATE_Rstatus:\\n460:         begin\\n461:            if(update_dr_i) module_next_state <= STATE_idle;\\n462:            else if (biu_ready) module_next_state <= STATE_Rburst;\\n463:            else module_next_state <= STATE_Rstatus;\\n464:         end\\n465:       STATE_Rburst:\\n466:         begin\\n467:            if(update_dr_i) module_next_state <= STATE_idle;\\n468:            else if(bit_count_max && word_count_zero) module_next_state <= STATE_Rcrc;\\n469:            else module_next_state <= STATE_Rburst;\\n470:         end\\n471:       STATE_Rcrc:\\n472:         begin\\n473:            if(update_dr_i) module_next_state <= STATE_idle;\\n474:            // This doubles as the 'recovery' state, so stay here until update_dr_i.\\n475:            else module_next_state <= STATE_Rcrc;\\n476:         end\\n477: \\n478:       STATE_Wready:\\n479:         begin\\n480:            if(word_count_zero) module_next_state <= STATE_idle;\\n481:            else if(module_select_i && capture_dr_i) module_next_state <= STATE_Wwait;\\n482:            else module_next_state <= STATE_Wready;\\n483:         end\\n484:       STATE_Wwait:\\n485:         begin\\n486:            if(update_dr_i)  module_next_state <= STATE_idle;  // client terminated early\\n487:            else if(module_select_i && data_register_i[56]) module_next_state <= STATE_Wburst; // Got a start bit\\n488:            else module_next_state <= STATE_Wwait;\\n489:         end\\n490:       STATE_Wburst:\\n491:         begin\\n492:            if(update_dr_i)  module_next_state <= STATE_idle;  // client terminated early\\n493:            else if(bit_count_max)\\n494:              begin\\n495:                 if(word_count_zero) module_next_state <= STATE_Wcrc;\\n496:                 else module_next_state <= STATE_Wburst;\\n497:              end\\n498:            else module_next_state <= STATE_Wburst;\\n499:         end\\n500:       STATE_Wstatus:\\n501:         begin\\n502:            if(update_dr_i)  module_next_state <= STATE_idle;  // client terminated early\\n503:            else if(word_count_zero) module_next_state <= STATE_Wcrc;\\n504:            // can't wait until bus ready if multiple devices in chain...\\n505:            // Would have to read postfix_bits, then send another start bit and push it through\\n506:            // prefix_bits...potentially very inefficient.\\n507:            else module_next_state <= STATE_Wburst;\\n508:         end\\n509: \\n510:       STATE_Wcrc:\\n511:         begin\\n512:            if(update_dr_i)  module_next_state <= STATE_idle;  // client terminated early\\n513:            else if(bit_count_32) module_\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 7,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 520,
+        "path": "rtl/pulpissimo/pulpissimo.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"520:         .pad_i2s1_sdi          ( pad_i2s1_sdi           ),\\n521:         .pad_cam_pclk          ( pad_cam_pclk           ),\\n522:         .pad_cam_hsync         ( pad_cam_hsync          ),\\n523:         .pad_cam_data0         ( pad_cam_data0          ),\\n524:         .pad_cam_data1         ( pad_cam_data1          ),\\n525:         .pad_cam_data2         ( pad_cam_data2          ),\\n526:         .pad_cam_data3         ( pad_cam_data3          ),\\n527:         .pad_cam_data4         ( pad_cam_data4          ),\\n528:         .pad_cam_data5         ( pad_cam_data5          ),\\n529:         .pad_cam_data6         ( pad_cam_data6          ),\\n530:         .pad_cam_data7         ( pad_cam_data7          ),\\n531:         .pad_cam_vsync         ( pad_cam_vsync          ),\\n532:         .pad_i2c0_sda          ( pad_i2c0_sda           ),\\n533:         .pad_i2c0_scl          ( pad_i2c0_scl           ),\\n534:         .pad_uart_rx           ( pad_uart_rx            ),\\n535:         .pad_uart_tx           ( pad_uart_tx            ),\\n536: \\n537:         .pad_bootsel           ( pad_bootsel            ),\\n538:         .pad_reset_n           ( pad_reset_n            ),\\n539:         .pad_jtag_tck          ( pad_jtag_tck           ),\\n540:         .pad_jtag_tdi          ( pad_jtag_tdi           ),\\n541:         .pad_jtag_tdo          ( pad_jtag_tdo           ),\\n542:         .pad_jtag_tms          ( pad_jtag_tms           ),\\n543:         .pad_jtag_trst         ( pad_jtag_trst          ),\\n544:         .pad_xtal_in           ( pad_xtal_in            )\\n545: \\n546:    );\\n547: \\n548:   //***********************************************************\\n549:   //********** SAFE DOMAIN ************************************\\n550:   //***********************************************************\\n551:    safe_domain safe_domain_i (\\n552: \\n553:         .ref_clk_i                  ( s_ref_clk                   ),\\n554:         .slow_clk_o                 ( s_slow_clk                  ),\\n555:         .rst_ni                     ( s_rstn                     ),\\n556: \\n557:         .rst_no                     ( s_rstn_por                  ),\\n558: \\n559:         .test_clk_o                 ( s_test_clk                  ),\\n560:         .test_mode_o                ( s_test_mode                 ),\\n561:         .mode_select_o              ( s_mode_select               ),\\n562:         .dft_cg_enable_o            ( s_dft_cg_enable             ),\\n563: \\n564:         .sel_fll_clk_o              ( s_sel_fll_clk               ),\\n565: \\n566:         .jtag_tck_i                 ( s_jtag_tck                  ),\\n567:         .jtag_trst_ni               ( s_jtag_trst                 ),\\n568:         .jtag_tms_i                 ( s_jtag_tms                  ),\\n569:         .jtag_tdi_i                 ( s_jtag_tdi                  ),\\n570:         .jtag_tdo_o                 ( s_jtag_tdo                  ),\\n571: \\n572:         .soc_tck_o                  ( s_soc_tck                   ),\\n573:         .soc_trstn_o                ( s_soc_trstn                 ),\\n574:         .soc_tms_o                  ( s_soc_tms                   ),\\n575:         .soc_tdi_o                  ( s_soc_tdi                   ),\\n576: \\n577:         .jtag_shift_dr_o            ( s_jtag_shift_dr             ),\\n578:         .jtag_update_dr_o           ( s_jtag_update_dr            ),\\n579:         .jtag_capture_dr_o          ( s_jtag_capture_dr           ),\\n580: \\n581:         .axireg_sel_o               ( s_axireg_sel                ),\\n582:         .axireg_tdi_o               ( s_axireg_tdi                ),\\n583:         .axireg_tdo_i               ( s_axireg_tdo                ),\\n584: \\n585:         .soc_jtag_reg_i             ( s_soc_jtag_regi             ),\\n586:         .soc_jtag_reg_o             ( s_soc_jtag_rego             ),\\n587: \\n588:         .pad_cfg_o                  ( s_pad_cfg                   ),\\n589: \\n590:      \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 7,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 1,
+        "path": "rtl/pulpissimo/soc_domain.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: module soc_domain #(\\n12:     parameter CORE_TYPE            = 0,\\n13:     parameter USE_FPU              = 1,\\n14:     parameter AXI_ADDR_WIDTH       = 32,\\n15:     parameter AXI_DATA_IN_WIDTH    = 64,\\n16:     parameter AXI_DATA_OUT_WIDTH   = 32,\\n17:     parameter AXI_ID_IN_WIDTH      = 4,\\n18:     parameter AXI_ID_INT_WIDTH     = 8,\\n19:     parameter AXI_ID_OUT_WIDTH     = 6,\\n20:     parameter AXI_USER_WIDTH       = 6,\\n21:     parameter AXI_STRB_IN_WIDTH    = AXI_DATA_IN_WIDTH/8,\\n22:     parameter AXI_STRB_OUT_WIDTH   = AXI_DATA_OUT_WIDTH/8,\\n23:     parameter BUFFER_WIDTH         = 8,\\n24:     parameter EVNT_WIDTH           = 8\\n25: )(\\n26: \\n27:     input logic                              ref_clk_i,\\n28:     input logic                              slow_clk_i,\\n29:     input logic                              test_clk_i,\\n30: \\n31: `ifdef PULP_FPGA_EMUL\\n32:     input  logic                             zynq_soc_clk_i,\\n33:     input  logic                             zynq_per_clk_i,\\n34: `endif\\n35: \\n36:     input  logic                             rstn_glob_i,\\n37: \\n38:     input  logic                             dft_test_mode_i,\\n39:     input  logic                             dft_cg_enable_i,\\n40: \\n41:     input  logic                             mode_select_i,\\n42: \\n43:     input  logic                             sel_fll_clk_i,\\n44: \\n45:     input  logic [7:0]                       soc_jtag_reg_i,\\n46:     output logic [7:0]                       soc_jtag_reg_o,\\n47: \\n48:     input logic                              boot_l2_i,\\n49: \\n50:     input  logic                             jtag_tck_i,\\n51:     input  logic                             jtag_trst_ni,\\n52:     input  logic                             jtag_tms_i,\\n53:     input  logic                             jtag_td_i,\\n54:     input  logic                             jtag_axireg_tdi_i,\\n55:     output logic                             jtag_axireg_tdo_o,\\n56:     input  logic                             jtag_axireg_sel_i,\\n57:     input  logic                             jtag_shift_dr_i,\\n58:     input  logic                             jtag_update_dr_i,\\n59:     input  logic                             jtag_capture_dr_i,\\n60: \\n61:     input  logic [31:0]                      gpio_in_i,\\n62:     output logic [31:0]                      gpio_out_o,\\n63:     output logic [31:0]                      gpio_dir_o,\\n64:     output logic [191:0]                     gpio_cfg_o,\\n65: \\n66:     output logic [127:0]                     pad_mux_o,\\n67:     output logic [383:0]                     pad_cfg_o,\\n68: \\n69:     output logic                             uart_tx_o,\\n70:     input  logic                             uart_rx_i,\\n71: \\n72:     input  logic                             cam_clk_i,\\n73:     input  logic [7:0]                       cam_data_i,\\n74:     input  logic                             cam_hsync_i,\\n75:     input  logic                             cam_vsync_i,\\n76: \\n77:     output logic [3:0]                       timer_ch0_o,\\n78:     output logic [3:0]                       timer_ch1_o,\\n79:     output logic [3:0]                       timer_ch2_o,\\n80:     output logic [3:0]    \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 7,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 1,
+        "path": "rtl/pulpissimo/safe_domain.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: \\n12: `include \\\"pulp_soc_defines.sv\\\"\\n13: \\n14: module safe_domain\\n15:     #(\\n16:         parameter FLL_DATA_WIDTH = 32,\\n17:         parameter FLL_ADDR_WIDTH = 32\\n18:     )\\n19:     (\\n20:         input  logic             ref_clk_i            ,\\n21:         output logic             slow_clk_o           ,\\n22:         input  logic             rst_ni               ,\\n23:         output logic             rst_no               ,\\n24: \\n25:         output logic             test_clk_o           ,\\n26:         output logic             test_mode_o          ,\\n27:         output logic             mode_select_o        ,\\n28:         output logic             dft_cg_enable_o      ,\\n29: \\n30:         output logic             sel_fll_clk_o,\\n31: \\n32:         input  logic             jtag_tck_i           ,\\n33:         input  logic             jtag_trst_ni         ,\\n34:         input  logic             jtag_tms_i           ,\\n35:         input  logic             jtag_tdi_i           ,\\n36:         output logic             jtag_tdo_o           ,\\n37: \\n38:         output logic             soc_tck_o            ,\\n39:         output logic             soc_trstn_o          ,\\n40:         output logic             soc_tms_o            ,\\n41:         output logic             soc_tdi_o            ,\\n42: \\n43:         output logic             jtag_shift_dr_o      ,\\n44:         output logic             jtag_update_dr_o     ,\\n45:         output logic             jtag_capture_dr_o    ,\\n46: \\n47:         output logic             axireg_sel_o         ,\\n48:         output logic             axireg_tdi_o         ,\\n49:         input  logic             axireg_tdo_i         ,\\n50: \\n51:         input  logic       [7:0] soc_jtag_reg_i       ,\\n52:         output logic       [7:0] soc_jtag_reg_o       ,\\n53: \\n54:         //**********************************************************\\n55:         //*** PERIPHERALS SIGNALS **********************************\\n56:         //**********************************************************\\n57: \\n58:         // PAD CONTROL REGISTER\\n59:         input  logic [127:0]     pad_mux_i            ,\\n60:         input  logic [383:0]     pad_cfg_i            ,\\n61: \\n62:         output logic [47:0][5:0] pad_cfg_o            ,\\n63: \\n64:         // GPIOS\\n65:         input  logic [31:0]      gpio_out_i           ,\\n66:         output logic [31:0]      gpio_in_o            ,\\n67:         input  logic [31:0]      gpio_dir_i           ,\\n68:         input  logic [191:0]     gpio_cfg_i           ,\\n69: \\n70:         // UART\\n71:         input  logic             uart_tx_i            ,\\n72:         output logic             uart_rx_o            ,\\n73: \\n74:         // I2C0\\n75:         input  logic             i2c0_scl_out_i       ,\\n76:         output logic             i2c0_scl_in_o        ,\\n77:         input  logic             i2c0_scl_oe_i        ,\\n78:         input  logic             i2c0_sda_out_i       ,\\n79:         output logic             i2c0_sda_in_o        ,\\n80:         input  logic             i2c0_sda_oe_i        ,\\n81: \\n82:         // I2C1\\n83:         input  logic             i2c1_scl_out_i       ,\\n84:         output logic             i2c1_scl_in_o        ,\\\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 7,
+      "tool": "read_file",
+      "args": {
+        "limit": 160,
+        "offset": 330,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+      "error": null,
+      "content": "330:     FLL_BUS #(\n331:         .FLL_ADDR_WIDTH ( FLL_ADDR_WIDTH ),\n332:         .FLL_DATA_WIDTH ( FLL_DATA_WIDTH )\n333:     ) s_per_fll_master ();\n334: \n335:     FLL_BUS #(\n336:         .FLL_ADDR_WIDTH ( FLL_ADDR_WIDTH ),\n337:         .FLL_DATA_WIDTH ( FLL_DATA_WIDTH )\n338:     ) s_cluster_fll_master ();\n339: \n340: \n341:     APB_BUS s_apb_periph_bus ();\n342: \n343:     UNICAD_MEM_BUS_32 s_mem_rom_bus ();\n344: \n345:     UNICAD_MEM_BUS_32  s_mem_l2_bus[NB_L2_BANKS-1:0]();\n346:     UNICAD_MEM_BUS_32  s_mem_l2_pri_bus[NB_L2_BANKS_PRI-1:0]();\n347: \n348:     UNICAD_MEM_BUS_32 s_scm_l2_data_bus ();\n349:     UNICAD_MEM_BUS_32 s_scm_l2_instr_bus ();\n350: \n351:     XBAR_TCDM_BUS s_lint_debug_bus ();\n352:     XBAR_TCDM_BUS s_lint_jtag_bus ();\n353:     XBAR_TCDM_BUS s_lint_udma_tx_bus ();\n354:     XBAR_TCDM_BUS s_lint_udma_rx_bus ();\n355:     XBAR_TCDM_BUS s_lint_fc_data_bus ();\n356:     XBAR_TCDM_BUS s_lint_fc_instr_bus ();\n357:     XBAR_TCDM_BUS s_lint_hwpe_bus[NB_HWPE_PORTS-1:0]();\n358: \n359:     `ifdef REMAP_ADDRESS\n360:         logic [3:0] base_addr_int;\n361:         assign base_addr_int = 4'b0001; //FIXME attach this signal somewhere in the soc peripherals --> IGOR\n362:     `endif\n363: \n364: \n365:     \n366:     logic s_cluster_isolate_dc;\n367:     logic s_rstn_cluster_sync_soc;\n368: \n369: \n370:     assign cluster_clk_o  = s_cluster_clk;\n371:     assign cluster_rstn_o = s_cluster_rstn && s_cluster_rstn_soc_ctrl;\n372:     assign s_rstn_cluster_sync_soc = s_cluster_rstn && s_cluster_rstn_soc_ctrl;\n373: \n374:     assign cluster_rtc_o     = ref_clk_i;\n375:     assign cluster_test_en_o = dft_test_mode_i;\n376:     // isolate dc if the cluster is down\n377:    assign s_cluster_isolate_dc = 1'b0;\n378: //cluster_byp_o;\n379:     // If you want to connect a real PULP cluster you also need a cluster_busy_i signal\n380: \n381:     // cluster to soc\n382:     axi_slice_dc_master_wrap  #(\n383:         .AXI_ADDR_WIDTH ( AXI_ADDR_WIDTH    ),\n384:         .AXI_DATA_WIDTH ( AXI_DATA_IN_WIDTH ),\n385:         .AXI_ID_WIDTH   ( AXI_ID_IN_WIDTH   ),\n386:         .AXI_USER_WIDTH ( AXI_USER_WIDTH    ),\n387:         .BUFFER_WIDTH   ( BUFFER_WIDTH      )\n388:     ) dc_fifo_dataout_bus_i (\n389:         .clk_i           ( s_soc_clk                ),\n390:         .rst_ni          ( s_cluster_rstn           ),\n391:         .isolate_i       ( s_cluster_isolate_dc     ),\n392:         .test_cgbypass_i ( 1'b0                     ),\n393:         .clock_down_i    ( 1'b0                     ),\n394:         .incoming_req_o  (                          ),\n395:         .axi_master      ( s_data_in_bus            ),\n396:         .axi_slave_async ( s_data_slave             )\n397:     );\n398: \n399:     // SOC TO CLUSTER\n400:     axi_slice_dc_slave_wrap #(\n401:         .AXI_ADDR_WIDTH ( AXI_ADDR_WIDTH     ),\n402:         .AXI_DATA_WIDTH ( AXI_DATA_OUT_WIDTH ),\n403:         .AXI_ID_WIDTH   ( AXI_ID_OUT_WIDTH   ),\n404:         .AXI_USER_WIDTH ( AXI_USER_WIDTH     ),\n405:         .BUFFER_WIDTH   ( BUFFER_WIDTH       )\n406:     ) dc_fifo_datain_bus_i (\n407:         .clk_i            ( s_soc_clk               ),\n408:         .rst_ni           ( s_rstn_cluster_sync_soc ),\n409: \t.test_cgbypass_i  ( 1'b0                    ),\n410:         .isolate_i        ( s_cluster_isolate_dc    ),\n411:         .axi_slave        ( s_data_out_bus          ),\n412:         .axi_master_async ( s_data_master           )\n413:     );\n414: \n415:     //********************************************************\n416:     //********************* SOC L2 RAM ***********************\n417:     //********************************************************\n418: \n419:     l2_ram_multi_bank #(\n420:         .MEM_ADDR_WIDTH        ( L2_MEM_ADDR_WIDTH     ),\n421:         .NB_BANKS              ( NB_L2_BANKS           ),\n422:         .BANK_SIZE             ( L2_BANK_SIZE          ),\n423:         .MEM_ADDR_WIDTH_PRI    ( L2_MEM_ADDR_WIDTH_PRI ),\n424:         .NB_BANKS_PRI          ( NB_L2_BANKS_PRI       )\n425:     ) l2_ram_i (\n426: \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 8,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 500,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"500:         .gpio_out               ( gpio_out_o             ),\\n501:         .gpio_dir               ( gpio_dir_o             ),\\n502:         .gpio_padcfg            ( s_gpio_cfg             ),\\n503: \\n504:         .pad_mux_o              ( s_pad_mux              ),\\n505:         .pad_cfg_o              ( s_pad_cfg              ),\\n506: \\n507:         .uart_tx                ( uart_tx_o              ),\\n508:         .uart_rx                ( uart_rx_i              ),\\n509: \\n510:         .cam_clk_i              ( cam_clk_i              ),\\n511:         .cam_data_i             ( cam_data_i             ),\\n512:         .cam_hsync_i            ( cam_hsync_i            ),\\n513:         .cam_vsync_i            ( cam_vsync_i            ),\\n514: \\n515:         .i2c0_scl_i             ( i2c0_scl_i             ),\\n516:         .i2c0_scl_o             ( i2c0_scl_o             ),\\n517:         .i2c0_scl_oe_o          ( i2c0_scl_oe_o          ),\\n518:         .i2c0_sda_i             ( i2c0_sda_i             ),\\n519:         .i2c0_sda_o             ( i2c0_sda_o             ),\\n520:         .i2c0_sda_oe_o          ( i2c0_sda_oe_o          ),\\n521: \\n522:         .i2c1_scl_i             ( i2c1_scl_i             ),\\n523:         .i2c1_scl_o             ( i2c1_scl_o             ),\\n524:         .i2c1_scl_oe_o          ( i2c1_scl_oe_o          ),\\n525:         .i2c1_sda_i             ( i2c1_sda_i             ),\\n526:         .i2c1_sda_o             ( i2c1_sda_o             ),\\n527:         .i2c1_sda_oe_o          ( i2c1_sda_oe_o          ),\\n528: \\n529:         .i2s_sd0_i              ( i2s_sd0_i              ),\\n530:         .i2s_sd1_i              ( i2s_sd1_i              ),\\n531:         .i2s_ws_i               ( i2s_ws_i               ),\\n532:         .i2s_sck_i              ( i2s_sck_i              ),\\n533:         .i2s_ws0_o              ( i2s_ws0_o              ),\\n534:         .i2s_mode0_o            ( i2s_mode0_o            ),\\n535:         .i2s_sck0_o             ( i2s_sck0_o             ),\\n536:         .i2s_ws1_o              ( i2s_ws1_o              ),\\n537:         .i2s_sck1_o             ( i2s_sck1_o             ),\\n538:         .i2s_mode1_o            ( i2s_mode1_o            ),\\n539: \\n540:         .spi_master0_clk        ( spi_master0_clk_o      ),\\n541:         .spi_master0_csn0       ( spi_master0_csn0_o     ),\\n542:         .spi_master0_csn1       ( spi_master0_csn1_o     ),\\n543:         .spi_master0_csn2       (                        ),\\n544:         .spi_master0_csn3       (                        ),\\n545:         .spi_master0_mode       ( spi_master0_mode_o     ),\\n546:         .spi_master0_sdo0       ( spi_master0_sdo0_o     ),\\n547:         .spi_master0_sdo1       ( spi_master0_sdo1_o     ),\\n548:         .spi_master0_sdo2       ( spi_master0_sdo2_o     ),\\n549:         .spi_master0_sdo3       ( spi_master0_sdo3_o     ),\\n550:         .spi_master0_sdi0       ( spi_master0_sdi0_i     ),\\n551:         .spi_master0_sdi1       ( spi_master0_sdi1_i     ),\\n552:         .spi_master0_sdi2       ( spi_master0_sdi2_i     ),\\n553:         .spi_master0_sdi3       ( spi_master0_sdi3_i     ),\\n554: \\n555:         .sdclk_o                ( sdio_clk_o             ),           \\n556:         .sdcmd_o                ( sdio_cmd_o             ),\\n557:         .sdcmd_i                ( sdio_cmd_i             ),\\n558:         .sdcmd_oen_o            ( sdio_cmd_oen_o         ),\\n559:         .sddata_o               ( sdio_data_o            ),\\n560:         .sddata_i               ( sdio_data_i            ),\\n561:         .sddata_oen_o           ( sdio_data_oen_o        ),\\n562: \\n563:         .timer_ch0_o            ( timer_ch0_o            ),\\n564:         .timer_ch1_o            ( timer_ch1_o            ),\\n565:         .timer_ch2_o            ( timer_ch2_o            ),\\n566:         .timer_ch3_o            ( timer_ch3_o            ),\\n567: \\n568:         .cl_event_data_o        ( s_\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 8,
+      "tool": "read_file",
+      "args": {
+        "limit": 120,
+        "offset": 1,
+        "path": "rtl/includes/soc_bus_defines.sv"
+      },
+      "status": "ok",
+      "path": "rtl/includes/soc_bus_defines.sv",
+      "error": null,
+      "content": "1: /*\n2:  * soc_bus_defines.sv\n3:  *\n4:  * Copyright (C) 2013-2018 ETH Zurich, University of Bologna.\n5:  *\n6:  * Copyright and related rights are licensed under the Solderpad Hardware\n7:  * License, Version 0.51 (the \"License\"); you may not use this file except in\n8:  * compliance with the License.  You may obtain a copy of the License at\n9:  * http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n10:  * or agreed to in writing, software, hardware and materials distributed under\n11:  * this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n12:  * CONDITIONS OF ANY KIND, either express or implied. See the License for the\n13:  * specific language governing permissions and limitations under the License.\n14:  *\n15:  */\n16: \n17: // SOC BUS PARAMETRES\n18: `include \"pulp_soc_defines.sv\"\n19: \n20: `define NB_SLAVE  4\n21: `define NB_MASTER 4\n22: `define NB_REGION 4\n23: \n24: // MASTER PORT TO CLUSTER(3MB)\n25: `define CLUSTER_DATA_START_ADDR  32'h1000_0000\n26: `define CLUSTER_DATA_END_ADDR    32'h103F_FFFF\n27: \n28: // MASTER PORT TO L2\n29: `define SOC_L2_START_ADDR        32'h1C00_0000\n30: `define SOC_L2_END_ADDR          32'h1FFF_FFFF\n31: \n32: // MASTER PORT TO L2\n33: `define SOC_L2_PRI_CH0_START_ADDR     32'h1C00_0000\n34: `define SOC_L2_PRI_CH0_END_ADDR       32'h1C00_8000\n35: \n36: `define SOC_L2_PRI_CH1_START_ADDR     32'h1C00_8000\n37: `define SOC_L2_PRI_CH1_END_ADDR       32'h1C01_0000\n38: \n39: `define SOC_L2_PRI_CH0_SCM_START_ADDR 32'h1C00_6000\n40: `define SOC_L2_PRI_CH0_SCM_END_ADDR   32'h1C00_8000\n41: \n42: `define ALIAS_SOC_L2_PRI_CH0_SCM_START_ADDR 32'h0000_6000\n43: `define ALIAS_SOC_L2_PRI_CH0_SCM_END_ADDR   32'h0000_8000\n44: \n45: \n46: // MASTER PORT TO SOC APB\n47: \n48: // REGION TO SOC APB PERIPHERALS\n49: `define SOC_APB_START_ADDR       32'h1A10_0000\n50: `define SOC_APB_END_ADDR         32'h1A10_FFFF\n51: \n52: // REGION TO FABRIC CONTROLLER PERIPHERAL INTERCONNECT PERIPHERALS\n53: `define FC_PERIPH_APB_START_ADDR 32'h1B20_0000\n54: `define FC_PERIPH_APB_END_ADDR   32'h1B20_3FFF\n55: \n56: // REGION TO FABRIC CONTROLLER APB PERIPHERALS\n57: `define FC_APB_START_ADDR        32'h1B30_0000\n58: `define FC_APB_END_ADDR          32'h1B3F_FFFF\n59: \n60: // MASTER PORT TO STDOUT(64KB)\n61: `define SOC_STDOUT_START_ADDR    32'h1A11_0000\n62: `define SOC_STDOUT_END_ADDR      32'h1A11_FFFF\n63: \n64: `define AXI_ASSIGN_SLAVE(lhs, rhs)        \\\n65:     assign lhs.aw_id     = rhs.aw_id;     \\\n66:     assign lhs.aw_addr   = rhs.aw_addr;   \\\n67:     assign lhs.aw_len    = rhs.aw_len;    \\\n68:     assign lhs.aw_size   = rhs.aw_size;   \\\n69:     assign lhs.aw_burst  = rhs.aw_burst;  \\\n70:     assign lhs.aw_lock   = rhs.aw_lock;   \\\n71:     assign lhs.aw_cache  = rhs.aw_cache;  \\\n72:     assign lhs.aw_prot   = rhs.aw_prot;   \\\n73:     assign lhs.aw_region = rhs.aw_region; \\\n74:     assign lhs.aw_user   = rhs.aw_user;   \\\n75:     assign lhs.aw_qos    = rhs.aw_qos;    \\\n76:     assign lhs.aw_valid  = rhs.aw_valid;  \\\n77:     assign rhs.aw_ready  = lhs.aw_ready;  \\\n78:                                           \\\n79:     assign lhs.ar_id     = rhs.ar_id;     \\\n80:     assign lhs.ar_addr   = rhs.ar_addr;   \\\n81:     assign lhs.ar_len    = rhs.ar_len;    \\\n82:     assign lhs.ar_size   = rhs.ar_size;   \\\n83:     assign lhs.ar_burst  = rhs.ar_burst;  \\\n84:     assign lhs.ar_lock   = rhs.ar_lock;   \\\n85:     assign lhs.ar_cache  = rhs.ar_cache;  \\\n86:     assign lhs.ar_prot   = rhs.ar_prot;   \\\n87:     assign lhs.ar_region = rhs.ar_region; \\\n88:     assign lhs.ar_user   = rhs.ar_user;   \\\n89:     assign lhs.ar_qos    = rhs.ar_qos;    \\\n90:     assign lhs.ar_valid  = rhs.ar_valid;  \\\n91:     assign rhs.ar_ready  = lhs.ar_ready;  \\\n92:                                           \\\n93:     assign lhs.w_data    = rhs.w_data;    \\\n94:     assign lhs.w_strb    = rhs.w_strb;    \\\n95:     assign lhs.w_last    = rhs.w_last;    \\\n96:     assign lhs.w_user    = rhs.w_user;    \\\n97:     assign lhs.w_valid   = rhs.w_valid;   \\\n98:     assign rh\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 8,
+      "tool": "read_file",
+      "args": {
+        "limit": 160,
+        "offset": 150,
+        "path": "rtl/pulpissimo/soc_domain.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"150:     output logic                             cluster_byp_o,\\n151: \\n152:     // EVENT BUS\\n153:     output logic [BUFFER_WIDTH-1:0]          cluster_events_wt_o,\\n154:     input  logic [BUFFER_WIDTH-1:0]          cluster_events_rp_i,\\n155:     output logic [EVNT_WIDTH-1:0]            cluster_events_da_o,\\n156: \\n157:     output logic                             dma_pe_evt_ack_o,\\n158:     input  logic                             dma_pe_evt_valid_i,\\n159: \\n160:     output logic                             dma_pe_irq_ack_o,\\n161:     input  logic                             dma_pe_irq_valid_i,\\n162: \\n163:     output logic                             pf_evt_ack_o,\\n164:     input logic                              pf_evt_valid_i,\\n165: \\n166:     // AXI4 SLAVE\\n167:     input  logic [7:0]                       data_slave_aw_writetoken_i,\\n168:     input  logic [AXI_ADDR_WIDTH-1:0]        data_slave_aw_addr_i,\\n169:     input  logic [2:0]                       data_slave_aw_prot_i,\\n170:     input  logic [3:0]                       data_slave_aw_region_i,\\n171:     input  logic [7:0]                       data_slave_aw_len_i,\\n172:     input  logic [2:0]                       data_slave_aw_size_i,\\n173:     input  logic [1:0]                       data_slave_aw_burst_i,\\n174:     input  logic                             data_slave_aw_lock_i,\\n175:     input  logic [3:0]                       data_slave_aw_cache_i,\\n176:     input  logic [3:0]                       data_slave_aw_qos_i,\\n177:     input  logic [AXI_ID_IN_WIDTH-1:0]       data_slave_aw_id_i,\\n178:     input  logic [AXI_USER_WIDTH-1:0]        data_slave_aw_user_i,\\n179:     output logic [7:0]                       data_slave_aw_readpointer_o,\\n180: \\n181:     input  logic [7:0]                       data_slave_ar_writetoken_i,\\n182:     input  logic [AXI_ADDR_WIDTH-1:0]        data_slave_ar_addr_i,\\n183:     input  logic [2:0]                       data_slave_ar_prot_i,\\n184:     input  logic [3:0]                       data_slave_ar_region_i,\\n185:     input  logic [7:0]                       data_slave_ar_len_i,\\n186:     input  logic [2:0]                       data_slave_ar_size_i,\\n187:     input  logic [1:0]                       data_slave_ar_burst_i,\\n188:     input  logic                             data_slave_ar_lock_i,\\n189:     input  logic [3:0]                       data_slave_ar_cache_i,\\n190:     input  logic [3:0]                       data_slave_ar_qos_i,\\n191:     input  logic [AXI_ID_IN_WIDTH-1:0]       data_slave_ar_id_i,\\n192:     input  logic [AXI_USER_WIDTH-1:0]        data_slave_ar_user_i,\\n193:     output logic [7:0]                       data_slave_ar_readpointer_o,\\n194: \\n195:     input  logic [7:0]                       data_slave_w_writetoken_i,\\n196:     input  logic [AXI_DATA_IN_WIDTH-1:0]     data_slave_w_data_i,\\n197:     input  logic [AXI_STRB_IN_WIDTH-1:0]     data_slave_w_strb_i,\\n198:     input  logic [AXI_USER_WIDTH-1:0]        data_slave_w_user_i,\\n199:     input  logic                             data_slave_w_last_i,\\n200:     output logic [7:0]                       data_slave_w_readpointer_o,\\n201: \\n202:     output logic [7:0]                       data_slave_r_writetoken_o,\\n203:     output logic [AXI_DATA_IN_WIDTH-1:0]     data_slave_r_data_o,\\n204:     output logic [1:0]                       data_slave_r_resp_o,\\n205:     output logic                             data_slave_r_last_o,\\n206:     output logic [AXI_ID_IN_WIDTH-1:0]       data_slave_r_id_o,\\n207:     output logic [AXI_USER_WIDTH-1:0]        data_slave_r_user_o,\\n208:     input  logic [7:0]                       data_slave_r_readpointer_i,\\n209: \\n210:     output logic [7:0]                       data_slave_b_writetoken_o,\\n211:     output logic [1:0]                       data_slave_b_resp_o,\\n212:     output logic [AXI_ID_IN_WIDTH-1:0]       data_slave_b_id_o,\\n213:     output logic [AXI_USER_WIDTH-1:0]\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 8,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "query": "lint_debug|s_lint_debug_bus|jtag_lint|l2|interconnect|xbar|tcdm"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 9,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "query": "lint_debug"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:351: XBAR_TCDM_BUS s_lint_debug_bus ();\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:725: .lint_debug       ( s_lint_debug_bus    ),\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:749: .jtag_lint_master(s_lint_debug_bus)",
+      "truncated": false
+    },
+    {
+      "step": 9,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "query": "s_lint_debug_bus"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:351: XBAR_TCDM_BUS s_lint_debug_bus ();\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:725: .lint_debug       ( s_lint_debug_bus    ),\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:749: .jtag_lint_master(s_lint_debug_bus)",
+      "truncated": false
+    },
+    {
+      "step": 9,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "query": "lint_jtag"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:352: XBAR_TCDM_BUS s_lint_jtag_bus ();\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:737: lint_jtag_wrap i_lint_jtag (",
+      "truncated": false
+    },
+    {
+      "step": 9,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "query": "tcdm"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:351: XBAR_TCDM_BUS s_lint_debug_bus ();\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:352: XBAR_TCDM_BUS s_lint_jtag_bus ();\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:353: XBAR_TCDM_BUS s_lint_udma_tx_bus ();\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:354: XBAR_TCDM_BUS s_lint_udma_rx_bus ();\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:355: XBAR_TCDM_BUS s_lint_fc_data_bus ();\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:356: XBAR_TCDM_BUS s_lint_fc_instr_bus ();\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:357: XBAR_TCDM_BUS s_lint_hwpe_bus[NB_HWPE_PORTS-1:0]();",
+      "truncated": false
+    },
+    {
+      "step": 9,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/adv_dbg_if/rtl",
+        "query": "debug_select_i"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl",
+      "error": null,
+      "content": "ips/adv_dbg_if/rtl/adbg_lintonly_top.sv:35: input  logic                       debug_select_i,\nips/adv_dbg_if/rtl/adbg_lintonly_top.sv:85: else if(debug_select_i && select_cmd && update_dr_i && !select_inhibit)       // Chain select\nips/adv_dbg_if/rtl/adbg_lintonly_top.sv:107: else if(debug_select_i && shift_dr_i)\nips/adv_dbg_if/rtl/adbg_top.sv:65: input  logic                       debug_select_i,\nips/adv_dbg_if/rtl/adbg_top.sv:169: else if(debug_select_i && select_cmd && update_dr_i && !select_inhibit)       // Chain select\nips/adv_dbg_if/rtl/adbg_top.sv:191: else if(debug_select_i && shift_dr_i)\nips/adv_dbg_if/rtl/adv_dbg_if.sv:172: .debug_select_i(s_debug_select),",
+      "truncated": false
+    },
+    {
+      "step": 10,
+      "tool": "model_message",
+      "args": {},
+      "status": "ok",
+      "content": "```json\n{\n  \"scope_id\": \"adv_dbg_if_pulpissimo_permission_scope\",\n  \"results\": [\n    {\n      \"obligation_id\": \"PERM-ADVDBG-AXI-001\",\n      \"status\": \"inconclusive\",\n      \"subject\": \"external JTAG/debug requester reaching the advanced debug AXI module\",\n      \"operation\": \"read/write via AXI master\",\n      \"object\": \"AXI address space addressed by adbg_axi_biu.addr_reg / axi_master_aw_addr / axi_master_ar_addr\",\n      \"expected_guard\": \"debug authentication/authorization, lifecycle/debug-enable, or address-range guard before AXI valid is asserted\",\n      \"observed_behavior\": \"Within the advanced debug RTL, AXI transactions are generated from JTAG-shifted command/address/data when module_cmd, module_select_i, update_dr_i/capture_dr_i, and BIU readiness conditions are met. The BIU latches addr_i/data_i on strobe_i && rdy_o and then asserts axi_master_aw_valid or axi_master_ar_valid on start_toggle. No address-range check, privilege check, lifecycle/debug-enable input, or authentication signal is visible at the AXI issue point. However, in the visible PULPissimo integration searched/read, adv_dbg_if/adbg_top AXI instantiation was not found; the SoC-visible JTAG path appears to use lint_jtag_wrap instead. Therefore the AXI-module behavior is a candidate issue at module level, but SoC reachability is not proven from the inspected top-level files.\",\n      \"path\": \"adbg_tap_top/adv_dbg_if -> adbg_top -> adbg_axi_module -> adbg_axi_biu -> AXI master ports, but current PULPissimo top-level reachability not established\",\n      \"state_condition\": \"adbg_top resets module_id_reg to 0, selecting AXI by default inside adbg_top; input_shift_reg shifts only when debug_select_i && shift_dr_i; module_id_reg updates on debug_select_i && select_cmd && update_dr_i && !select_inhibit. adbg_axi_module starts read/write bursts from STATE_idle when module_cmd && module_select_i && update_dr_i && burst_read/burst_write. adbg_axi_biu starts AXI when strobe_i && rdy_o toggles str_sync and the AXI-domain FSM observes start_toggle.\",\n      \"impact\": \"If this AXI debug module is connected to a SoC fabric, an external JTAG requester that can select DEBUG and issue module commands could read or write arbitrary 32-bit addresses exposed on the AXI master, potentially modifying protected memory/registers or extracting protected data. Impact is not confirmed for the inspected PULPissimo integration because the AXI debug interface was not found instantiated there.\",\n      \"rtl_evidence\": [\n        \"ips/adv_dbg_if/rtl/adbg_top.sv:165-170: module_id_reg resets to 5'h0 and updates from JTAG input when debug_select_i && select_cmd && update_dr_i && !select_inhibit.\",\n        \"ips/adv_dbg_if/rtl/adbg_top.sv:173-179: module_id_reg == 0 selects module_selects = 2'b01, connected to i_dbg_axi at lines 200-219.\",\n        \"ips/adv_dbg_if/rtl/adbg_axi_module.sv:584-587: STATE_idle transitions to read or write states when module_cmd && module_select_i && update_dr_i && burst_read/burst_write.\",\n        \"ips/adv_dbg_if/rtl/adbg_axi_module.sv:763-770: STATE_Rbegin asserts biu_strobe and increments address for a read.\",\n        \"ips/adv_dbg_if/rtl/adbg_axi_biu.sv:323-347: strobe_i && rdy_o latches sel_reg, addr_reg, data_in_reg, wr_reg and toggles str_sync.\",\n        \"ips/adv_dbg_if/rtl/adbg_axi_biu.sv:380-414: AXI address and attributes are assigned directly; no range/auth check is present.\",\n        \"ips/adv_dbg_if/rtl/adbg_axi_biu.sv:520-536: start_toggle drives S_AXIADDR; wr_reg selects aw_valid vs ar_valid.\",\n        \"Search for adv_dbg_if/jtag_axireg in visible scope did not show a PULPissimo instantiation of adv_dbg_if; lint_jtag_wrap is the located SoC JTAG debug wrapper.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM-ADVDBG-LINT-002\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"external JTAG LINT debug requester\",\n      \"operation\": \"read/write via LINT debug bus\",\n      \"object\": \"SoC LINT/TCDM debug bus targets reachable through s_lint_debug_bus\",\n      \"expected_guard\": \"debug authorization plus address-range/access policy before lint_req_o/lint_wen_o reaches SoC targets\",\n      \"observed_behavior\": \"The SoC instantiates lint_jtag_wrap, driven by JTAG TAP scan signals and axireg_sel. The wrapper directly connects adbg_lintonly_top/adbg_lint_module/adbg_lint_biu outputs to s_lint_debug_bus. The BIU accepts JTAG-derived address/data/word-size on strobe_i && rdy_o, drives lint_add_o/lint_wdata_o/lint_be_o, and asserts lint_req_o in S_DATA. The only visible gating is TAP selection/module selection and bus grant/valid handshaking; no debug authentication, lifecycle input, requester identity guard, or address-range policy is visible in lint_jtag_wrap or adbg_lint_biu before the request enters s_lint_debug_bus.\",\n      \"path\": \"external JTAG pins -> safe_domain/jtag_tap_top -> soc_domain/pulp_soc JTAG scan signals -> lint_jtag_wrap -> adbg_lintonly_top -> adbg_lint_module -> adbg_lint_biu -> s_lint_debug_bus\",\n      \"state_condition\": \"lint_jtag_wrap uses lint_select_i/jtag_axireg_sel_i as debug_select_i. adbg_lint_biu resets rdy_o to 1, latches addr/data/wr on strobe_i && rdy_o, toggles start, then in clk_i domain asserts lint_req_o in S_DATA and clears lint_wen_o for writes when wr_reg is set. Completion depends on lint_gnt_i and lint_r_valid_i.\",\n      \"impact\": \"External JTAG can inject LINT read/write requests into the SoC debug LINT bus. Because the inspected wrapper/BIU does not constrain address or authorize the requester, a JTAG user may read or modify L2/TCDM or debug-bus-accessible SoC state reachable by s_lint_debug_bus.\",\n      \"rtl_evidence\": [\n        \"rtl/pulpissimo/pulpissimo.sv:566-583: external/safe-domain JTAG signals connect to safe_domain outputs including axireg_sel_o, axireg_tdi_o, axireg_tdo_i.\",\n        \"rtl/pulpissimo/jtag_tap_top.sv:63-90: tap_top receives external TCK/TMS/TDI/TRST and emits jtag_shift/update/capture and axireg_sel_o; dbg_axi_scan_in_o is s_scan_i and axireg_out_i feeds scan output.\",\n        \"ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:737-750: lint_jtag_wrap connects jtag_tck_i, jtag_axireg_tdi_i, jtag_trst_ni, jtag_shift/update/capture, jtag_axireg_sel_i, and s_lint_debug_bus.\",\n        \"ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv:34-67: adbg_lintonly_top connects debug_select_i to lint_select_i and directly maps lint_req/add/wen/wdata/be to jtag_lint_master.\",\n        \"ips/adv_dbg_if/rtl/adbg_lint_biu.sv:246-259: strobe_i && rdy_o latches JTAG-originated address/data/write state and toggles str_sync.\",\n        \"ips/adv_dbg_if/rtl/adbg_lint_biu.sv:293-307: lint_add_o, lint_wdata_o, lint_be_o, lint_aux_o are assigned from internal registers; aux fixed zero.\",\n        \"ips/adv_dbg_if/rtl/adbg_lint_biu.sv:372-399: start_toggle causes S_DATA; lint_req_o asserted; lint_wen_o set low for writes; transitions only depend on grant/valid.\",\n        \"ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:351 and 725: s_lint_debug_bus is declared and connected as .lint_debug to the SoC interconnect.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM-ADVDBG-TAP-003\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"external JTAG TAP controller\",\n      \"operation\": \"select/enable debug module and route scan data\",\n      \"object\": \"debug module selection controls and downstream bus-master capability\",\n      \"expected_guard\": \"only authorized/lifecycle-enabled debug instructions should select bus-master/debug modules; unselected modules should not drive TDO or issue transactions\",\n      \"observed_behavior\": \"In adbg_tap_top, the DEBUG instruction value decodes directly to debug_select. TDO mux routes debug_tdo_i when latched_jtag_ir == DEBUG. No lifecycle/debug-enable/auth input is present in the TAP port list. There is a passchk/pass/correct mechanism in the TAP FSM before leaving run_test_idle for select_dr_scan, but it is not exposed as a SoC authorization/lifecycle signal and the decode itself is simply instruction-based. In the PULPissimo jtag_tap_top wrapper\n[TRUNCATED]",
+      "truncated": true
+    }
+  ]
+}

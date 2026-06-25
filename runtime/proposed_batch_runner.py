@@ -41,6 +41,7 @@ class ProposedBatchConfig:
     input_scopes: list[ProposedBatchInputScopeConfig]
     knowledge_base_path: str | None = None
     max_tool_result_chars: int = 8_000
+    request_timeout: float | None = 600
 
 
 class ProposedBatchRunner:
@@ -63,6 +64,12 @@ class ProposedBatchRunner:
         manifest_path = batch_dir / "batch_manifest.json"
         status_path = batch_dir / "batch_status.jsonl"
         config_copy_path = batch_dir / "batch_config.yaml"
+        existing_status_rows = _load_status_rows(status_path)
+        successful_run_ids = {
+            str(row.get("run_id"))
+            for row in existing_status_rows
+            if row.get("batch_id") == config.batch_id and row.get("status") == "success"
+        }
 
         if source_config_path:
             shutil.copyfile(source_config_path, config_copy_path)
@@ -82,16 +89,18 @@ class ProposedBatchRunner:
             "temperature": config.temperature,
             "max_tokens": config.max_tokens,
             "max_closure_iterations": config.max_closure_iterations,
+            "request_timeout": config.request_timeout,
             "models": [model.__dict__ for model in config.models],
             "input_scopes": [scope.__dict__ for scope in config.input_scopes],
             "started_at": _now_iso(),
-            "runs": [],
+            "runs": existing_status_rows.copy(),
         }
 
         total_runs = len(config.models) * len(config.input_scopes) * config.repetitions
         current_run = 0
         success_count = 0
         failed_count = 0
+        skipped_count = 0
 
         print(
             f"[proposed] batch_id={config.batch_id} total_runs={total_runs} "
@@ -113,6 +122,16 @@ class ProposedBatchRunner:
                         / model_cfg.model_id
                         / scope_cfg.scope_id
                     )
+                    if full_run_id in successful_run_ids:
+                        skipped_count += 1
+                        print(
+                            f"[proposed][{current_run}/{total_runs}] SKIP  "
+                            f"model={model_cfg.model_id} scope={scope_cfg.scope_id} "
+                            f"rep={rep} existing_success=true",
+                            flush=True,
+                        )
+                        continue
+
                     run_config = ProposedRunConfig(
                         run_id=run_id,
                         provider=model_cfg.provider,  # type: ignore[arg-type]
@@ -125,6 +144,7 @@ class ProposedBatchRunner:
                         max_steps=config.max_steps,
                         max_closure_iterations=config.max_closure_iterations,
                         max_tool_result_chars=config.max_tool_result_chars,
+                        request_timeout=config.request_timeout,
                     )
 
                     started_at = _now_iso()
@@ -190,7 +210,8 @@ class ProposedBatchRunner:
         manifest["completed_at"] = _now_iso()
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         print(
-            f"[proposed] batch completed: success={success_count} failed={failed_count} total={total_runs}",
+            f"[proposed] batch completed: success={success_count} failed={failed_count} "
+            f"skipped={skipped_count} total={total_runs}",
             flush=True,
         )
         print(f"[proposed] status_file={status_path}", flush=True)
@@ -210,6 +231,7 @@ class ProposedBatchRunner:
             max_tokens=int(raw.get("max_tokens", 8192)),
             max_closure_iterations=int(raw.get("max_closure_iterations", 1)),
             max_tool_result_chars=int(raw.get("max_tool_result_chars", 8_000)),
+            request_timeout=_optional_float(raw.get("request_timeout", 600)),
             knowledge_base_path=str(raw["knowledge_base_path"]) if raw.get("knowledge_base_path") else None,
             models=[
                 ProposedBatchModelConfig(
@@ -268,6 +290,7 @@ def _batch_config_to_dict(config: ProposedBatchConfig) -> dict[str, Any]:
         "max_tokens": config.max_tokens,
         "max_closure_iterations": config.max_closure_iterations,
         "max_tool_result_chars": config.max_tool_result_chars,
+        "request_timeout": config.request_timeout,
         "models": [model.__dict__ for model in config.models],
         "input_scopes": [scope.__dict__ for scope in config.input_scopes],
     }
@@ -278,10 +301,31 @@ def _append_jsonl(path: Path, row: dict[str, Any]) -> None:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _load_status_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
 def _now_iso() -> str:
     return datetime.now().astimezone().isoformat()
 
 
 def _default_project_root() -> Path:
     return Path(__file__).resolve().parents[1]
-

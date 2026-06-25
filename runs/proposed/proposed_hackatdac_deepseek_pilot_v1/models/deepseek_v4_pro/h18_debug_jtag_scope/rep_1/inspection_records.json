@@ -1,0 +1,720 @@
+{
+  "scope_id": "pulpissimo_debug_scope",
+  "obligations": [
+    {
+      "obligation_id": "OBL-001",
+      "reason": "The adbg_axi_module translates JTAG debug commands to AXI bus transactions. Without a permission guard, an external debugger could read/write any memory/peripheral, bypassing CPU privilege protections.",
+      "subject": "JTAG debug interface (adbg_tap_top)",
+      "operation": "read/write memory via AXI",
+      "object": "system memory and peripherals on AXI bus",
+      "expected_guard": "debug enable state or authentication signal that gates AXI transaction generation",
+      "candidate_path": "adbg_tap_top -> adbg_top -> adbg_axi_module -> adbg_axi_biu -> AXI master",
+      "state_conditions_to_check": [
+        "debug_enable bit value",
+        "authenticated signal",
+        "reset default of debug control"
+      ],
+      "required_evidence_slots": [
+        "subject identification",
+        "operation enable",
+        "guard signals",
+        "path connectivity"
+      ],
+      "files_or_modules_to_inspect": [
+        "adbg_axi_module.sv",
+        "adbg_axi_biu.sv",
+        "adbg_top.sv",
+        "adbg_tap_top.v"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "Whether debug enable is implemented and its default value needs confirmation."
+    },
+    {
+      "obligation_id": "OBL-002",
+      "reason": "The adbg_lint_module provides a LINT bus interface for debug. Without a permission check, an attacker could access TCDM memory or peripherals, potentially reading secrets or modifying configuration.",
+      "subject": "JTAG debug interface",
+      "operation": "read/write internal memory via LINT",
+      "object": "TCDM/LINT-connected memory and peripherals",
+      "expected_guard": "debug enable or authentication signal that gates LINT transaction generation",
+      "candidate_path": "adbg_tap_top -> adbg_top -> adbg_lint_module -> adbg_lint_biu -> LINT bus",
+      "state_conditions_to_check": [
+        "debug_enable",
+        "any module-specific inhibit"
+      ],
+      "required_evidence_slots": [
+        "subject identification",
+        "operation enable logic",
+        "guard signal in adbg_lint_module"
+      ],
+      "files_or_modules_to_inspect": [
+        "adbg_lint_module.sv",
+        "adbg_lint_biu.sv",
+        "adbg_top.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "Is there a global debug enable that covers both AXI and LINT? Need to trace the inhibit or enable signal."
+    },
+    {
+      "obligation_id": "OBL-003",
+      "reason": "The adbg_top module selects which debug module (AXI, LINT, etc.) is active based on TAP command. If module_select_i is not gated by a security state, a debugger could activate a debug module that accesses sensitive resources without authorization.",
+      "subject": "JTAG TAP controller (adbg_tap_top)",
+      "operation": "select debug module (AXI/LINT)",
+      "object": "debug module activation (module_select_i and top_inhibit_o signals)",
+      "expected_guard": "a lock or permission register that restricts which modules can be selected; or authenticated state required before able to select",
+      "candidate_path": "adbg_tap_top -> data_register_i -> module_select_i -> adbg_top",
+      "state_conditions_to_check": [
+        "module select gating logic",
+        "inhibit signal generation",
+        "lock bits in TAP register"
+      ],
+      "required_evidence_slots": [
+        "subject identification",
+        "operation enable",
+        "guard signals in adbg_tap_top/adbg_top"
+      ],
+      "files_or_modules_to_inspect": [
+        "adbg_tap_top.v",
+        "adbg_top.sv",
+        "adv_dbg_if.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "May not be a direct permission flaw if module selection is benign, but cross-module inhibition could impact security."
+    },
+    {
+      "obligation_id": "OBL-004",
+      "reason": "The adbg_or1k_status_reg contains debug control states (e.g., stop, reset, debug enable). If these bits are writable without a lock or one-time write protection, a debugger could disable debug locks or enable debug after security has locked it down.",
+      "subject": "JTAG debug interface",
+      "operation": "write to debug status/control register",
+      "object": "debug control bits in adbg_or1k_status_reg",
+      "expected_guard": "sticky lock bit that, once set, prevents further writes to critical debug enable bits; or authenticated-only access",
+      "candidate_path": "on-chip debug logic -> adbg_or1k_status_reg register file",
+      "state_conditions_to_check": [
+        "reset value of lock bit",
+        "write condition for lock bit",
+        "how lock bit gates writes to other status bits"
+      ],
+      "required_evidence_slots": [
+        "register description",
+        "write logic",
+        "lock bit signal",
+        "reset state"
+      ],
+      "files_or_modules_to_inspect": [
+        "adbg_or1k_status_reg.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to verify if the status register actually contains security-critical bits and if a lock is implemented."
+    },
+    {
+      "obligation_id": "OBL-005",
+      "reason": "If after reset the debug interface is enabled by default, an attacker could use JTAG before any software lock-down, allowing early-stage compromise. Expected that debug is disabled until explicitly enabled after secure boot.",
+      "subject": "JTAG debug interface (adbg_tap_top)",
+      "operation": "reset (power-on or warm)",
+      "object": "debug enable state (e.g., dbg_en, debug_module_clk_enable)",
+      "expected_guard": "reset default of debug enable = 0 (disabled); or requires authenticated sequence to enable",
+      "candidate_path": "reset signal (trstn_i) -> debug enable register -> gate debug paths",
+      "state_conditions_to_check": [
+        "reset value of any debug_enable register",
+        "synchronizer/initialization logic"
+      ],
+      "required_evidence_slots": [
+        "reset logic for debug control",
+        "register reset value",
+        "path to debug module enable"
+      ],
+      "files_or_modules_to_inspect": [
+        "adbg_tap_top.v",
+        "adbg_top.sv",
+        "adbg_axi_module.sv",
+        "adbg_lint_module.sv",
+        "adv_dbg_if.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "The SoC might have a separate secure boot that disables debug later; but hardware default should be safe."
+    },
+    {
+      "obligation_id": "OBL-006",
+      "reason": "The debug LINT bus connects to both soc_domain and safe_domain. A debug-initiated transaction should not access safe_domain resources unless explicitly authorized, else it bypasses domain isolation.",
+      "subject": "Debug LINT master (adbg_lint_module)",
+      "operation": "initiate LINT bus read/write",
+      "object": "safe_domain memory/peripherals",
+      "expected_guard": "address range checker or security attribute that blocks debug transactions targeting safe_domain",
+      "candidate_path": "adbg_lint_module -> LINT interconnect -> safe_domain",
+      "state_conditions_to_check": [
+        "address decoding for safe_domain",
+        "debug attribute on bus can bypass isolation",
+        "any domain crossing permission signal"
+      ],
+      "required_evidence_slots": [
+        "address map of safe_domain",
+        "bus firewall/gate",
+        "debug transaction attribute (e.g., lint_aux_o)"
+      ],
+      "files_or_modules_to_inspect": [
+        "safe_domain.sv",
+        "soc_domain.sv",
+        "pulpissimo.sv",
+        "adbg_lint_module.sv",
+        "adbg_lint_biu.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need to verify if safe_domain has any bus-level firewall; otherwise this is a valid concern."
+    }
+  ],
+  "inspection_records": [
+    {
+      "obligation_id": "OBL-001",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "JTAG debug interface (adbg_tap_top)",
+        "operation": "read/write memory via AXI",
+        "object": "system memory and peripherals on AXI bus",
+        "expected_guard": "debug enable state or authentication signal that gates AXI transaction generation",
+        "observed_behavior": "adbg_axi_module accepts JTAG commands and initiates AXI transactions unconditionally when selected; no debug_enable or authentication input is present. The module's FSM transitions directly from idle to burst operations upon command decode, without checking any permission signal.",
+        "path": "adbg_tap_top -> adbg_top -> adbg_axi_module -> adbg_axi_biu -> AXI master",
+        "state_condition": "After reset, module_id_reg is 0, selecting the AXI module. Once a burst read/write command is received, the state machine starts AXI transactions without any enable check.",
+        "impact": "An external debugger can read/write any memory or peripheral on the AXI bus, completely bypassing CPU privilege protections and secure boot.",
+        "rtl_evidence": [
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+            "line": 218,
+            "description": "module_selects[0] connected directly to adbg_axi_module module_select_i without gating."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+            "lines": "222-227",
+            "description": "Command decoding uses operation_in without any security check; no enable signal observed."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+            "lines": "776-830",
+            "description": "State machine transitions from STATE_Rstatus to STATE_Rburst to start read, and from STATE_Wwait to STATE_Wburst for writes, both without a permission condition."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_defines.v",
+            "lines": "1-75",
+            "description": "No debug enable define present in the global defines file."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "",
+      "candidate_finding": "Missing debug enable guard: AXI debug module generates bus transactions without any authentication or permission check. This allows unrestricted debug access to all memory and peripherals.",
+      "notes": ""
+    },
+    {
+      "obligation_id": "OBL-002",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "JTAG debug interface",
+        "operation": "read/write internal memory via LINT",
+        "object": "TCDM/LINT-connected memory and peripherals",
+        "expected_guard": "debug enable or authentication signal that gates LINT transaction generation",
+        "observed_behavior": "adbg_lint_module decodes JTAG commands and initiates LINT bus transactions without any permission signal. The module's state machine starts burst reads/writes immediately upon command, and no debug_enable input exists in the port list.",
+        "path": "adbg_tap_top -> adbg_top -> adbg_lint_module -> adbg_lint_biu -> LINT bus",
+        "state_condition": "After reset, the LINT module is idle but ready; when selected via JTAG, a burst command triggers the state machine to start LINT transactions without checking any enable bit.",
+        "impact": "An attacker can access internal TCDM memory and peripherals via JTAG, reading secrets or modifying configuration.",
+        "rtl_evidence": [
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+            "lines": "184-212",
+            "description": "Command decoding and operation latch without any guard."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+            "lines": "438-466",
+            "description": "Next-state logic for burst reads/writes transitions solely on command and TAP state, no permission check."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+            "lines": "22-52",
+            "description": "Module port list shows no debug_enable or authenticated input."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_defines.v",
+            "lines": "1-75",
+            "description": "No debug enable macro defined."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "",
+      "candidate_finding": "Missing debug enable guard for LINT debug module: JTAG-initiated LINT transactions can proceed without any authentication, exposing internal bus resources.",
+      "notes": ""
+    },
+    {
+      "obligation_id": "OBL-003",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "JTAG TAP controller (adbg_tap_top)",
+        "operation": "select debug module (AXI/LINT)",
+        "object": "debug module activation (module_select_i and top_inhibit_o signals)",
+        "expected_guard": "a lock or permission register that restricts which modules can be selected; or authenticated state required before able to select",
+        "observed_behavior": "Module selection is performed by writing to the input shift register with a select command, and the module_id_reg is updated directly on update_dr_i if !select_inhibit. There is no lock bit or authentication required to change the selected module. The select_inhibit signal only prevents switching during ongoing burst transactions, not for security.",
+        "path": "adbg_tap_top -> data_register_i -> module_select_i -> adbg_top",
+        "state_condition": "When debug_select_i is asserted and a select command is present, module_id_reg is updated unconditionally (after reset it is 0, selecting AXI). No security state gates this update.",
+        "impact": "An attacker can switch the active debug module to any supported module, including ones with access to sensitive resources, without any authorization.",
+        "rtl_evidence": [
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+            "lines": "158-170",
+            "description": "module_id_reg update logic: condition debug_select_i && select_cmd && update_dr_i && !select_inhibit. No lock or permission bit is checked."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+            "lines": "173-178",
+            "description": "module_selects are derived directly from module_id_reg; no additional gating."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_defines.v",
+            "lines": "50-53",
+            "description": "Defines for module IDs (WISHBONE, CPU0, CPU1, JSP) but no lock configuration."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "",
+      "candidate_finding": "Missing module selection lock: No authentication or sticky lock prevents an attacker from switching the active debug module via JTAG, allowing access to any debug interface.",
+      "notes": ""
+    },
+    {
+      "obligation_id": "OBL-004",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "JTAG debug interface",
+        "operation": "write to debug status/control register",
+        "object": "debug control bits in adbg_or1k_status_reg",
+        "expected_guard": "sticky lock bit that, once set, prevents further writes to critical debug enable bits; or authenticated-only access",
+        "observed_behavior": "The adbg_or1k_status_reg module has a write enable (we_i) input; data_i is written directly to internal control registers (ctrl_reg_o). No lock bit or write-once mechanism was found. The register can be rewritten at any time via debug commands.",
+        "path": "on-chip debug logic -> adbg_or1k_status_reg register file",
+        "state_condition": "When we_i is asserted (driven by OR1K debug module), the control register is updated. No lock condition gates these writes.",
+        "impact": "Debug control bits (e.g., stop, reset, debug enable) can be modified by an attacker at will, potentially disabling security locks or re-enabling debug after lock-down.",
+        "rtl_evidence": [
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+            "lines": "68-166",
+            "description": "Module port list and inferred logic: we_i directly enables register update; no lock bit present."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_or1k_defines.v",
+            "lines": "1-83",
+            "description": "Defines file includes no lock bit define."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "File content truncated; full register write logic and lock implementation could not be confirmed from available snippet, but no lock signal was observed in the port list or logic.",
+      "candidate_finding": "Missing lock on debug status register: writes to critical debug control bits are unprotected, allowing unauthorized modification.",
+      "notes": "Further, unobserved logic may contain a lock; based on available evidence, no guard found."
+    },
+    {
+      "obligation_id": "OBL-005",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "JTAG debug interface (adbg_tap_top)",
+        "operation": "reset (power-on or warm)",
+        "object": "debug enable state (e.g., dbg_en, debug_module_clk_enable)",
+        "expected_guard": "reset default of debug enable = 0 (disabled); or requires authenticated sequence to enable",
+        "observed_behavior": "No debug enable register or global enable signal was found in the debug path. After reset, the adbg_top module initializes module_id_reg to 0, selecting the AXI module, and all debug sub-modules are ready to process JTAG commands immediately. There is no hardware default that keeps debug disabled at reset.",
+        "path": "reset signal (trstn_i) -> debug enable register -> gate debug paths",
+        "state_condition": "On trstn_i negedge, module_id_reg <= 0, which selects the AXI module. No other state disables debug operation; debug modules are fully operational once clock and reset are stable.",
+        "impact": "An attacker can access the debug interface immediately after reset, before any secure boot software has a chance to lock down debug, enabling early-stage compromise.",
+        "rtl_evidence": [
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+            "lines": "165-168",
+            "description": "Reset of module_id_reg to 0, enabling AXI module."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+            "lines": "44-67",
+            "description": "Port list of adbg_top: no debug_enable or lock input."
+          },
+          {
+            "file": "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+            "lines": "15-116",
+            "description": "Top-level debug interface wrapper shows no debug enable input from SoC."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "",
+      "candidate_finding": "Debug enable not default-disabled at reset: debug modules are active immediately after reset, allowing JTAG access before secure boot.",
+      "notes": ""
+    },
+    {
+      "obligation_id": "OBL-006",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "Debug LINT master (adbg_lint_module)",
+        "operation": "initiate LINT bus read/write",
+        "object": "safe_domain memory/peripherals",
+        "expected_guard": "address range checker or security attribute that blocks debug transactions targeting safe_domain",
+        "observed_behavior": "The LINT debug bus (lint_jtag_wrap) connects the debug module directly to the system LINT interconnect without any address filtering or firewall. No bus-level security attribute or domain crossing gate was found in the path to safe_domain.",
+        "path": "adbg_lint_module -> LINT interconnect -> safe_domain",
+        "state_condition": "Once a debug burst command is issued, the LINT master places an address on the bus. No check is performed to restrict addresses to soc_domain only; safe_domain regions are accessible if physically connected.",
+        "impact": "A debugger can access safe_domain memory and peripherals, breaking domain isolation and potentially compromising security-critical functions.",
+        "rtl_evidence": [
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+            "lines": "14-69",
+            "description": "Direct connection from adbg_lintonly_top to XBAR_TCDM_Bus, no firewall instantiation."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+            "lines": "351-354",
+            "description": "s_lint_jtag_bus connected to interconnect; no domain isolation logic visible."
+          },
+          {
+            "file": "rtl/pulpissimo/safe_domain.sv",
+            "lines": "1-560",
+            "description": "safe_domain module no observed debug access control input; bus connection appears unfiltered."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Full safe_domain bus firewall logic not inspected; but based on the lint_jtag_wrap and pulp_soc connectivity, no address-range check is apparent.",
+      "candidate_finding": "No bus firewall for debug LINT transactions to safe_domain; debug-initiated accesses can reach safe resources, violating domain isolation.",
+      "notes": ""
+    }
+  ],
+  "tool_observations": [
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "path": "ips/adv_dbg_if/rtl/adbg_defines.v"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_defines.v",
+      "error": null,
+      "content": "//////////////////////////////////////////////////////////////////////\n////                                                              ////\n////  adbg_defines.v                                              ////\n////                                                              ////\n////                                                              ////\n////  This file is part of the Advanced Debug Interface.          ////\n////                                                              ////\n////  Author(s):                                                  ////\n////       Nathan Yawn (nathan.yawn@opencores.org)                ////\n////                                                              ////\n////                                                              ////\n////                                                              ////\n//////////////////////////////////////////////////////////////////////\n////                                                              ////\n//// Copyright (C) 2008 - 2010 Authors                            ////\n////                                                              ////\n//// This source file may be used and distributed without         ////\n//// restriction provided that this copyright statement is not    ////\n//// removed from the file and that any derivative work contains  ////\n//// the original copyright notice and the associated disclaimer. ////\n////                                                              ////\n//// This source file is free software; you can redistribute it   ////\n//// and/or modify it under the terms of the GNU Lesser General   ////\n//// Public License as published by the Free Software Foundation; ////\n//// either version 2.1 of the License, or (at your option) any   ////\n//// later version.                                               ////\n////                                                              ////\n//// This source is distributed in the hope that it will be       ////\n//// useful, but WITHOUT ANY WARRANTY; without even the implied   ////\n//// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      ////\n//// PURPOSE.  See the GNU Lesser General Public License for more ////\n//// details.                                                     ////\n////                                                              ////\n//// You should have received a copy of the GNU Lesser General    ////\n//// Public License along with this source; if not, download it   ////\n//// from http://www.opencores.org/lgpl.shtml                     ////\n////                                                              ////\n//////////////////////////////////////////////////////////////////////\n\n\n// Length of the MODULE ID register\n`define\tDBG_TOP_MODULE_ID_LENGTH\t2\n\n// How many modules can be supported by the module id length\n`define     DBG_TOP_MAX_MODULES           4\n\n// Chains\n`define DBG_TOP_WISHBONE_DEBUG_MODULE  2'h0\n`define DBG_TOP_CPU0_DEBUG_MODULE      2'h1\n`define DBG_TOP_CPU1_DEBUG_MODULE      2'h2\n`define DBG_TOP_JSP_DEBUG_MODULE       2'h3\n\n// Length of data\n`define DBG_TOP_MODULE_DATA_LEN  64\n\n\n// If WISHBONE sub-module is supported uncomment the following line\n`define DBG_WISHBONE_SUPPORTED\n\n// If CPU_0 sub-module is supported uncomment the following line\n`define DBG_CPU0_SUPPORTED\n\n// If CPU_1 sub-module is supported uncomment the following line\n//`define DBG_CPU1_SUPPORTED\n\n// To include the JTAG Serial Port (JSP), uncomment the following line\n`define DBG_JSP_SUPPORTED  \n\n// Define this if you intend to use the JSP in a system with multiple\n// devices on the JTAG chain\n`define ADBG_JSP_SUPPORT_MULTI\n\n// If this is defined, status bits will be skipped on burst\n// reads and writes to improve download speeds.\n`define ADBG_USE_HISPEED\n",
+      "truncated": false
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "path": "ips/adv_dbg_if/rtl/adbg_tap_defines.v"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_tap_defines.v",
+      "error": null,
+      "content": "//////////////////////////////////////////////////////////////////////\n////                                                              ////\n////  tap_defines.v                                               ////\n////                                                              ////\n////                                                              ////\n////  This file is part of the JTAG Test Access Port (TAP)        ////\n////  http://www.opencores.org/projects/jtag/                     ////\n////                                                              ////\n////  Author(s):                                                  ////\n////       Igor Mohor (igorm@opencores.org)                       ////\n////                                                              ////\n////                                                              ////\n////  All additional information is avaliable in the README.txt   ////\n////  file.                                                       ////\n////                                                              ////\n//////////////////////////////////////////////////////////////////////\n////                                                              ////\n//// Copyright (C) 2000 - 2003 Authors                            ////\n////                                                              ////\n//// This source file may be used and distributed without         ////\n//// restriction provided that this copyright statement is not    ////\n//// removed from the file and that any derivative work contains  ////\n//// the original copyright notice and the associated disclaimer. ////\n////                                                              ////\n//// This source file is free software; you can redistribute it   ////\n//// and/or modify it under the terms of the GNU Lesser General   ////\n//// Public License as published by the Free Software Foundation; ////\n//// either version 2.1 of the License, or (at your option) any   ////\n//// later version.                                               ////\n////                                                              ////\n//// This source is distributed in the hope that it will be       ////\n//// useful, but WITHOUT ANY WARRANTY; without even the implied   ////\n//// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      ////\n//// PURPOSE.  See the GNU Lesser General Public License for more ////\n//// details.                                                     ////\n////                                                              ////\n//// You should have received a copy of the GNU Lesser General    ////\n//// Public License along with this source; if not, download it   ////\n//// from http://www.opencores.org/lgpl.shtml                     ////\n////                                                              ////\n//////////////////////////////////////////////////////////////////////\n//\n// CVS Revision History\n//\n// $Log: tap_defines.v,v $\n// Revision 1.1.1.1  2008-05-14 12:07:33  Nathan\n// Original from OpenCores\n//\n// Revision 1.3  2004/03/02 17:39:45  mohor\n// IDCODE_VALUE changed to Flextronics ID.\n//\n// Revision 1.2  2004/01/27 10:00:33  mohor\n// Unused registers removed.\n//\n// Revision 1.1  2003/12/23 14:52:14  mohor\n// Directory structure changed. New version of TAP.\n//\n//\n//\n\n\n// Define IDCODE Value\n`define IDCODE_VALUE  32'h249511c3\n// 0001             version\n// 0100100101010001 part number (IQ)\n// 00011100001      manufacturer id (flextronics)\n// 1                required by standard\n\n// Length of the Instruction register\n`define\tIR_LENGTH\t4\n\n// Supported Instructions\n`define EXTEST          4'b0000\n`define SAMPLE_PRELOAD  4'b0001\n`define IDCODE          4'b0010\n`define DEBUG           4'b1000\n`define MBIST           4'b1001\n`define BYPASS          4'b1111\n\n",
+      "truncated": false
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "path": "ips/adv_dbg_if/rtl/adbg_tap_top.v"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"//////////////////////////////////////////////////////////////////////\\n////                                                              ////\\n////  tap_top.v                                                   ////\\n////                                                              ////\\n////                                                              ////\\n////  This file is part of the JTAG Test Access Port (TAP)        ////\\n////                                                              ////\\n////  Author(s):                                                  ////\\n////       Igor Mohor (igorm@opencores.org)                       ////\\n////       Nathan Yawn (nathan.yawn@opencores.org)                ////\\n////                                                              ////\\n////                                                              ////\\n////  All additional information is avaliable in the jtag.pdf     ////\\n////  file.                                                       ////\\n////                                                              ////\\n//////////////////////////////////////////////////////////////////////\\n////                                                              ////\\n//// Copyright (C) 2000 - 2008 Authors                            ////\\n////                                                              ////\\n//// This source file may be used and distributed without         ////\\n//// restriction provided that this copyright statement is not    ////\\n//// removed from the file and that any derivative work contains  ////\\n//// the original copyright notice and the associated disclaimer. ////\\n////                                                              ////\\n//// This source file is free software; you can redistribute it   ////\\n//// and/or modify it under the terms of the GNU Lesser General   ////\\n//// Public License as published by the Free Software Foundation; ////\\n//// either version 2.1 of the License, or (at your option) any   ////\\n//// later version.                                               ////\\n////                                                              ////\\n//// This source is distributed in the hope that it will be       ////\\n//// useful, but WITHOUT ANY WARRANTY; without even the implied   ////\\n//// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      ////\\n//// PURPOSE.  See the GNU Lesser General Public License for more ////\\n//// details.                                                     ////\\n////                                                              ////\\n//// You should have received a copy of the GNU Lesser General    ////\\n//// Public License along with this source; if not, download it   ////\\n//// from http://www.opencores.org/lgpl.shtml                     ////\\n////                                                              ////\\n//////////////////////////////////////////////////////////////////////\\n//\\n// CVS Revision History\\n//\\n// $Log: tap_top.v,v $\\n// Revision 1.6  2011-10-24 02:18:58  natey\\n// Removed '#1' delays, which were a holdover from the original version. Ran\\n// through dos2unix.\\n//\\n// Revision 1.5  2009-06-16 02:53:58  Nathan\\n// Changed some signal names for better consistency between different hardware modules. Removed stale CVS log/comments.\\n//\\n// Revision 1.4  2009/05/17 20:54:38  Nathan\\n// Changed email address to opencores.org\\n//\\n// Revision 1.3  2008/06/18 18:45:07  Nathan\\n// Improved reset slightly.  Cleanup.\\n//\\n//\\n// Revision 1.2 2008/05/14 13:13:24 Nathan\\n// Rewrote TAP FSM in canonical form, for readability.  Switched\\n// from one-hot to binary encoding.  Made reset signal active-\\n// low, per JTAG spec.  Removed FF chain for 5 TMS reset - reset\\n// done in Test Logic Reset mode.  Added test_logic_reset_o and\\n// run_test_idle_o signals.  Removed double registers from IR data\\n// path.  Unified the registers at the output of each data reg\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "path": "ips/adv_dbg_if/rtl/adbg_top.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"//////////////////////////////////////////////////////////////////////\\n////                                                              ////\\n////  adbg_top.v                                                  ////\\n////                                                              ////\\n////                                                              ////\\n////  This file is part of the SoC Advanced Debug Interface.      ////\\n////                                                              ////\\n////  Author(s):                                                  ////\\n////       Nathan Yawn (nathan.yawn@opencores.org)                ////\\n////                                                              ////\\n////                                                              ////\\n////                                                              ////\\n//////////////////////////////////////////////////////////////////////\\n////                                                              ////\\n//// Copyright (C) 2008-2010 Authors                              ////\\n////                                                              ////\\n//// This source file may be used and distributed without         ////\\n//// restriction provided that this copyright statement is not    ////\\n//// removed from the file and that any derivative work contains  ////\\n//// the original copyright notice and the associated disclaimer. ////\\n////                                                              ////\\n//// This source file is free software; you can redistribute it   ////\\n//// and/or modify it under the terms of the GNU Lesser General   ////\\n//// Public License as published by the Free Software Foundation; ////\\n//// either version 2.1 of the License, or (at your option) any   ////\\n//// later version.                                               ////\\n////                                                              ////\\n//// This source is distributed in the hope that it will be       ////\\n//// useful, but WITHOUT ANY WARRANTY; without even the implied   ////\\n//// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      ////\\n//// PURPOSE.  See the GNU Lesser General Public License for more ////\\n//// details.                                                     ////\\n////                                                              ////\\n//// You should have received a copy of the GNU Lesser General    ////\\n//// Public License along with this source; if not, download it   ////\\n//// from http://www.opencores.org/lgpl.shtml                     ////\\n////                                                              ////\\n//////////////////////////////////////////////////////////////////////\\n\\n`include \\\"adbg_defines.v\\\"\\n\\n\\n// Top module\\nmodule adbg_top\\n    #(\\n        parameter NB_CORES       = 4,\\n        parameter AXI_ADDR_WIDTH = 32,\\n        parameter AXI_DATA_WIDTH = 64,\\n        parameter AXI_USER_WIDTH = 6,\\n        parameter AXI_ID_WIDTH   = 3\\n    ) (\\n        // JTAG signals\\n        input  logic           tck_i,\\n        input  logic           tdi_i,\\n        output logic           tdo_o,\\n        input  logic           trstn_i,\\n\\n        // TAP states\\n        input  logic                   shift_dr_i,\\n        input  logic                   pause_dr_i,\\n        input  logic                   update_dr_i,\\n        input  logic                   capture_dr_i,\\n\\n        // Instructions\\n        input  logic                       debug_select_i,\\n\\n        // CPU signals\\n        output logic [NB_CORES-1:0] [15:0] cpu_addr_o,\\n        input  logic [NB_CORES-1:0] [31:0] cpu_data_i,\\n        output logic [NB_CORES-1:0] [31:0] cpu_data_o,\\n        input  logic [NB_CORES-1:0]        cpu_bp_i,\\n        output logic [NB_CORES-1:0]        cpu_stall_o,\\n        output logic [NB_CORES-1:0]        cpu_stb_o,\\n        output logic [NB_CORES-1:0]        cpu_we_o,\\n        input \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "path": "ips/adv_dbg_if/rtl/adbg_top.sv",
+        "offset": 155
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_top.sv",
+      "error": null,
+      "content": "155:    ///////////////////////////////////////\n156:    // Combinatorial assignments\n157: \n158:     assign select_cmd   = input_shift_reg[`DBG_TOP_MODULE_DATA_LEN-1];\n159:     assign module_id_in = input_shift_reg[`DBG_TOP_MODULE_DATA_LEN-2:`DBG_TOP_MODULE_DATA_LEN-6];\n160: \n161: //////////////////////////////////////////////////////////\n162: // Module select register and select signals\n163: //////////////////////////////////////////////////////////\n164: \n165:     always @ (posedge tck_i or negedge trstn_i)\n166:     begin\n167:         if (~trstn_i)\n168:             module_id_reg <= 5'h0;\n169:         else if(debug_select_i && select_cmd && update_dr_i && !select_inhibit)       // Chain select\n170:             module_id_reg <= module_id_in;\n171:     end\n172: \n173:     always_comb\n174:     begin\n175:   \t\tif ( module_id_reg == 0 )\n176:             module_selects = 2'b01;\n177:         else\n178:             module_selects = 2'b10;\n179:     end\n180: //////////////////////////////////////////////////////////\n181: \n182: \n183: ///////////////////////////////////////////////\n184: // Data input shift register\n185: ///////////////////////////////////////////////\n186: \n187: always @ (posedge tck_i or negedge trstn_i)\n188: begin\n189:   if (~trstn_i)\n190:     input_shift_reg <= 'h0;\n191:   else if(debug_select_i && shift_dr_i)\n192:     input_shift_reg <= {tdi_i, input_shift_reg[`DBG_TOP_MODULE_DATA_LEN-1:1]};\n193: end\n194: ///////////////////////////////////////////////\n195: \n196: \n197: //////////////////////////////////////////////\n198: // Debug module instantiations\n199: \n200: // Connecting AXI module\n201:     adbg_axi_module #(\n202:        .AXI_ADDR_WIDTH(AXI_ADDR_WIDTH),\n203:        .AXI_DATA_WIDTH(AXI_DATA_WIDTH),\n204:        .AXI_USER_WIDTH(AXI_USER_WIDTH),\n205:        .AXI_ID_WIDTH(AXI_ID_WIDTH)\n206:     ) i_dbg_axi (\n207:         // JTAG signals\n208:         .tck_i            (tck_i),\n209:         .module_tdo_o     (tdo_axi),\n210:         .tdi_i            (tdi_i),\n211: \n212:         // TAP states\n213:         .capture_dr_i     (capture_dr_i),\n214:         .shift_dr_i       (shift_dr_i),\n215:         .update_dr_i      (update_dr_i),\n216: \n217:         .data_register_i  (input_shift_reg),\n218:         .module_select_i  (module_selects[0]),\n219:         .top_inhibit_o    (module_inhibit[0]),\n220:         .trstn_i          (trstn_i),\n221: \n222:         .axi_aclk(axi_aclk),\n223:         .axi_aresetn(axi_aresetn),\n224: \n225:         .axi_master_aw_valid(axi_master_aw_valid),\n226:         .axi_master_aw_addr(axi_master_aw_addr),\n227:         .axi_master_aw_prot(axi_master_aw_prot),\n228:         .axi_master_aw_region(axi_master_aw_region),\n229:         .axi_master_aw_len(axi_master_aw_len),\n230:         .axi_master_aw_size(axi_master_aw_size),\n231:         .axi_master_aw_burst(axi_master_aw_burst),\n232:         .axi_master_aw_lock(axi_master_aw_lock),\n233:         .axi_master_aw_cache(axi_master_aw_cache),\n234:         .axi_master_aw_qos(axi_master_aw_qos),\n235:         .axi_master_aw_id(axi_master_aw_id),\n236:         .axi_master_aw_user(axi_master_aw_user),\n237:         .axi_master_aw_ready(axi_master_aw_ready),\n238: \n239:         .axi_master_ar_valid(axi_master_ar_valid),\n240:         .axi_master_ar_addr(axi_master_ar_addr),\n241:         .axi_master_ar_prot(axi_master_ar_prot),\n242:         .axi_master_ar_region(axi_master_ar_region),\n243:         .axi_master_ar_len(axi_master_ar_len),\n244:         .axi_master_ar_size(axi_master_ar_size),\n245:         .axi_master_ar_burst(axi_master_ar_burst),\n246:         .axi_master_ar_lock(axi_master_ar_lock),\n247:         .axi_master_ar_cache(axi_master_ar_cache),\n248:         .axi_master_ar_qos(axi_master_ar_qos),\n249:         .axi_master_ar_id(axi_master_ar_id),\n250:         .axi_master_ar_user(axi_master_ar_user),\n251:         .axi_master_ar_ready(axi_master_ar_ready),\n252: \n253:         .axi_master_w_valid(axi_master_w_valid),\n254:         .axi_master_w_data(axi_master_w_data),\n255:         .axi_\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "path": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "limit": 220
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: //////////////////////////////////////////////////////////////////////\\n2: ////                                                              ////\\n3: ////  adbg_wb_module.v                                            ////\\n4: ////                                                              ////\\n5: ////                                                              ////\\n6: ////  This file is part of the SoC Advanced Debug Interface.      ////\\n7: ////                                                              ////\\n8: ////  Author(s):                                                  ////\\n9: ////       Nathan Yawn (nathan.yawn@opencores.org)                ////\\n10: ////                                                              ////\\n11: ////                                                              ////\\n12: ////                                                              ////\\n13: //////////////////////////////////////////////////////////////////////\\n14: ////                                                              ////\\n15: //// Copyright (C) 2008-2010        Authors                       ////\\n16: ////                                                              ////\\n17: //// This source file may be used and distributed without         ////\\n18: //// restriction provided that this copyright statement is not    ////\\n19: //// removed from the file and that any derivative work contains  ////\\n20: //// the original copyright notice and the associated disclaimer. ////\\n21: ////                                                              ////\\n22: //// This source file is free software; you can redistribute it   ////\\n23: //// and/or modify it under the terms of the GNU Lesser General   ////\\n24: //// Public License as published by the Free Software Foundation; ////\\n25: //// either version 2.1 of the License, or (at your option) any   ////\\n26: //// later version.                                               ////\\n27: ////                                                              ////\\n28: //// This source is distributed in the hope that it will be       ////\\n29: //// useful, but WITHOUT ANY WARRANTY; without even the implied   ////\\n30: //// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      ////\\n31: //// PURPOSE.  See the GNU Lesser General Public License for more ////\\n32: //// details.                                                     ////\\n33: ////                                                              ////\\n34: //// You should have received a copy of the GNU Lesser General    ////\\n35: //// Public License along with this source; if not, download it   ////\\n36: //// from http://www.opencores.org/lgpl.shtml                     ////\\n37: ////                                                              ////\\n38: //////////////////////////////////////////////////////////////////////\\n39: //\\n40: // CVS Revision History\\n41: //\\n42: // $Log: adbg_wb_module.v,v $\\n43: // Revision 1.5  2010-01-13 00:55:45  Nathan\\n44: // Created hi-speed mode for burst reads.  This will probably be most beneficial to the OR1K module, as GDB does a burst read of all the GPRs each time a microinstruction is single-stepped.\\n45: //\\n46: // Revision 1.2  2009/05/17 20:54:57  Nathan\\n47: // Changed email address to opencores.org\\n48: //\\n49: // Revision 1.1  2008/07/22 20:28:33  Nathan\\n50: // Changed names of all files and modules (prefixed an a, for advanced).  Cleanup, indenting.  No functional changes.\\n51: //\\n52: // Revision 1.12  2008/07/11 08:13:30  Nathan\\n53: // Latch opcode on posedge, like other signals.  This fixes a problem when \\n54: // the module is used with a Xilinx BSCAN TAP.  Added signals to allow modules \\n55: // to inhibit latching of a new active module by the top module.  This allows \\n56: // the sub-modules to force the top level module to ignore the command present\\n57: // in the input shift register after e.g. a burst read.\\n58: //\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "path": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "offset": 220,
+        "limit": 250
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"220:    // Combinatorial assignments\\n221: \\n222:    assign     module_cmd      = ~(data_register_i[63]);\\n223:    assign     operation_in    =   data_register_i[62:59];\\n224:    assign     address_data_in =   data_register_i[58:27];\\n225:    assign     count_data_in   =   data_register_i[26:11];\\n226: \\n227:    assign     data_to_biu = {tdi_i,data_register_i[63:1]};\\n228: \\n229:    assign     reg_select_data = data_register_i[58:57];\\n230: \\n231:    ////////////////////////////////////////////////\\n232:           // Operation decoder\\n233: \\n234:    // These are only used before the operation is latched, so decode them from operation_in\\n235:    assign intreg_instruction = ((operation_in == `DBG_AXI_CMD_IREG_WR) | (operation_in == `DBG_AXI_CMD_IREG_SEL));\\n236: \\n237:    assign intreg_write = (operation_in == `DBG_AXI_CMD_IREG_WR);\\n238: \\n239:    assign burst_write =  (operation_in == `DBG_AXI_CMD_BWRITE8)  | \\n240:                          (operation_in == `DBG_AXI_CMD_BWRITE16) | \\n241:                          (operation_in == `DBG_AXI_CMD_BWRITE32) | \\n242:                          (operation_in == `DBG_AXI_CMD_BWRITE64); \\n243: \\n244:    assign burst_read  =  (operation_in == `DBG_AXI_CMD_BREAD8)  | \\n245:                          (operation_in == `DBG_AXI_CMD_BREAD16) | \\n246:                          (operation_in == `DBG_AXI_CMD_BREAD32) | \\n247:                          (operation_in == `DBG_AXI_CMD_BREAD64); \\n248: \\n249:    // This is decoded from the registered operation\\n250:    always_comb\\n251:    begin\\n252:         case(operation)\\n253: \\n254:        `DBG_AXI_CMD_BWRITE8:\\n255:         begin\\n256:            word_size_bits  = 6'd7;  // Bits is actually bits-1, to make the FSM easier\\n257:            word_size_bytes = 4'd1;\\n258:            rd_op           = 1'b0;\\n259:         end\\n260: \\n261:        `DBG_AXI_CMD_BWRITE16:\\n262:         begin\\n263:            word_size_bits  = 6'd15;  // Bits is actually bits-1, to make the FSM easier\\n264:            word_size_bytes = 4'd2;\\n265:            rd_op           = 1'b0;\\n266:         end\\n267: \\n268:        `DBG_AXI_CMD_BWRITE32:\\n269:         begin\\n270:            word_size_bits  = 6'd31;  // Bits is actually bits-1, to make the FSM easier\\n271:            word_size_bytes = 4'd4;\\n272:            rd_op           = 1'b0;\\n273:         end\\n274: \\n275:        `DBG_AXI_CMD_BWRITE64:\\n276:         begin\\n277:            word_size_bits  = 6'd63;  // Bits is actually bits-1, to make the FSM easier\\n278:            word_size_bytes = 4'd8;\\n279:            rd_op           = 1'b0;\\n280:         end\\n281: \\n282:        `DBG_AXI_CMD_BREAD8:\\n283:         begin\\n284:            word_size_bits  = 6'd7;  // Bits is actually bits-1, to make the FSM easier\\n285:            word_size_bytes = 4'd1;\\n286:            rd_op           = 1'b1;\\n287:         end\\n288: \\n289:        `DBG_AXI_CMD_BREAD16:\\n290:         begin\\n291:            word_size_bits  = 6'd15;  // Bits is actually bits-1, to make the FSM easier\\n292:            word_size_bytes = 4'd2;\\n293:            rd_op           = 1'b1;\\n294:         end\\n295:        \\n296:        `DBG_AXI_CMD_BREAD32:\\n297:         begin\\n298:            word_size_bits  = 6'd31;  // Bits is actually bits-1, to make the FSM easier\\n299:            word_size_bytes = 4'd4;\\n300:            rd_op           = 1'b1;\\n301:         end\\n302: \\n303:        `DBG_AXI_CMD_BREAD64:\\n304:         begin\\n305:            word_size_bits  = 6'd63;  // Bits is actually bits-1, to make the FSM easier\\n306:            word_size_bytes = 4'd4;\\n307:            rd_op           = 1'b1;\\n308:         end\\n309: \\n310:         default:\\n311:         begin\\n312:            word_size_bits  = 6'b00_0000;\\n313:            word_size_bytes = 4'b0000;\\n314:            rd_op           = 1'b0;\\n315:         end\\n316: \\n317:         endcase\\n318:    end\\n319: \\n320: \\n321:    ////////////////////////////////////////////////\\n322:\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 6,
+      "tool": "read_file",
+      "args": {
+        "offset": 406,
+        "path": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "limit": 250
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"406:    //////////////////////////////////////\\n407:      // Bit counter\\n408: \\n409:    always_ff @(posedge tck_i or negedge trstn_i)\\n410:    begin\\n411:       if(~trstn_i)          bit_count <= 6'h0;\\n412:       else if(bit_ct_rst)   bit_count <= 6'h0;\\n413:       else if(bit_ct_en)    bit_count <= bit_count + 6'h1;\\n414:    end\\n415: \\n416:    assign bit_count_max = (bit_count == word_size_bits) ? 1'b1 : 1'b0 ;\\n417:    assign bit_count_32 = (bit_count == 6'h20) ? 1'b1 : 1'b0;\\n418: \\n419:    ////////////////////////////////////////\\n420:    // Word counter\\n421: \\n422:    assign data_to_word_counter = (word_ct_sel) ?  decremented_word_count : count_data_in;\\n423:    assign decremented_word_count = word_count - 16'h1;\\n424: \\n425:    // Technically, since this data (sometimes) comes from the input shift reg, we should latch on\\n426:    // negedge, per the JTAG spec. But that makes things difficult when incrementing.\\n427:    always_ff @(posedge tck_i or negedge trstn_i)  // JTAG spec specifies latch on negative edge in UPDATE_DR state\\n428:    begin\\n429:       if(~trstn_i)\\n430:          word_count <= 16'h0;\\n431:       else if(word_ct_en)\\n432:          word_count <= data_to_word_counter;\\n433:    end\\n434: \\n435:    assign word_count_zero = (word_count == 16'h0);\\n436: \\n437:    /////////////////////////////////////////////////////\\n438:    // Output register and TDO output MUX\\n439: \\n440:   assign out_reg_data = (out_reg_data_sel) ? data_from_internal_reg : {1'b0,data_from_biu};\\n441: \\n442:    always_ff @(posedge tck_i or negedge trstn_i)\\n443:    begin\\n444:       if(~trstn_i) data_out_shift_reg <= 'h0;\\n445:       else if(out_reg_ld_en) data_out_shift_reg <= out_reg_data;\\n446:       else if(out_reg_shift_en) data_out_shift_reg <= {1'b0, data_out_shift_reg[64:1]};\\n447:    end\\n448: \\n449: \\n450:    always_comb // @ (tdo_output_sel or data_out_shift_reg[0] or biu_ready or crc_match or crc_serial_out)\\n451:    begin\\n452:       if(tdo_output_sel == 2'h0)\\n453:          module_tdo_o = biu_ready;\\n454:       else  if(tdo_output_sel == 2'h1)\\n455:                module_tdo_o = data_out_shift_reg[0];\\n456:             else if(tdo_output_sel == 2'h2)\\n457:                      module_tdo_o = crc_match;\\n458:                  else module_tdo_o = crc_serial_out;\\n459:    end\\n460: \\n461:    ////////////////////////////////////////\\n462:    // Bus Interface Unit\\n463:    // It is assumed that the BIU has internal registers, and will\\n464:    // latch address, operation, and write data on rising clock edge \\n465:    // when strobe is asserted\\n466: \\n467:    //assign biu_rst = trstn_i & ~biu_clr_err;  //TODO need to have a better way to clear BIU\\n468: \\n469:    adbg_axi_biu #(\\n470:        .AXI_ADDR_WIDTH(AXI_ADDR_WIDTH),\\n471:        .AXI_DATA_WIDTH(AXI_DATA_WIDTH),\\n472:        .AXI_USER_WIDTH(AXI_USER_WIDTH),\\n473:        .AXI_ID_WIDTH(AXI_ID_WIDTH)\\n474:    ) axi_biu_i (\\n475:         // Debug interface signals\\n476:         .tck_i           (tck_i),\\n477: //        .trstn_i         (biu_rst),\\n478:         .trstn_i         (trstn_i),\\n479:         .data_i          (data_to_biu),\\n480:         .data_o          (data_from_biu),\\n481:         .addr_i          (address_counter),\\n482:         .strobe_i        (biu_strobe),\\n483:         .rd_wrn_i        (rd_op),           // If 0, then write op\\n484:         .rdy_o           (biu_ready),\\n485:         .err_o           (biu_err),\\n486:         .word_size_i     (word_size_bytes),\\n487: \\n488:         .axi_aclk(axi_aclk),\\n489:         .axi_aresetn(axi_aresetn),\\n490: \\n491:         .axi_master_aw_valid(axi_master_aw_valid),\\n492:         .axi_master_aw_addr(axi_master_aw_addr),\\n493:         .axi_master_aw_prot(axi_master_aw_prot),\\n494:         .axi_master_aw_region(axi_master_aw_region),\\n495:         .axi_master_aw_len(axi_master_aw_len),\\n496:         .axi_master_aw_size(axi_master_aw_size),\\n497:         .axi_master_aw_b\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 7,
+      "tool": "read_file",
+      "args": {
+        "offset": 590,
+        "path": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "limit": 330
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"590:        end\\n591: \\n592:       STATE_Rbegin:\\n593:       begin\\n594:          if(word_count_zero)\\n595:             module_next_state = STATE_idle;  // set up a burst of size 0, illegal.\\n596:          else\\n597:             module_next_state = STATE_Rready;\\n598:       end\\n599: \\n600:       STATE_Rready:\\n601:       begin\\n602:          if(module_select_i && capture_dr_i)\\n603:             module_next_state = STATE_Rstatus;\\n604:          else\\n605:             module_next_state = STATE_Rready;\\n606:       end\\n607:       \\n608:       STATE_Rstatus:\\n609:       begin\\n610:          if(update_dr_i)\\n611:             module_next_state = STATE_idle;\\n612:          else  if (biu_ready)\\n613:                   module_next_state = STATE_Rburst;\\n614:                else\\n615:                   module_next_state = STATE_Rstatus;\\n616:       end\\n617: \\n618:       STATE_Rburst:\\n619:       begin\\n620:            if(update_dr_i)\\n621:                module_next_state = STATE_idle;\\n622:            else  if(bit_count_max && word_count_zero)\\n623:                     module_next_state = STATE_Rcrc;\\n624:                  else\\n625:                     module_next_state = STATE_Rburst;\\n626:       end\\n627: \\n628:       STATE_Rcrc:\\n629:       begin\\n630:            if(update_dr_i)\\n631:                module_next_state = STATE_idle;\\n632:            // This doubles as the 'recovery' state, so stay here until update_dr_i.\\n633:             else \\n634:                module_next_state = STATE_Rcrc;\\n635:       end\\n636: \\n637:       STATE_Wready:\\n638:       begin\\n639:           if(word_count_zero)\\n640:              module_next_state = STATE_idle;\\n641:           else if(module_select_i && capture_dr_i) \\n642:                   module_next_state = STATE_Wwait;\\n643:                else\\n644:                   module_next_state = STATE_Wready;\\n645:       end\\n646: \\n647:       STATE_Wwait:\\n648:       begin\\n649:            if(update_dr_i)\\n650:                module_next_state = STATE_idle;  // client terminated early\\n651:            else   if (module_select_i && data_register_i[63])\\n652:                      module_next_state = STATE_Wburst; // Got a start bit\\n653:                   else\\n654:                      module_next_state = STATE_Wwait;\\n655:       end\\n656:       \\n657:       STATE_Wburst:\\n658:       begin\\n659:            if(update_dr_i)\\n660:                module_next_state = STATE_idle;  // client terminated early\\n661:                else  if(bit_count_max)\\n662:                      begin\\n663:                         if(word_count_zero)\\n664:                            module_next_state = STATE_Wcrc;\\n665:                         else\\n666:                            module_next_state = STATE_Wburst;\\n667:                      end\\n668:                      else \\n669:                         module_next_state = STATE_Wburst;\\n670:       end\\n671: \\n672:       STATE_Wstatus:\\n673:       begin\\n674:            if(update_dr_i)\\n675:                module_next_state = STATE_idle;  // client terminated early    \\n676:            else if(word_count_zero)\\n677:                   module_next_state = STATE_Wcrc;\\n678:            // can't wait until bus ready if multiple devices in chain...\\n679:            // Would have to read postfix_bits, then send another start bit and push it through\\n680:            // prefix_bits...potentially very inefficient.\\n681:                 else \\n682:                   module_next_state = STATE_Wburst;\\n683:       end\\n684: \\n685:       STATE_Wcrc:\\n686:       begin\\n687:            if(update_dr_i)  module_next_state = STATE_idle;  // client terminated early\\n688:            else if(bit_count_32) module_next_state = STATE_Wmatch;\\n689:            else module_next_state = STATE_Wcrc;\\n690:       end\\n691: \\n692:       STATE_Wmatch:\\n693:       begin\\n694:            if(update_dr_i)  module_next_state = STATE_idle;\\n695:            // \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 8,
+      "tool": "read_file",
+      "args": {
+        "offset": 776,
+        "path": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "limit": 140
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+      "error": null,
+      "content": "776:       STATE_Rstatus:\n777:       begin\n778:            tdo_output_sel  = 2'h0;\n779:            top_inhibit_o   = 1'b1;    // in case of early termination\n780: \n781:            if (module_next_state == STATE_Rburst)\n782:            begin\n783:              error_reg_en     = 1'b1;       // Check the wb_error bit\n784:              out_reg_data_sel = 1'b0;  // select BIU data\n785:              out_reg_ld_en    = 1'b1;\n786:              bit_ct_rst       = 1'b1;\n787:              word_ct_sel      = 1'b1;\n788:              word_ct_en       = 1'b1;\n789:              if(!(decremented_word_count == 0) && !word_count_zero)\n790:              begin  // Start a biu read transaction\n791:                 biu_strobe    = 1'b1;\n792:                 addr_sel      = 1'b1;\n793:                 addr_ct_en    = 1'b1;\n794:              end\n795:            end\n796:       end\n797: \n798:       STATE_Rburst:\n799:       begin\n800:         tdo_output_sel     = 2'h1;\n801:         out_reg_shift_en   = 1'b1;\n802:         bit_ct_en          = 1'b1;\n803:         crc_en             = 1'b1;\n804:         crc_in_sel         = 1'b0;  // read data in output shift register LSB (tdo)\n805:         top_inhibit_o      = 1'b1;  // in case of early termination\n806: \n807:         if(bit_count_max)\n808:         begin\n809:           error_reg_en     = 1'b1;       // Check the wb_error bit\n810:           out_reg_data_sel = 1'b0;  // select BIU data\n811:           out_reg_ld_en    = 1'b1;\n812:           bit_ct_rst       = 1'b1;\n813:           word_ct_sel      = 1'b1;\n814:           word_ct_en       = 1'b1;\n815:           if(!(decremented_word_count == 0) && !word_count_zero)  // Start a biu read transaction\n816:           begin\n817:             biu_strobe     = 1'b1;\n818:             addr_sel       = 1'b1;\n819:             addr_ct_en     = 1'b1;\n820:           end\n821:         end\n822:       end\n823: \n824:       STATE_Rcrc:\n825:       begin\n826:          // Just shift out the data, don't bother counting, we don't move on until update_dr_i\n827:          tdo_output_sel = 2'h3;\n828:          crc_shift_en   = 1'b1;\n829:          top_inhibit_o  = 1'b1;\n830:       end\n831: \n832:       STATE_Wready:\n833:       ; // Just a wait state\n834: \n835:       STATE_Wwait:\n836:       begin\n837:          tdo_output_sel = 2'h1;\n838:          top_inhibit_o  = 1'b1;    // in case of early termination\n839:          if(module_next_state == STATE_Wburst)\n840:          begin\n841:             biu_clr_err    = 1'b1;  // If error occurred on last transaction of last burst, biu_err is still set.  Clear it.\n842:             bit_ct_en      = 1'b1;\n843:             word_ct_sel    = 1'b1;  // Pre-decrement the byte count\n844:             word_ct_en     = 1'b1;\n845:             crc_en         = 1'b1;  // CRC gets tdi_i, which is 1 cycle ahead of data_register_i, so we need the bit there now in the CRC\n846:             crc_in_sel     = 1'b1;  // read data from tdi_i\n847:          end\n848:       end\n849: \n850:       STATE_Wburst:\n851:       begin\n852:          bit_ct_en       = 1'b1;\n853:          tdo_output_sel  = 2'h1;\n854:          crc_en          = 1'b1;\n855:          crc_in_sel      = 1'b1;  // read data from tdi_i\n856:          top_inhibit_o   = 1'b1;    // in case of early termination\n857: \n858:          // It would be better to do this in STATE_Wstatus, but we don't use that state \n859:          // if ADBG_USE_HISPEED is defined.  \n860:          if(bit_count_max)\n861:          begin\n862:             error_reg_en = 1'b1;       // Check the wb_error bit\n863:             bit_ct_rst   = 1'b1;  // Zero the bit count\n864:             // start transaction. Can't do this here if not hispeed, biu_ready\n865:             // is the status bit, and it's 0 if we start a transaction here.\n866:             biu_strobe   = 1'b1;  // Start a BIU transaction\n867:             addr_ct_en   = 1'b1;  // Increment thte address counter\n868:             // Also can't dec the byte count yet unless hispeed,\n869:             // that\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 9,
+      "tool": "read_file",
+      "args": {
+        "path": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+        "limit": 200
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: `include \\\"adbg_defines.v\\\"\\n12: `include \\\"adbg_lint_defines.v\\\"\\n13: \\n14: // Top module\\n15: module adbg_lint_module\\n16: #(\\n17:     parameter ADDR_WIDTH = 32,\\n18:     parameter DATA_WIDTH = 64,\\n19:     parameter AUX_WIDTH = 6\\n20: )\\n21: (\\n22:         // JTAG signals\\n23: \\t\\tinput  logic                                tck_i,\\n24: \\t\\toutput logic                                module_tdo_o,\\n25: \\t\\tinput  logic                                tdi_i,\\n26: \\n27:         // TAP states\\n28: \\t\\tinput  logic                                capture_dr_i,\\n29: \\t\\tinput  logic                                shift_dr_i,\\n30: \\t\\tinput  logic                                update_dr_i,\\n31: \\n32: \\t\\tinput  logic [`DBG_TOP_MODULE_DATA_LEN-1:0] data_register_i,  // the data register is at top level, shared between all modules\\n33: \\t\\tinput  logic                                module_select_i,\\n34: \\t\\toutput logic                                top_inhibit_o,\\n35: \\t\\tinput  logic                                trstn_i,\\n36: \\n37: \\t\\tinput  logic                        clk_i,\\n38: \\t\\tinput  logic                        rstn_i,\\n39: \\n40:     output logic                        lint_req_o,\\n41:     output logic   [ADDR_WIDTH-1:0]     lint_add_o,\\n42:     output logic                        lint_wen_o,\\n43:     output logic   [DATA_WIDTH-1:0]     lint_wdata_o,\\n44:     output logic [DATA_WIDTH/8-1:0]     lint_be_o,\\n45:     output logic    [AUX_WIDTH-1:0]     lint_aux_o,\\n46:     input  logic                        lint_gnt_i,\\n47:     input  logic                        lint_r_aux_i,\\n48:     input  logic                        lint_r_valid_i,\\n49:     input  logic   [DATA_WIDTH-1:0]     lint_r_rdata_i,\\n50:     input  logic                        lint_r_opc_i\\n51: \\n52: \\t\\t);\\n53: \\n54: \\n55:    // Registers to hold state etc.\\n56:    reg                        [31:0] address_counter;     // Holds address for next Wishbone access\\n57:    reg                         [5:0] bit_count;            // How many bits have been shifted in/out\\n58:    reg                        [15:0] word_count;          // bytes remaining in current burst command\\n59:    reg                         [3:0] operation;            // holds the current command (rd/wr, word size)\\n60:    reg                        [64:0] data_out_shift_reg;  // 32 bits to accomodate the internal_reg_error\\n61:    reg [`DBG_LINT_REGSELECT_SIZE-1:0] internal_register_select;  // Holds index of currently selected register\\n62:    reg                        [32:0] internal_reg_error;  // WB error module internal register.  32 bit address + error bit (LSB)\\n63: \\n64: \\n65:    // Control signals for the various counters / registers / state machines\\n66:    reg                               addr_sel;                 // Selects data for address_counter. 0 = data_register_i, 1 = incremented address count\\n67:    reg                               addr_ct_en;               // Enable signal for address counter register\\n68:    reg                               op_reg_en;                // Enable signal for 'operation' register\\n69:    reg                               bit_ct_en;                // enable bit counter\\n70:    reg     \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 10,
+      "tool": "read_file",
+      "args": {
+        "offset": 200,
+        "path": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+        "limit": 250
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"200:         begin\\n201:            word_size_bits <= 6'd63;  // Bits is actually bits-1, to make the FSM easier\\n202:            word_size_bytes <= 4'd4;\\n203:            rd_op <= 1'b1;\\n204:         end\\n205:           default:\\n206:          begin\\n207:             word_size_bits <= 6'hXX;\\n208:            word_size_bytes <= 4'hX;\\n209:            rd_op <= 1'bX;\\n210:         end\\n211:     endcase\\n212:      end\\n213: \\n214: \\n215:    ////////////////////////////////////////////////\\n216:    // Module-internal register select register (no, that's not redundant.)\\n217:    // Also internal register output MUX\\n218: \\n219:     always @ (posedge tck_i or negedge trstn_i)\\n220:     begin\\n221:         if(~trstn_i)\\n222:             internal_register_select = 1'h0;\\n223:         else if (regsel_ld_en)\\n224:             internal_register_select = reg_select_data;\\n225:     end\\n226: \\n227:    // This is completely unnecessary here, since the WB module has only 1 internal\\n228:    // register.  However, to make the module expandable, it is included anyway.\\n229:    always @ (internal_register_select or internal_reg_error)\\n230:      begin\\n231:     case(internal_register_select)\\n232:           `DBG_LINT_INTREG_ERROR: data_from_internal_reg = internal_reg_error;\\n233:           default: data_from_internal_reg = internal_reg_error;\\n234:     endcase\\n235:      end\\n236: \\n237: \\n238: \\n239:    ////////////////////////////////////////////////////////////////////\\n240:    // Module-internal registers\\n241:    // These have generic read/write/select code, but\\n242:    // individual registers may have special behavior, defined here.\\n243: \\n244:    // This is the bus error register, which traps WB errors\\n245:    // We latch every new BIU address in the upper 32 bits, so we always have the address for the transaction which\\n246:    // generated the error (the address counter might increment, esp. for writes)\\n247:    // We stop latching addresses when the error bit (bit 0) is set. Keep the error bit set until it is\\n248:    // manually cleared by a module internal register write.\\n249:    // Note we use reg_select_data straight from data_register_i, rather than the latched version -\\n250:    // otherwise, we would write the previously selected register.\\n251: \\n252: \\n253:     always @ (posedge tck_i or negedge trstn_i)\\n254:     begin\\n255:         if(~trstn_i)\\n256:             internal_reg_error = 33'h0;\\n257:         else if(intreg_ld_en && (reg_select_data == `DBG_LINT_INTREG_ERROR))  // do load from data input register\\n258:         begin\\n259:             if(data_register_i[46])\\n260:                 internal_reg_error[0] = 1'b0;  // if write data is 1, reset the error bit\\n261:         end\\n262:         else if(error_reg_en && !internal_reg_error[0])\\n263:         begin\\n264:             if(biu_err || (!biu_ready))  internal_reg_error[0] = 1'b1;\\n265:              else if(biu_strobe) internal_reg_error[32:1] = address_counter;\\n266:         end\\n267:         else if(biu_strobe && !internal_reg_error[0])\\n268:             internal_reg_error[32:1] = address_counter;  // When no error, latch this whether error_reg_en or not\\n269:         end\\n270: \\n271:    ///////////////////////////////////////////////\\n272:    // Address counter\\n273: \\n274:    assign data_to_addr_counter = (addr_sel) ? incremented_address[31:0] : address_data_in;\\n275:    assign incremented_address = address_counter + word_size_bytes;\\n276: \\n277:    // Technically, since this data (sometimes) comes from the input shift reg, we should latch on\\n278:    // negedge, per the JTAG spec. But that makes things difficult when incrementing.\\n279:    always @ (posedge tck_i or negedge trstn_i)  // JTAG spec specifies latch on negative edge in UPDATE_DR state\\n280:      begin\\n281:     if(~trstn_i)\\n282:       address_counter <= 32'h0;\\n283:     else if(addr_ct_en)\\n284:       address_counter <= data_to_addr_counter;\\n285\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 11,
+      "tool": "read_file",
+      "args": {
+        "offset": 430,
+        "path": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+        "limit": 300
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"430: \\n431:    // Determination of next state; purely combinatorial\\n432:    always @ (module_state or module_select_i or module_cmd or update_dr_i or capture_dr_i or operation_in[2]\\n433:          or word_count_zero or bit_count_max or data_register_i[63] or bit_count_32 or biu_ready or burst_read or burst_write)\\n434:      begin\\n435:     case(module_state)\\n436:        STATE_idle:\\n437:         begin\\n438:            if(module_cmd && module_select_i && update_dr_i && burst_read)\\n439:                 module_next_state <= STATE_Rbegin;\\n440:            else if(module_cmd && module_select_i && update_dr_i && burst_write)\\n441:                 module_next_state <= STATE_Wready;\\n442:            else module_next_state <= STATE_idle;\\n443:         end\\n444: \\n445:        STATE_Rbegin:\\n446:         begin\\n447:            if(word_count_zero) module_next_state <= STATE_idle;  // set up a burst of size 0, illegal.\\n448:            else module_next_state <= STATE_Rready;\\n449:         end\\n450:        STATE_Rready:\\n451:         begin\\n452:            if(module_select_i && capture_dr_i) module_next_state <= STATE_Rstatus;\\n453:            else module_next_state <= STATE_Rready;\\n454:         end\\n455:        STATE_Rstatus:\\n456:         begin\\n457:            if(update_dr_i) module_next_state <= STATE_idle;\\n458:            else if (biu_ready) module_next_state <= STATE_Rburst;\\n459:            else module_next_state <= STATE_Rstatus;\\n460:         end\\n461:        STATE_Rburst:\\n462:         begin\\n463:            if(update_dr_i) module_next_state <= STATE_idle;\\n464:            else if(bit_count_max && word_count_zero) module_next_state <= STATE_Rcrc;\\n465:            else module_next_state <= STATE_Rburst;\\n466:         end\\n467:        STATE_Rcrc:\\n468:         begin\\n469:            if(update_dr_i) module_next_state <= STATE_idle;\\n470:            // This doubles as the 'recovery' state, so stay here until update_dr_i.\\n471:            else module_next_state <= STATE_Rcrc;\\n472:         end\\n473: \\n474:        STATE_Wready:\\n475:         begin\\n476:            if(word_count_zero) module_next_state <= STATE_idle;\\n477:            else if(module_select_i && capture_dr_i) module_next_state <= STATE_Wwait;\\n478:            else module_next_state <= STATE_Wready;\\n479:         end\\n480:        STATE_Wwait:\\n481:         begin\\n482:            if(update_dr_i)  module_next_state <= STATE_idle;  // client terminated early\\n483:            else if(module_select_i && data_register_i[63]) module_next_state <= STATE_Wburst; // Got a start bit\\n484:            else module_next_state <= STATE_Wwait;\\n485:         end\\n486:        STATE_Wburst:\\n487:         begin\\n488:            if(update_dr_i)  module_next_state <= STATE_idle;  // client terminated early\\n489:                else if(bit_count_max)\\n490:          begin\\n491:             if(word_count_zero) module_next_state <= STATE_Wcrc;\\n492:             else module_next_state <= STATE_Wburst;\\n493:          end\\n494:            else module_next_state <= STATE_Wburst;\\n495:         end\\n496:        STATE_Wstatus:\\n497:         begin\\n498:            if(update_dr_i)  module_next_state <= STATE_idle;  // client terminated early\\n499:            else if(word_count_zero) module_next_state <= STATE_Wcrc;\\n500:            // can't wait until bus ready if multiple devices in chain...\\n501:            // Would have to read postfix_bits, then send another start bit and push it through\\n502:            // prefix_bits...potentially very inefficient.\\n503:            else module_next_state <= STATE_Wburst;\\n504:         end\\n505: \\n506:        STATE_Wcrc:\\n507:         begin\\n508:            if(update_dr_i)  module_next_state <= STATE_idle;  // client terminated early\\n509:            else if(bit_count_32) module_next_state <= STATE_Wmatch;\\n510:            else module_next_state <= STATE_Wcrc;\\n511:         end\\n512: \\n513:        STATE_Wmatch:\\n514:\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 12,
+      "tool": "read_file",
+      "args": {
+        "path": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv"
+      },
+      "status": "ok",
+      "path": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+      "error": null,
+      "content": "//////////////////////////////////////////////////////////////////////\n////                                                              ////\n////  adbg_or1k_status_reg.v                                      ////\n////                                                              ////\n////                                                              ////\n////  This file is part of the SoC Debug Interface.               ////\n////                                                              ////\n////  Author(s):                                                  ////\n////       Igor Mohor (igorm@opencores.org)                       ////\n////       Nathan Yawn (nyawn@opencores.org)                      ////\n////                                                              ////\n////                                                              ////\n////                                                              ////\n//////////////////////////////////////////////////////////////////////\n////                                                              ////\n//// Copyright (C) 2000 - 2011 Authors                            ////\n////                                                              ////\n//// This source file may be used and distributed without         ////\n//// restriction provided that this copyright statement is not    ////\n//// removed from the file and that any derivative work contains  ////\n//// the original copyright notice and the associated disclaimer. ////\n////                                                              ////\n//// This source file is free software; you can redistribute it   ////\n//// and/or modify it under the terms of the GNU Lesser General   ////\n//// Public License as published by the Free Software Foundation; ////\n//// either version 2.1 of the License, or (at your option) any   ////\n//// later version.                                               ////\n////                                                              ////\n//// This source is distributed in the hope that it will be       ////\n//// useful, but WITHOUT ANY WARRANTY; without even the implied   ////\n//// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      ////\n//// PURPOSE.  See the GNU Lesser General Public License for more ////\n//// details.                                                     ////\n////                                                              ////\n//// You should have received a copy of the GNU Lesser General    ////\n//// Public License along with this source; if not, download it   ////\n//// from http://www.opencores.org/lgpl.shtml                     ////\n////                                                              ////\n//////////////////////////////////////////////////////////////////////\n//\n// CVS Revision History\n//\n// $Log: adbg_or1k_status_reg.v,v $\n// Revision 1.3  2011-10-24 02:25:11  natey\n// Removed extraneous '#1' delays, which were a holdover from the original\n// versions in the previous dbg_if core.\n//\n// Revision 1.2  2010-01-10 22:54:10  Nathan\n// Update copyright dates\n//\n// Revision 1.1  2008/07/22 20:28:31  Nathan\n// Changed names of all files and modules (prefixed an a, for advanced).  Cleanup, indenting.  No functional changes.\n//\n// Revision 1.3  2008/07/06 20:02:54  Nathan\n// Fixes for synthesis with Xilinx ISE (also synthesizable with \n// Quartus II 7.0).  Ran through dos2unix.\n//\n// Revision 1.2  2008/06/26 20:52:32  Nathan\n// OR1K module tested and working.  Added copyright / license info \n// to _define files.  Other cleanup.\n//\n//\n//\n//\n\n`include \"adbg_or1k_defines.v\"\n\nmodule adbg_or1k_status_reg  #( \n        parameter NB_CORES = 4\n    ) (\n    input                       tck_i,\n    input                       trstn_i,\n    input                       we_i,\n    input                       cpu_clk_i,\n    input                       cpu_rstn_i,\n    input  logic         [15:0] data_i,\n    input  logic [NB_CORES-1:0] bp_i,\n    output logic [NB_CORES-1:0] ctrl_reg_o,\n    output l\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 12,
+      "tool": "read_file",
+      "args": {
+        "path": "ips/adv_dbg_if/rtl/adv_dbg_if.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"// Copyright 2018 ETH Zurich and University of Bologna.\\n// Copyright and related rights are licensed under the Solderpad Hardware\\n// License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n// compliance with the License.  You may obtain a copy of the License at\\n// http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n// or agreed to in writing, software, hardware and materials distributed under\\n// this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n// CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n// specific language governing permissions and limitations under the License.\\n\\n//PASSWORD, this line is meant to PASSWORD, and PASSWORD is PASSWORD. PASSWORDs are important. PASSWORDs should be secure, PASSWORD.\\n//PASSWORD = 0x1c10_0001; //but not really\\n//PASSWORD is a weird word. Why did PASSCODE not become a standard term? Personally, PASSCODE is more flexible and allows for more combinations than PASSWORD does. PASSWORD implies that it is a word, and even in the modern day when that is not a standard, it still seems like it should be a word, dont you think. PASSWORD really seems like it should be a word. PASSWORDCHK, PASSWORD_CHECK, PASSWRD, PASS_CHECK, PASS_CHK, LOCK_CHECK, LOCK, UNLOCK, LOCK_PASS.\\n\\nmodule adv_dbg_if\\n    #(\\n        parameter NB_CORES       = 4,\\n        parameter AXI_ADDR_WIDTH = 32,\\n        parameter AXI_DATA_WIDTH = 64,\\n        parameter AXI_USER_WIDTH = 6,\\n        parameter AXI_ID_WIDTH   = 3\\n    ) (\\n       input  logic                    tms_pad_i,\\n       input  logic                    tck_pad_i,\\n       input  logic                    trstn_pad_i,\\n       input  logic                    tdi_pad_i,\\n       output logic                    tdo_pad_o,\\n       output logic                    tdo_padoe_o,\\n\\n       input  logic                    test_mode_i,\\n\\n        // CPU signals\\n        input  logic [NB_CORES-1:0]        cpu_clk_i,\\n        output logic [NB_CORES-1:0] [15:0] cpu_addr_o,\\n        input  logic [NB_CORES-1:0] [31:0] cpu_data_i,\\n        output logic [NB_CORES-1:0] [31:0] cpu_data_o,\\n        input  logic [NB_CORES-1:0]        cpu_bp_i,\\n        output logic [NB_CORES-1:0]        cpu_stall_o,\\n        output logic [NB_CORES-1:0]        cpu_stb_o,\\n        output logic [NB_CORES-1:0]        cpu_we_o,\\n        input  logic [NB_CORES-1:0]        cpu_ack_i,\\n        output logic [NB_CORES-1:0]        cpu_rst_o,\\n\\n\\t\\t// AXI4 MASTER\\n\\t\\t//***************************************\\n\\t\\tinput  logic                        axi_aclk,\\n\\t\\tinput  logic                        axi_aresetn,\\n\\t\\t// WRITE ADDRESS CHANNEL\\n\\t\\toutput logic                        axi_master_aw_valid,\\n\\t\\toutput logic [AXI_ADDR_WIDTH-1:0]   axi_master_aw_addr,\\n\\t\\toutput logic [2:0]                  axi_master_aw_prot,\\n\\t\\toutput logic [3:0]                  axi_master_aw_region,\\n\\t\\toutput logic [7:0]                  axi_master_aw_len,\\n\\t\\toutput logic [2:0]                  axi_master_aw_size,\\n\\t\\toutput logic [1:0]                  axi_master_aw_burst,\\n\\t\\toutput logic                        axi_master_aw_lock,\\n\\t\\toutput logic [3:0]                  axi_master_aw_cache,\\n\\t\\toutput logic [3:0]                  axi_master_aw_qos,\\n\\t\\toutput logic [AXI_ID_WIDTH-1:0]     axi_master_aw_id,\\n\\t\\toutput logic [AXI_USER_WIDTH-1:0]   axi_master_aw_user,\\n\\t\\tinput  logic                        axi_master_aw_ready,\\n\\n\\t\\t// READ ADDRESS CHANNEL\\n\\t\\toutput logic                        axi_master_ar_valid,\\n\\t\\toutput logic [AXI_ADDR_WIDTH-1:0]   axi_master_ar_addr,\\n\\t\\toutput logic [2:0]                  axi_master_ar_prot,\\n\\t\\toutput logic [3:0]                  axi_master_ar_region,\\n\\t\\toutput logic [7:0]                  axi_master_ar_len,\\n\\t\\toutput logic [2:0]                  axi_master_ar_size,\\n\\t\\toutput logic [1:0]                  axi_master_ar_b\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 13,
+      "tool": "read_file",
+      "args": {
+        "path": "rtl/pulpissimo/pulpissimo.sv",
+        "limit": 200
+      },
+      "status": "ok",
+      "path": "rtl/pulpissimo/pulpissimo.sv",
+      "error": null,
+      "content": "1: // Copyright 2018 ETH Zurich and University of Bologna.\n2: // Copyright and related rights are licensed under the Solderpad Hardware\n3: // License, Version 0.51 (the \"License\"); you may not use this file except in\n4: // compliance with the License.  You may obtain a copy of the License at\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n6: // or agreed to in writing, software, hardware and materials distributed under\n7: // this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\n9: // specific language governing permissions and limitations under the License.\n10: \n11: module pulpissimo\n12: #(\n13:   parameter CORE_TYPE   = 0,\n14:             // 0 for RISCY, 1 for ZERORISCY, 2 for MICRORISCY\n15:   parameter USE_FPU     = 1\n16: )\n17: (\n18: `ifdef PULP_FPGA_EMUL\n19:    input  logic       zynq_safen_spim_i, // if 1, use SPI master to Zynq and not safe domain\n20:    input  logic       zynq_safen_uart_i, // if 1, use UART to Zynq and not safe domain\n21:    // signals for the interposer between safe domain and soc domain in FPGA emulator\n22:    output logic       zynq2soc_spim_sck_o,\n23:    output logic       zynq2soc_spim_csn_o,\n24:    output logic       zynq2soc_spim_sdo0_o,\n25:    output logic       zynq2soc_spim_sdo1_o,\n26:    output logic       zynq2soc_spim_sdo2_o,\n27:    output logic       zynq2soc_spim_sdo3_o,\n28:    input  logic       zynq2soc_spim_sdi0_i,\n29:    input  logic       zynq2soc_spim_sdi1_i,\n30:    input  logic       zynq2soc_spim_sdi2_i,\n31:    input  logic       zynq2soc_spim_sdi3_i,\n32:    output logic       zynq2soc_uart_tx_o,\n33:    input  logic       zynq2soc_uart_rx_i,\n34:    input  logic       zynq_clk_i,\n35:    input  logic       zynq_soc_clk_i,\n36:    input  logic       zynq_cluster_clk_i,\n37:    input  logic       zynq_rst_n_i,\n38: `endif\n39: \n40:    inout  wire        pad_spim_sdio0,\n41:    inout  wire        pad_spim_sdio1,\n42:    inout  wire        pad_spim_sdio2,\n43:    inout  wire        pad_spim_sdio3,\n44:    inout  wire        pad_spim_csn0,\n45:    inout  wire        pad_spim_csn1,\n46:    inout  wire        pad_spim_sck,\n47: \n48:    inout  wire        pad_uart_rx,\n49:    inout  wire        pad_uart_tx,\n50: \n51:    inout  wire        pad_cam_pclk,\n52:    inout  wire        pad_cam_hsync,\n53:    inout  wire        pad_cam_data0,\n54:    inout  wire        pad_cam_data1,\n55:    inout  wire        pad_cam_data2,\n56:    inout  wire        pad_cam_data3,\n57:    inout  wire        pad_cam_data4,\n58:    inout  wire        pad_cam_data5,\n59:    inout  wire        pad_cam_data6,\n60:    inout  wire        pad_cam_data7,\n61:    inout  wire        pad_cam_vsync,\n62: \n63:    inout  wire        pad_sdio_clk,\n64:    inout  wire        pad_sdio_cmd,\n65:    inout  wire        pad_sdio_data0,\n66:    inout  wire        pad_sdio_data1,\n67:    inout  wire        pad_sdio_data2,\n68:    inout  wire        pad_sdio_data3,\n69: \n70:    inout  wire        pad_i2c0_sda,\n71:    inout  wire        pad_i2c0_scl,\n72: \n73:    inout  wire        pad_i2s0_sck,\n74:    inout  wire        pad_i2s0_ws,\n75:    inout  wire        pad_i2s0_sdi,\n76:    inout  wire        pad_i2s1_sdi,\n77: \n78:    inout  wire        pad_reset_n,\n79:    inout  wire        pad_bootsel,\n80: \n81:    inout  wire        pad_jtag_tck,\n82:    inout  wire        pad_jtag_tdi,\n83:    inout  wire        pad_jtag_tdo,\n84:    inout  wire        pad_jtag_tms,\n85:    inout  wire        pad_jtag_trst,\n86: \n87:    inout  wire        pad_xtal_in,\n88:    input  logic       cluster_jtag_tck_i,\n89:    input  logic       cluster_jtag_tdi_i,\n90:    output logic       cluster_jtag_tdo_o,\n91:    input  logic       cluster_jtag_tms_i,\n92:    input  logic       cluster_jtag_trst_ni\n93:   );\n94: \n95:   localparam AXI_ADDR_WIDTH             = 32;\n96:   localparam AXI_DATA_WIDTH             = 64;\n97:   localparam AXI_DATA_SOC_CLUSTER_WIDTH = 32;\n98:   localparam\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 13,
+      "tool": "read_file",
+      "args": {
+        "path": "rtl/pulpissimo/jtag_tap_top.sv"
+      },
+      "status": "ok",
+      "path": "rtl/pulpissimo/jtag_tap_top.sv",
+      "error": null,
+      "content": "// Copyright 2018 ETH Zurich and University of Bologna.\n// Copyright and related rights are licensed under the Solderpad Hardware\n// License, Version 0.51 (the \"License\"); you may not use this file except in\n// compliance with the License.  You may obtain a copy of the License at\n// http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n// or agreed to in writing, software, hardware and materials distributed under\n// this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n// CONDITIONS OF ANY KIND, either express or implied. See the License for the\n// specific language governing permissions and limitations under the License.\n\n\nmodule jtag_tap_top\n(\n    input  logic              tck_i,\n    input  logic              trst_ni,\n    input  logic              tms_i,\n    input  logic              td_i,\n    output logic              td_o,\n\n    output logic              soc_tck_o,\n    output logic              soc_trstn_o,\n    output logic              soc_tms_o,\n    output logic              soc_tdi_o,\n    input  logic              soc_tdo_i,\n\n    input  logic              test_clk_i,\n    input  logic              test_rstn_i,\n\n    input  logic        [7:0] soc_jtag_reg_i,\n    output logic        [7:0] soc_jtag_reg_o,\n    output logic              sel_fll_clk_o,\n\n   // tap\n   output logic               jtag_shift_dr_o,\n   output logic               jtag_update_dr_o,\n   output logic               jtag_capture_dr_o,\n   output logic               axireg_sel_o,\n\n   output logic               dbg_axi_scan_in_o,\n   input  logic               dbg_axi_scan_out_i\n);\n\n    logic                       s_scan_i;\n    logic [8:0]                 s_confreg;\n    logic                       confscan;\n    logic                       confreg_sel;\n    logic                       td_o_int;\n\n    logic [7:0] r_soc_reg0;\n    logic [7:0] r_soc_reg1;\n\n    logic [7:0] s_soc_jtag_reg_sync;\n\n    assign soc_trstn_o = trst_ni;\n    assign soc_tms_o = tms_i;\n    assign soc_tdi_o = td_o_int;\n    assign soc_tck_o = tck_i;\n\n    assign td_o = soc_tdo_i;\n\n\n    // jtag tap controller\n    tap_top tap_top_i\n    (\n        .tms_i             ( tms_i              ),\n        .tck_i             ( tck_i              ),\n        .rst_ni            ( trst_ni            ),\n        .td_i              ( td_i               ),\n        .td_o              ( td_o_int           ),\n\n        .shift_dr_o        ( jtag_shift_dr_o    ),\n        .update_dr_o       ( jtag_update_dr_o   ),\n        .capture_dr_o      ( jtag_capture_dr_o  ),\n\n        .axireg_sel_o      ( axireg_sel_o       ),\n        .bbmuxreg_sel_o    (                    ),\n        .clkgatereg_sel_o  (                    ),\n        .confreg_sel_o     ( confreg_sel        ),\n        .testmodereg_sel_o (                    ),\n        .bistreg_sel_o     (                    ),\n\n        .scan_in_o         ( s_scan_i           ),\n\n        .axireg_out_i      ( dbg_axi_scan_out_i ),\n        .bbmuxreg_out_i    ( 1'b0               ),\n        .clkgatereg_out_i  ( 1'b0               ),\n        .confreg_out_i     ( confscan           ),\n        .testmodereg_out_i ( 1'b0               ),\n        .bistreg_out_i     ( 1'b0               )\n    );\n\n    // pulp configuration register\n    jtagreg\n    #(\n        .JTAGREGSIZE(9),\n        .SYNC(0)\n    )\n    confreg\n    (\n        .clk_i                  ( tck_i               ),\n        .rst_ni                 ( trst_ni             ),\n        .enable_i               ( confreg_sel         ),\n        .capture_dr_i           ( jtag_capture_dr_o   ),\n        .shift_dr_i             ( jtag_shift_dr_o     ),\n        .update_dr_i            ( jtag_update_dr_o    ),\n        .jtagreg_in_i           ( {1'b0, s_soc_jtag_reg_sync} ), //at sys rst enable the fll\n        .mode_i                 ( 1'b1                ),\n        .scan_in_i              ( s_scan_i            ),\n        .jtagreg_out_o          ( s_confreg           ),\n        .scan_out_o             ( confscan            )\n  \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 14,
+      "tool": "search_text",
+      "args": {
+        "query": "adv_dbg_if",
+        "path": "rtl/pulpissimo/pulpissimo.sv"
+      },
+      "status": "ok",
+      "path": "rtl/pulpissimo/pulpissimo.sv",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 14,
+      "tool": "search_text",
+      "args": {
+        "query": "lint_jtag",
+        "path": "rtl/pulpissimo"
+      },
+      "status": "ok",
+      "path": "rtl/pulpissimo",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 15,
+      "tool": "search_text",
+      "args": {
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "query": "adv_dbg_if|jtag|debug"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 16,
+      "tool": "read_file",
+      "args": {
+        "path": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+      "error": null,
+      "content": "// Copyright 2018 ETH Zurich and University of Bologna.\n// Copyright and related rights are licensed under the Solderpad Hardware\n// License, Version 0.51 (the \"License\"); you may not use this file except in\n// compliance with the License.  You may obtain a copy of the License at\n// http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n// or agreed to in writing, software, hardware and materials distributed under\n// this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n// CONDITIONS OF ANY KIND, either express or implied. See the License for the\n// specific language governing permissions and limitations under the License.\n\n\n`include \"pulp_soc_defines.sv\"\n\nmodule lint_jtag_wrap #(\n    parameter ADDRESS_WIDTH = 32,\n    parameter DATA_WIDTH    = 32\n) (\n    input  logic         tck_i,\n    input  logic         tdi_i,\n    input  logic         trstn_i,\n    output logic         tdo_o,\n    input  logic         shift_dr_i,\n    input  logic         pause_dr_i,\n    input  logic         update_dr_i,\n    input  logic         capture_dr_i,\n    input  logic         lint_select_i,\n    input  logic         clk_i,\n    input  logic         rst_ni,\n    XBAR_TCDM_BUS.Master jtag_lint_master\n);\n\n\n    // Top module\n    adbg_lintonly_top #(\n        .ADDR_WIDTH ( ADDRESS_WIDTH ),\n        .DATA_WIDTH ( DATA_WIDTH    )\n    ) dbg_module_i (\n        // JTAG signals\n        .tck_i          ( tck_i                    ),\n        .tdi_i          ( tdi_i                    ),\n        .tdo_o          ( tdo_o                    ),\n        .trstn_i        ( trstn_i                  ),\n\n        // TAP states\n        .shift_dr_i     ( shift_dr_i               ),\n        .pause_dr_i     ( pause_dr_i               ),\n        .update_dr_i    ( update_dr_i              ),\n        .capture_dr_i   ( capture_dr_i             ),\n\n        // Instructions\n        .debug_select_i ( lint_select_i            ),\n\n        .clk_i          ( clk_i                    ),\n        .rstn_i         ( rst_ni                   ),\n\n        .lint_req_o     ( jtag_lint_master.req     ),\n        .lint_add_o     ( jtag_lint_master.add     ),\n        .lint_wen_o     ( jtag_lint_master.wen     ),\n        .lint_wdata_o   ( jtag_lint_master.wdata   ),\n        .lint_be_o      ( jtag_lint_master.be      ),\n        .lint_aux_o     (                          ),\n        .lint_gnt_i     ( jtag_lint_master.gnt     ),\n        .lint_r_aux_i   (                          ),\n        .lint_r_valid_i ( jtag_lint_master.r_valid ),\n        .lint_r_rdata_i ( jtag_lint_master.r_rdata ),\n        .lint_r_opc_i   ( jtag_lint_master.r_opc   )\n    );\n\nendmodule // jtag_wrap\n",
+      "truncated": false
+    },
+    {
+      "step": 17,
+      "tool": "search_text",
+      "args": {
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "query": "lint_jtag|jtag_lint"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 18,
+      "tool": "search_text",
+      "args": {
+        "path": "ips/pulp_soc/rtl/pulp_soc",
+        "query": "jtag|debug"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 19,
+      "tool": "read_file",
+      "args": {
+        "offset": 700,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "limit": 200
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"700:         .N_L2_BANKS         ( NB_L2_BANKS           ),\\n701:         .ADDR_MEM_WIDTH     ( L2_MEM_ADDR_WIDTH     ),\\n702:         .N_HWPE_PORTS       ( NB_HWPE_PORTS         ),\\n703: \\n704:         .N_L2_BANKS_PRI     ( NB_L2_BANKS_PRI       ),\\n705:         .ADDR_MEM_PRI_WIDTH ( L2_MEM_ADDR_WIDTH_PRI ),\\n706: \\n707:         .ROM_ADDR_WIDTH     ( ROM_ADDR_WIDTH        ),\\n708: \\n709:         .AXI_32_ID_WIDTH    ( AXI_ID_OUT_WIDTH      ),\\n710:         .AXI_32_USER_WIDTH  ( AXI_USER_WIDTH        ),\\n711: \\n712:         .AXI_ADDR_WIDTH     ( AXI_ADDR_WIDTH        ),\\n713:         .AXI_DATA_WIDTH     ( AXI_DATA_IN_WIDTH     ),\\n714:         .AXI_STRB_WIDTH     ( AXI_DATA_IN_WIDTH/8   ),\\n715:         .AXI_USER_WIDTH     ( AXI_USER_WIDTH        ),\\n716:         .AXI_ID_WIDTH       ( AXI_ID_IN_WIDTH       )\\n717:     ) i_soc_interconnect_wrap (\\n718:         .clk_i            ( s_soc_clk           ),\\n719:         .rstn_i           ( s_soc_rstn          ),\\n720:         .test_en_i        ( dft_test_mode_i     ),\\n721:         .lint_fc_data     ( s_lint_fc_data_bus  ),\\n722:         .lint_fc_instr    ( s_lint_fc_instr_bus ),\\n723:         .lint_udma_tx     ( s_lint_udma_tx_bus  ),\\n724:         .lint_udma_rx     ( s_lint_udma_rx_bus  ),\\n725:         .lint_debug       ( s_lint_debug_bus    ),\\n726:         .lint_hwpe        ( s_lint_hwpe_bus     ),\\n727: \\t\\n728:         .axi_from_cluster ( s_data_in_bus       ),\\n729:         .axi_to_cluster   ( s_data_out_bus      ),\\n730: \\n731:         .apb_periph_bus   ( s_apb_periph_bus    ),\\n732:         .mem_l2_bus       ( s_mem_l2_bus        ),\\n733:         .mem_l2_pri_bus   ( s_mem_l2_pri_bus    ),\\n734:         .mem_rom_bus      ( s_mem_rom_bus       )\\n735:     );\\n736: \\n737:     lint_jtag_wrap i_lint_jtag (\\n738:         .tck_i        ( jtag_tck_i        ),\\n739:         .tdi_i        ( jtag_axireg_tdi_i ),\\n740:         .trstn_i      ( jtag_trst_ni      ),\\n741:         .tdo_o        ( jtag_axireg_tdo_o ),\\n742:         .shift_dr_i   ( jtag_shift_dr_i   ),\\n743:         .pause_dr_i   ( 1'b0              ),\\n744:         .update_dr_i  ( jtag_update_dr_i  ),\\n745:         .capture_dr_i ( jtag_capture_dr_i ),\\n746:         .lint_select_i( jtag_axireg_sel_i ),\\n747:         .clk_i        ( s_soc_clk  ),\\n748:         .rst_ni       ( s_soc_rstn ),\\n749:         .jtag_lint_master(s_lint_debug_bus)\\n750:     );\\n751: \\n752:     //********************************************************\\n753:     //*** PAD AND GPIO CONFIGURATION SIGNALS PACK ************\\n754:     //********************************************************\\n755: \\n756:     generate\\n757:         for (i=0; i<32; i++) begin\\n758:             for (j=0; j<6; j++) begin\\n759:                 assign gpio_cfg_o[j+6*i] = s_gpio_cfg[i][j];\\n760:             end\\n761:         end\\n762:     endgenerate\\n763: \\n764:     generate\\n765:         for (i=0; i<64; i++) begin\\n766:             for (j=0; j<2; j++) begin\\n767:                 assign pad_mux_o[j+2*i] = s_pad_mux[i][j];\\n768:             end\\n769:         end\\n770:     endgenerate\\n771: \\n772:     generate\\n773:         for (i=0; i<64; i++) begin\\n774:             for (j=0; j<6; j++) begin\\n775:                 assign pad_cfg_o[j+6*i] = s_pad_cfg[i][j];\\n776:             end\\n777:         end\\n778:     endgenerate\\n779: \\n780:     //********************************************************\\n781:     //*** AXI DATA SLAVE INTERFACE UNPACK ********************\\n782:     //********************************************************\\n783: \\n784:     // AXI DATA SLAVE\\n785:     assign s_data_slave.aw_writetoken  = data_slave_aw_writetoken_i  ;\\n786:     assign s_data_slave.aw_addr        = data_slave_aw_addr_i        ;\\n787:     assign s_data_slave.aw_prot        = data_slave_aw_prot_i        ;\\n788:     assign s_data_slave.aw_region      = data_slave_aw_region_i      ;\\n789:     assign s_data_slave.aw_len         = data_slave_aw_len_i \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 20,
+      "tool": "search_text",
+      "args": {
+        "path": "rtl/pulpissimo/pulpissimo.sv",
+        "query": "dbg_axi|axi_master|adv_dbg"
+      },
+      "status": "ok",
+      "path": "rtl/pulpissimo/pulpissimo.sv",
+      "error": null,
+      "content": "",
+      "truncated": false
+    }
+  ]
+}

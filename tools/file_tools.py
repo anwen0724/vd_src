@@ -59,7 +59,7 @@ class ReadSearchTools:
         except OSError as exc:
             return self._error("list_dir", path, str(exc))
 
-    def read_file(self, path: str) -> ToolResult:
+    def read_file(self, path: str, offset: int | None = None, limit: int | None = None) -> ToolResult:
         """Read one file under the input-scope root."""
 
         try:
@@ -70,6 +70,14 @@ class ReadSearchTools:
                 return self._error("read_file", path, "Path is not a file")
 
             text = target.read_text(encoding="utf-8", errors="replace")
+            if offset is not None or limit is not None:
+                lines = text.splitlines()
+                start_line = max(int(offset or 1), 1)
+                start_index = start_line - 1
+                end_index = len(lines) if limit is None else start_index + max(int(limit), 0)
+                selected = lines[start_index:end_index]
+                text = "\n".join(f"{line_number}: {line}" for line_number, line in enumerate(selected, start=start_line))
+
             truncated = len(text) > self.max_file_chars
             if truncated:
                 text = text[: self.max_file_chars]

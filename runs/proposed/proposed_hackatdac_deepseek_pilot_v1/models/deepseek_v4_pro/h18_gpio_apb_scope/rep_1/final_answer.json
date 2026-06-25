@@ -1,0 +1,120 @@
+{
+  "analysis_summary": "The proposed method produced 3 finding(s) from 8 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "potential_warning",
+      "summary": "apb_gpio implements a GPIOLOCK register (r_gpio_lock) but the write logic was not fully observed; from reset it initializes to 0. No sticky mechanism evident in inspected snippets. apb_soc_ctrl has no lock bits for critical registers.",
+      "vulnerability_category": "write to lock bit / any lock register (e.g., apb_gpio r_gpio_lock) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/apb/apb_gpio/apb_gpio.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/apb/apb_gpio/apb_gpio.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any APB master with write access Operation: write to lock bit Object: any lock register (e.g., apb_gpio r_gpio_lock) Expected guard: sticky lock bit, clearable only by privileged reset Observed behavior: apb_gpio implements a GPIOLOCK register (r_gpio_lock) but the write logic was not fully observed; from reset it initializes to 0. No sticky mechanism evident in inspected snippets. apb_soc_ctrl has no lock bits for critical registers. Path: APB write to apb_gpio REG_GPIOLOCK (address 0x48) Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If not sticky, an attacker could unlock gpio after lockdown.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The complete write case for REG_GPIOLOCK is missing from tool observations. Without it, we cannot determine whether the lock bit is made sticky (e.g., written once and then ignored). Also, no lock bits found in apb_soc_ctrl.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Critical security registers in apb_soc_ctrl lack a write-lock mechanism after reset. An adversary with standard APB write access can modify boot address, cluster power/reset, and JTAG register, defeating any expected boot-time lockdown.",
+      "vulnerability_category": "reset (value set to default) / fc_bootaddr_o, cluster_boot_addr_o, soc_jtag_reg_o, cluster_pow_o, etc. / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: reset controller / power-on default Operation: reset (value set to default) Object: fc_bootaddr_o, cluster_boot_addr_o, soc_jtag_reg_o, cluster_pow_o, etc. Expected guard: reset value must be secure; changes from secure value must be privileged (e.g., locked after secure boot) Observed behavior: Reset default for r_bootaddr = 0x1A000000, r_fetchen=1, cluster_pow=0, cluster_rstn=1, etc., which appear safe. However, after reset, any APB master that can access apb_soc_ctrl (e.g., CPU via main APB bus) can write new values to these registers without any lock or authentication check. The write path is: if (PSEL && PENABLE && PWRITE) { case(s_apb_addr) ...}. No conditional guarding on a ‘locked’ state. Path: APB write to apb_soc_ctrl (REG_FCBOOT, REG_CLUSTER_CTRL, etc.) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker who gains control of the main APB master (e.g., through a firmware vulnerability) can alter boot address or cluster control, compromising system integrity.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "Overlapping address ranges between UDMA and SOC_CTRL cause multiple PSEL assertions, violating APB exclusivity and potentially enabling unintended peripheral access.",
+      "vulnerability_category": "address decode and psel generation / APB slave selection in apb_node / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "rtl/includes/periph_bus_defines.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/apb/apb_node/apb_node.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "rtl/includes/periph_bus_defines.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/apb/apb_node/apb_node.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any APB master on the peripheral APB bus Operation: address decode and psel generation Object: APB slave selection in apb_node Expected guard: non-overlapping address ranges, complete decode Observed behavior: Address ranges UDMA (0x1A10_2000-0x1A10_4FFF) and SOC_CTRL (0x1A10_4000-0x1A10_4FFF) overlap. The apb_node generates psel using simple >=/<= comparisons, so both PSEL[2] (UDMA) and PSEL[3] (SOC_CTRL) are active for addresses in 0x4000-0x4FFF, violating APB protocol and potentially allowing one master to interfere with the other. Path: paddr_i → apb_node → psel_o[2] and psel_o[3] both asserted Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "A transaction intended for SOC_CTRL may also be seen by UDMA, and vice versa. This could allow a DMA configuration access to accidentally or maliciously affect SOC_CTRL registers, compromising system security.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

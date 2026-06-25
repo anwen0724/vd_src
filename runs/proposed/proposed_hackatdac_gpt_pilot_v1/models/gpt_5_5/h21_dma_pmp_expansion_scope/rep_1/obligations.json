@@ -1,0 +1,355 @@
+{
+  "scope_id": "piton_ariane_peripherals_permission_scope",
+  "obligations": [
+    {
+      "obligation_id": "PERM-RISCVPERIPH-DBG-001",
+      "reason": "The scope exposes JTAG pins, debug mode input, debug request/response handshakes, dmi_jtag/SimJTAG instances, and jtag_hash/jtag_unlock signals. Debug access is security-sensitive and must not be treated as safe merely because debug logic exists; verify that all reachable debug operations are covered by authorization.",
+      "subject": "external JTAG/DTM or simulation debug interface",
+      "operation": "trigger debug entry/reset or read/write debug-module resources",
+      "object": "hart debug control, ndmreset_o/dmactive_o/debug_req_o, and debug module bus-visible state",
+      "expected_guard": "debug authorization/unlock (e.g. jtag_unlock or equivalent authentication) must mediate debug requests before they can request hart debug entry, non-debug-module reset, or access protected system state",
+      "candidate_path": "JTAG/DTM inputs -> dmi_jtag/SimJTAG/Debug Module signals -> debug_req_o, ndmreset_o, dmactive_o and any dm_slave/dm_master access path",
+      "state_conditions_to_check": [
+        "reset/default of jtag_unlock or debug authorization state",
+        "whether debug_mode_i bypasses or substitutes for authorization",
+        "whether SimDTM/SimJTAG test paths are synthesis-gated or otherwise mediated"
+      ],
+      "required_evidence_slots": [
+        "subject: JTAG/DTM/debug requester",
+        "operation: DMI/debug request op or reset/debug entry",
+        "object: debug_req_o/ndmreset_o/dmactive_o or bus slave/master state",
+        "expected guard: jtag_unlock/auth/debug authorization",
+        "observed RTL condition enabling operation",
+        "path/reachability from ports or instances",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "evidence closure: subject, operation, object, guard, path/reachability"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer lists signals and instances but not complete debug-module connections; inspect implementation around the cited signals."
+    },
+    {
+      "obligation_id": "PERM-RISCVPERIPH-ACC-002",
+      "reason": "The top-level contains acc_ctrl, acc_ctrl_c indexed by privilege level/peripheral, and many protected-looking peripheral NoC endpoints. The assignment acc_ctrl_c[i][j] includes a special OR condition for one peripheral index, so each visible peripheral request should be checked for correct access mediation.",
+      "subject": "CPU/NoC MMIO requester at a given priv_lvl_i",
+      "operation": "route/read/write MMIO or NoC request to peripheral",
+      "object": "peripheral request paths and protected peripheral address regions",
+      "expected_guard": "peripheral accesses must be gated by the intended privilege/access-control bit for the requester and target peripheral; aliasing between peripheral indices must be intentional and safe",
+      "candidate_path": "riscv_peripherals access-control decode -> acc_ctrl/acc_ctrl_c -> peripheral request enables, especially rom_req, crypto/RNG/debug/DMA/reglk/reset peripheral NoC paths",
+      "state_conditions_to_check": [
+        "reset/update source of acc_ctrl bits",
+        "whether acc_ctrl can be programmed by insufficiently privileged software",
+        "special case acc_ctrl_c[i][j] OR behavior for j==5 using index 4",
+        "whether read and write paths share the same guard or need distinct guards"
+      ],
+      "required_evidence_slots": [
+        "subject: CPU/NoC requester and priv_lvl_i",
+        "operation: decoded read/write request",
+        "object: target peripheral request/data path",
+        "expected guard: acc_ctrl_c[priv_lvl_i][target] or equivalent",
+        "observed enable condition",
+        "address/peripheral decode evidence",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP",
+        "Common false-positive risks: explain expected guard"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer is truncated for later assignments; confirm all request enable equations in the full file."
+    },
+    {
+      "obligation_id": "PERM-RISCVPERIPH-LOCK-003",
+      "reason": "The design exposes a wide reglk_ctrl vector and dma_wrapper has reglk_ctrl_i plus core_lock_reg and write-enable logic. Verify lock enforcement at the actual write sites rather than assuming the lock exists.",
+      "subject": "software-visible AXI/MMIO requester or alternate debug/test writer",
+      "operation": "write or reconfigure locked peripheral registers",
+      "object": "DMA configuration registers and other peripheral configuration controlled by reglk_ctrl",
+      "expected_guard": "once a lock bit is set for a protected peripheral/register, all software/debug/test write paths that modify the protected configuration must be blocked until permitted reset or lifecycle event",
+      "candidate_path": "reglk_ctrl register source -> peripheral wrapper lock inputs -> write enables for DMA and other protected configuration registers",
+      "state_conditions_to_check": [
+        "reset value of lock bits",
+        "set and clear conditions for locks",
+        "whether locks are sticky or can be cleared by software",
+        "whether we_flag/testmode/rst_N signals bypass lock",
+        "whether read-only status registers are incorrectly protected/unprotected"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/MMIO/debug/test writer",
+        "operation: write to protected config",
+        "object: start/length/source/dest/core_lock or target peripheral register",
+        "expected guard: corresponding reglk_ctrl_i/core_lock bit",
+        "observed write enable expression",
+        "all alternate write/reset paths",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Debug / JTAG / Test Access",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Need full procedural blocks in dma_wrapper and top-level register-lock peripheral to map lock bits to registers."
+    },
+    {
+      "obligation_id": "PERM-DMA-PMP-004",
+      "reason": "The DMA has programmable start/length/source/destination registers and PMP-related state (pmp_addr_reg, pmp_access_type_en, pmp_allow_reg, abort, valid_reg). A DMA engine can bypass CPU permission checks if its transfer generation is not mediated by PMP or equivalent range checks.",
+      "subject": "DMA engine / software configuring DMA",
+      "operation": "initiate DMA read/write transfer",
+      "object": "memory regions reachable by DMA source/destination addresses",
+      "expected_guard": "DMA transfer start and each source/destination address used for memory access must be authorized by PMP/range/access-control checks before asserting transfer-valid state",
+      "candidate_path": "DMA MMIO registers/start -> dma internal start/length/source/dest -> valid_o/transfer request generation -> PMP allow/abort logic",
+      "state_conditions_to_check": [
+        "whether both source and destination are checked",
+        "whether checks cover entire length, not only base address",
+        "whether active transfer can continue after PMP/access configuration changes",
+        "whether pmp_allow_reg is reset safely and refreshed per transfer/address",
+        "whether abort reliably suppresses valid_o and clears outstanding state"
+      ],
+      "required_evidence_slots": [
+        "subject: DMA engine configured through MMIO",
+        "operation: source read/destination write transfer",
+        "object: memory address range from source/dest/length",
+        "expected guard: PMP/range allow for relevant access type",
+        "observed valid_o/start/abort conditions",
+        "address progression/bounds evidence",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/dma/dma.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/pmp/pmp.sv",
+        "piton/design/chip/tile/ariane/src/pmp/pmp_entry.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer gives internal signals but not state-machine details; inspect transfer FSM and PMP instantiations."
+    },
+    {
+      "obligation_id": "PERM-DMA-MMIO-005",
+      "reason": "dma_wrapper exposes AXI input/output ports, reglk_ctrl_i, acct_ctrl_i, we_flag, rst_8, and a set of DMA registers. The visible RTL should show that writes are not accepted solely from address decode/write strobe without permission mediation.",
+      "subject": "AXI-lite requester targeting DMA wrapper",
+      "operation": "write DMA control/start/address/length registers",
+      "object": "DMA software-visible configuration and control registers",
+      "expected_guard": "DMA configuration writes must require the intended MMIO access permission/accounting control and register-lock state before updating transfer parameters or start control",
+      "candidate_path": "dma_wrapper AXI-lite decode -> start_reg/length_reg/source_addr_*_reg/dest_addr_*_reg/core_lock_reg writes -> dma instance inputs",
+      "state_conditions_to_check": [
+        "reset values of DMA config registers",
+        "whether start can be asserted without permitted configuration writes",
+        "whether partial writes/byte enables bypass guards",
+        "whether we_flag or rst_8 creates a privileged override"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/MMIO requester",
+        "operation: write register",
+        "object: each DMA config/control register",
+        "expected guard: acct_ctrl_i plus reglk_ctrl_i/core_lock and valid decode",
+        "observed assignment/update condition",
+        "address decode mapping",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/clint/axi_lite_interface.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need inspect of address decode and procedural updates around line 129 onward."
+    },
+    {
+      "obligation_id": "PERM-AXILITE-006",
+      "reason": "The AXI-lite interface produces address_o, en_o, we_o, and data_o from AXI handshakes. Permission analysis should check whether downstream register writes are based on current valid requests and not on stale address_n/trans_id state or mismatched read/write channel handshakes.",
+      "subject": "AXI master connected to axi_lite_interface",
+      "operation": "read/write downstream register via AXI-lite bridge",
+      "object": "downstream CLINT/wrapper registers selected by address_o/en_o/we_o",
+      "expected_guard": "AXI-lite conversion must preserve valid address/write intent and any upstream permission attributes; protected downstream registers must not be written merely due to stale address or incomplete handshake",
+      "candidate_path": "axi_lite_interface AXI channels -> en_o/we_o/address_o/data_o -> CLINT or wrapper register access",
+      "state_conditions_to_check": [
+        "reset of address_n/trans_id_n",
+        "stability of address during en_o/we_o",
+        "handling of simultaneous or reordered read/write requests",
+        "whether assertions only check protocol and not permission"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI master",
+        "operation: read/write bridge transaction",
+        "object: downstream selected register",
+        "expected guard: valid AXI handshake plus downstream permission guard",
+        "observed en_o/we_o/address_o sequencing",
+        "reachability to protected register",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/clint/axi_lite_interface.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "The bridge is generic; finding requires tying it to a protected downstream register in this scope."
+    },
+    {
+      "obligation_id": "PERM-PMP-007",
+      "reason": "The PMP modules receive addr_i and riscv PMP configuration-like inputs and emit allow_o/match_o. Since DMA depends on PMP-like allow state, permission correctness requires checking default deny, priority, matching and access-type mediation.",
+      "subject": "CPU/DMA memory requester",
+      "operation": "allow memory access",
+      "object": "PMP-protected memory regions",
+      "expected_guard": "PMP allow must be false unless an enabled entry matches the requested address and grants the requested access type for the current privilege/requester; address matching must implement correct bounds for TOR/NA4/NAPOT or supported modes",
+      "candidate_path": "PMP configuration inputs -> pmp_entry match_o -> pmp allow_o -> DMA/CPU access decision",
+      "state_conditions_to_check": [
+        "no-entry-match default behavior",
+        "entry priority when multiple match bits asserted",
+        "lock bit effects on PMP entries if present",
+        "address granularity and boundary conditions",
+        "privilege-mode exceptions or machine-mode behavior"
+      ],
+      "required_evidence_slots": [
+        "subject: memory requester using PMP decision",
+        "operation: read/write/execute or DMA data access",
+        "object: address range under PMP control",
+        "expected guard: matching PMP entry with access permission and privilege conditions",
+        "observed allow_o equation and match priority",
+        "configuration source evidence",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/pmp/pmp.sv",
+        "piton/design/chip/tile/ariane/src/pmp/pmp_entry.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact extraction labels several PMP ports generically as riscv; inspect declarations to identify config, access type and privilege inputs."
+    },
+    {
+      "obligation_id": "PERM-FUSE-008",
+      "reason": "The top-level contains fuse_req, fuse_addr, and fuse_rdata signals. Fuses are protected assets when they contain keys, identities, lifecycle or security configuration; verify an actual exposure path and guard before reporting.",
+      "subject": "software-visible requester or debug/test interface",
+      "operation": "read/expose or use fuse data",
+      "object": "fuse_rdata and fuse-backed security/lifecycle configuration",
+      "expected_guard": "fuse read/exposure must be limited to authorized subjects and fuse-derived security configuration must not be readable or overridden by unprivileged/debug/test paths",
+      "candidate_path": "fuse_req/fuse_addr/fuse_rdata path -> NoC/MMIO response or security configuration consumers",
+      "state_conditions_to_check": [
+        "reset/default value of fuse response registers",
+        "whether stale fuse_rdata remains readable after denied request",
+        "whether debug/test path can read fuse_rdata",
+        "whether acc_ctrl/reglk controls cover fuse address space"
+      ],
+      "required_evidence_slots": [
+        "subject: MMIO/NoC/debug requester or internal consumer",
+        "operation: read fuse or override fuse-backed policy",
+        "object: fuse_rdata/fuse address region",
+        "expected guard: privilege/access-control/lifecycle/debug authorization",
+        "observed read mux/request enable condition",
+        "external response path or security-control effect",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "Only signal names are visible; inspect around line 1613 and response muxes for reachability."
+    },
+    {
+      "obligation_id": "PERM-RESET-009",
+      "reason": "The top-level includes many per-peripheral reset signals and a reset NoC endpoint; dma_wrapper receives rst_8. Permission analysis should check reset write paths and reset effects on locks/configuration.",
+      "subject": "software/NoC/debug requester controlling reset",
+      "operation": "trigger peripheral reset or clear security state",
+      "object": "peripheral reset lines and security/lock/configuration state affected by reset",
+      "expected_guard": "writes that assert peripheral resets must be privilege/access-control guarded, and reset must not clear locks or security state in a way that permits unauthorized reconfiguration",
+      "candidate_path": "reset-control peripheral/NoC path -> rst_1..rst_13 and rst_8 into dma_wrapper -> protected peripheral reset behavior",
+      "state_conditions_to_check": [
+        "whether reset lines are writable by unprivileged subjects",
+        "whether reset clears reglk/core_lock while preserving access to target config",
+        "whether security-sensitive registers retain stale values or become unsafe defaults",
+        "whether debug/ndmreset interacts with peripheral resets"
+      ],
+      "required_evidence_slots": [
+        "subject: MMIO/NoC requester writing reset control",
+        "operation: assert/deassert reset",
+        "object: rst_N signal and affected protected registers/locks",
+        "expected guard: privilege/access-control and lock/lifecycle policy",
+        "observed reset generation and register reset behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need decode and update logic for reset peripheral in full top-level file."
+    },
+    {
+      "obligation_id": "PERM-TEST-010",
+      "reason": "The top-level and DMA modules expose testmode_i and multiple we_flag inputs. Such signals may be legitimate but must be checked for bypass of permission guards and lock enforcement.",
+      "subject": "test/manufacturing override interface",
+      "operation": "override write protection or force write/reset/control state",
+      "object": "protected configuration registers, lock state, DMA/PMP control state",
+      "expected_guard": "test or manufacturing override signals must not enable writes, unlocks, resets, or protected operations in normal operation unless gated by explicit test lifecycle/debug authorization",
+      "candidate_path": "testmode_i/we_flag_0..we_flag_4/we_flag signals -> peripheral wrappers and DMA internal write enables",
+      "state_conditions_to_check": [
+        "whether testmode_i is tied off or externally controllable in this scope",
+        "whether we_flag bypasses reglk_ctrl/acct_ctrl/PMP checks",
+        "reset defaults of override-controlled registers",
+        "whether override effects persist after test mode is deasserted"
+      ],
+      "required_evidence_slots": [
+        "subject: test/debug external control",
+        "operation: force write/override/reset/control",
+        "object: protected register or permission state affected",
+        "expected guard: test lifecycle enable or debug authorization plus normal lock/permission guard",
+        "observed use of testmode_i/we_flag in assignments/procedural blocks",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Fact layer lists we_flag ports but not all uses; inspect all occurrences."
+    }
+  ]
+}

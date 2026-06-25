@@ -1,12 +1,19 @@
 {
-  "analysis_summary": "Analyzed only the RTL/source files under the provided input scope. The visible code implements a privilege-indexed access-control matrix and uses it to gate peripheral register access, including DMA. However, the access-control memory resets to all ones, making the design fail open by default. The access-control peripheral itself and the DMA wrapper inherit that default access. The DMA wrapper gates its AXI-Lite register writes with acct_ctrl_i, but because that signal comes from the fail-open matrix, lower privilege levels may be able to program DMA control registers unless trusted initialization closes and locks policy before any untrusted access. The actual dma module implementation is not present in scope, so PMP enforcement inside the DMA engine cannot be confirmed from visible source.",
+  "analysis_summary": "Inspected the visible RTL under the provided scope: local wrappers for DMA, packet/key table (PKT), register lock (REGLK), access control table (ACCT), and integration evidence from riscv_peripherals.sv. The design implements privilege-indexed access gating via acc_ctrl_c[priv_lvl_i][peripheral], register-lock masking, and wrapper-level AXI-lite enable gating. However, visible source evidence shows multiple permission-related weaknesses: the ACCT wrapper exposes too few access-control storage words for the top-level's 14 peripheral permission matrix and then indexes/writes beyond that storage; its output only drives the first three words while the top-level consumes 56 permission bits; reset defaults permissions to all ones; and the PKT wrapper exposes fuse data by default on many reads. These issues can cause unintended peripheral access grants and leakage of fuse/key-related information.",
   "findings": [
     {
-      "finding_id": "PERM-001",
+      "finding_id": "PERM-ACCT-001",
       "status": "confirmed_finding",
-      "summary": "Access-control registers reset to permit-all, causing a fail-open permission state across privilege-indexed peripheral gates.",
-      "vulnerability_category": "Fail-open permission control / insecure default access policy",
+      "summary": "Access-control table sizing and output mapping are inconsistent with the top-level 14-peripheral permission matrix, creating a permission-enforcement vulnerability.",
+      "vulnerability_category": "Permission bypass / incorrect access-control mapping",
       "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 33,
+          "line_end": 33,
+          "module": "acct_wrapper",
+          "signal_or_register": "AcCt_MEM_SIZE / acct_mem"
+        },
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
           "line_start": 49,
@@ -16,331 +23,267 @@
         },
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 73,
-          "line_end": 73,
+          "line_start": 108,
+          "line_end": 108,
           "module": "acct_wrapper",
-          "signal_or_register": "en"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 84,
-          "line_end": 84,
-          "module": "acct_wrapper",
-          "signal_or_register": "acct_mem"
+          "signal_or_register": "acct_mem[09]"
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 222,
+          "line_start": 216,
           "line_end": 222,
           "module": "riscv_peripherals",
-          "signal_or_register": "acc_ctrl_c"
+          "signal_or_register": "acc_ctrl_c / acc_ctrl"
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1729,
-          "line_end": 1729,
-          "module": "riscv_peripherals",
-          "signal_or_register": "acct_ctrl_i for ACCT"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1819,
-          "line_end": 1819,
-          "module": "riscv_peripherals",
-          "signal_or_register": "acct_ctrl_i for REGLK"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1906,
+          "line_start": 517,
           "line_end": 1906,
           "module": "riscv_peripherals",
-          "signal_or_register": "acct_ctrl_i for DMA"
+          "signal_or_register": "acc_ctrl_c[priv_lvl_i][*]"
         }
       ],
       "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 212,
+          "line_end": 216,
+          "module": "riscv_peripherals",
+          "object": "NB_PERIPHERALS / acc_ctrl / acc_ctrl_c",
+          "evidence_type": "source_search",
+          "description": "Top-level declares a 14-peripheral access-control vector and a privilege-indexed permission matrix.",
+          "supports_claim": "Shows the integration expects 4 permission bits for each of 14 peripherals, i.e. 56 bits of access-control state."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 220,
+          "line_end": 222,
+          "module": "riscv_peripherals",
+          "object": "assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]);",
+          "evidence_type": "source_search",
+          "description": "Top-level forms each permission bit from acc_ctrl[j*4+i], with a special OR for peripheral index 5.",
+          "supports_claim": "Shows all 14 peripheral permissions are consumed from the flattened acc_ctrl bus."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 517,
+          "line_end": 1906,
+          "module": "riscv_peripherals",
+          "object": "acc_ctrl_c[priv_lvl_i][...]",
+          "evidence_type": "source_search",
+          "description": "Top-level gates peripheral access using acc_ctrl_c[priv_lvl_i][peripheral], including ROM and many wrappers such as PKT, ACCT, REGLK, DMA.",
+          "supports_claim": "Shows these access-control bits directly determine whether a privilege level can access peripherals."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 33,
+          "line_end": 33,
+          "module": "acct_wrapper",
+          "object": "localparam AcCt_MEM_SIZE = NB_SLAVE*3",
+          "evidence_type": "source_search",
+          "description": "ACCT wrapper allocates only NB_SLAVE*3 32-bit words. In the top-level NB_SLAVE is 1, so this is three words.",
+          "supports_claim": "Only 96 internal permission bits are allocated for the default one slave, but downstream code assumes at least 10 words for programming and 56 output bits for permissions."
+        },
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
           "line_start": 49,
           "line_end": 49,
           "module": "acct_wrapper",
           "object": "assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};",
-          "evidence_type": "source_assignment",
-          "description": "Access-control output is derived directly from acct_mem entries, with the low byte of acct_mem[0] also ORed by we_flag.",
-          "supports_claim": "Shows acct_mem is the source of permission bits used elsewhere in the design."
+          "evidence_type": "source_search",
+          "description": "ACCT wrapper output only concatenates acct_mem[2], acct_mem[1], and acct_mem[0] ORed with we_flag, regardless of NB_PERIPHERALS.",
+          "supports_claim": "The output does not construct a full 4*NB_PERIPHERALS permission vector for 14 peripherals; high permission bits consumed by the top-level are not driven by corresponding storage."
         },
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 73,
-          "line_end": 73,
+          "line_start": 108,
+          "line_end": 108,
           "module": "acct_wrapper",
-          "object": "assign en = en_acct && acct_ctrl_i;",
-          "evidence_type": "source_assignment",
-          "description": "The access-control peripheral is itself gated by acct_ctrl_i.",
-          "supports_claim": "Shows access to ACCT register operations depends on the access-control matrix."
+          "object": "acct_mem[09] <= reglk_ctrl[7] ? acct_mem[09] : wdata;",
+          "evidence_type": "source_search",
+          "description": "ACCT write map includes writes up to acct_mem[09].",
+          "supports_claim": "With NB_SLAVE=1 and AcCt_MEM_SIZE=3, the visible code indexes beyond the declared acct_mem range, indicating an inconsistent permission table implementation."
+        }
+      ],
+      "reasoning_summary": "The top-level treats acc_ctrl_o as a 4*NB_PERIPHERALS permission vector and indexes it for privilege-level permission checks. NB_PERIPHERALS is 14, so 56 bits are required and consumed. But acct_wrapper allocates acct_mem using AcCt_MEM_SIZE = NB_SLAVE*3; top-level evidence shows NB_SLAVE=1, so only three 32-bit words are intended. More importantly, acc_ctrl_o is assigned from only acct_mem[2:0], while the write/read map references entries as high as acct_mem[09]. This is a structural mismatch in permission-state storage and output generation. Depending on elaboration/tool behavior for out-of-range references and vector width extension/truncation, some permission bits consumed by acc_ctrl_c may be undriven, zero-extended, incorrectly sourced, or not software-configurable. Because acc_ctrl_c gates access to peripherals, this can create incorrect grants or denials; in a security context, incorrect grants are permission bypasses.",
+      "security_impact": "Privilege-based peripheral isolation may be ineffective. A lower-privileged requester could be granted access to sensitive peripherals such as PKT, REGLK, DMA, RNG, or crypto blocks if permission bits are miswired, undriven, defaulted permissively, or not lockable. Conversely, administrators may believe permissions were programmed for all 14 peripherals when only a subset is actually represented by the ACCT output.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact elaboration behavior for out-of-range acct_mem references and width mismatch is tool-dependent and could not be simulated or linted under the task constraints. However, the structural inconsistency is visible in source and directly affects permission-gating signals.",
+      "recommended_follow_up": [
+        "Redesign acct_wrapper so the internal storage and acc_ctrl_o width exactly cover 4*NB_PERIPHERALS bits for all integrated peripherals and privilege levels.",
+        "Eliminate out-of-range acct_mem references; parameterize the address map from NB_PERIPHERALS/NB_SLAVE and add synthesis-time assertions for storage bounds and output width.",
+        "Define fail-closed behavior for any unimplemented or invalid access-control bit rather than allowing width-extension or unknown behavior to determine permissions.",
+        "Add verification that each acc_ctrl_c[priv][peripheral] bit maps to exactly one writable, lockable ACCT register field."
+      ]
+    },
+    {
+      "finding_id": "PERM-ACCT-002",
+      "status": "potential_warning",
+      "summary": "ACCT permission registers reset to all ones while permission bits are used as positive access enables, producing a permissive default state.",
+      "vulnerability_category": "Permissive default access control",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 84,
+          "line_end": 84,
+          "module": "acct_wrapper",
+          "signal_or_register": "acct_mem[j]"
         },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 517,
+          "line_end": 1906,
+          "module": "riscv_peripherals",
+          "signal_or_register": "acc_ctrl_c[priv_lvl_i][*]"
+        }
+      ],
+      "evidence": [
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
           "line_start": 84,
           "line_end": 84,
           "module": "acct_wrapper",
           "object": "acct_mem[j] <= 32'hffffffff;",
-          "evidence_type": "reset_behavior",
-          "description": "On reset, every access-control memory entry is initialized to all ones.",
-          "supports_claim": "Shows permissions default to enabled rather than denied."
+          "evidence_type": "source_search",
+          "description": "On reset, every ACCT memory word is initialized to 32'hffffffff.",
+          "supports_claim": "Shows access-control state resets to all ones."
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 222,
-          "line_end": 222,
+          "line_start": 517,
+          "line_end": 517,
           "module": "riscv_peripherals",
-          "object": "assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]);",
-          "evidence_type": "source_assignment",
-          "description": "The integration maps flat acc_ctrl bits into a privilege-indexed matrix indexed later by priv_lvl_i.",
-          "supports_claim": "Shows permission decisions are derived from acc_ctrl and arranged per privilege level."
+          "object": "assign rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0];",
+          "evidence_type": "source_search",
+          "description": "Top-level access decisions use acc_ctrl_c[priv_lvl_i][peripheral] as positive enables for peripheral access.",
+          "supports_claim": "A permission bit of one enables access for at least ROM."
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1729,
-          "line_end": 1729,
-          "module": "riscv_peripherals",
-          "object": ".acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][6]),",
-          "evidence_type": "module_connection",
-          "description": "The ACCT wrapper permission input is wired from the privilege-indexed access-control matrix.",
-          "supports_claim": "Shows the access-control peripheral is accessible when its matrix bit is set; that bit resets enabled."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1819,
-          "line_end": 1819,
-          "module": "riscv_peripherals",
-          "object": ".acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][9]),",
-          "evidence_type": "module_connection",
-          "description": "The REGLK wrapper permission input is wired from the same privilege-indexed access-control matrix.",
-          "supports_claim": "Shows register-lock control also depends on the same default-open permission source."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1906,
+          "line_start": 926,
           "line_end": 1906,
           "module": "riscv_peripherals",
-          "object": ".acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][8]),",
-          "evidence_type": "module_connection",
-          "description": "The DMA wrapper permission input is wired from the same privilege-indexed access-control matrix.",
-          "supports_claim": "Shows DMA access also inherits the default-open access-control state."
-        }
-      ],
-      "reasoning_summary": "The access-control policy source, acct_mem, resets to 32'hffffffff for all entries. acc_ctrl_o is derived from those entries and riscv_peripherals converts acc_ctrl into acc_ctrl_c indexed by priv_lvl_i. Sensitive peripherals, including ACCT, REGLK, and DMA, receive acct_ctrl_i from acc_ctrl_c[priv_lvl_i][...]. Therefore, after reset, the visible RTL grants access to these peripherals for all privilege indices unless trusted software or external hardware closes and locks the policy first. Because the ACCT peripheral itself is initially permitted, an untrusted initiator may also be able to modify the policy before lockdown.",
-      "security_impact": "Lower-privilege or untrusted software may access sensitive peripheral registers after reset and may be able to reconfigure access-control policy. This can undermine privilege separation and enable subsequent access to restricted devices such as DMA, cryptographic peripherals, reset control, or register-lock controls.",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "Exploitability depends on boot sequencing and external transaction ordering, which are not visible in the scoped source. External NoC filters or firmware may reduce practical exposure, but the RTL evidence confirms the fail-open reset behavior.",
-      "recommended_follow_up": [
-        "Change reset defaults for security-sensitive access-control bits to deny-by-default, then explicitly enable only trusted boot-time permissions.",
-        "Ensure the ACCT and REGLK programming interfaces are hardware-restricted to a trusted privilege/security state independent of the mutable access-control matrix they control.",
-        "Verify boot sequencing proves access-control policy and locks are configured before any lower-privilege or untrusted NoC transaction can reach these peripherals."
-      ]
-    },
-    {
-      "finding_id": "PERM-002",
-      "status": "potential_warning",
-      "summary": "DMA control registers inherit a default-open permission gate and can be programmed with transfer addresses and length.",
-      "vulnerability_category": "Improper DMA permission control / missing visible requester authorization",
-      "affected_locations": [
-        {
-          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 95,
-          "line_end": 95,
-          "module": "dma_wrapper",
-          "signal_or_register": "en"
+          "object": ".acct_ctrl_i ( acc_ctrl_c[priv_lvl_i][...] )",
+          "evidence_type": "source_search",
+          "description": "Multiple wrappers receive acct_ctrl_i from acc_ctrl_c[priv_lvl_i][peripheral].",
+          "supports_claim": "Permission bits are consistently used as positive enables across sensitive peripherals, including DMA, REGLK, ACCT, and PKT."
         },
         {
           "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 129,
-          "line_end": 129,
-          "module": "dma_wrapper",
-          "signal_or_register": "start_reg/length_reg/source_addr_lsb_reg/source_addr_msb_reg/dest_addr_lsb_reg/dest_addr_msb_reg write path"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 198,
-          "line_end": 207,
-          "module": "dma_wrapper",
-          "signal_or_register": "u_dma control inputs"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1906,
-          "line_end": 1906,
-          "module": "riscv_peripherals",
-          "signal_or_register": "DMA acct_ctrl_i"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1963,
-          "line_end": 1963,
-          "module": "riscv_peripherals",
-          "signal_or_register": "dma_axi_req.aw.prot"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1974,
-          "line_end": 1974,
-          "module": "riscv_peripherals",
-          "signal_or_register": "dma_axi_req.ar.prot"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 95,
-          "line_end": 95,
+          "line_start": null,
+          "line_end": null,
           "module": "dma_wrapper",
           "object": "assign en = en_acct && acct_ctrl_i;",
-          "evidence_type": "source_assignment",
-          "description": "DMA wrapper enables its AXI-Lite register interface when both en_acct and acct_ctrl_i are true.",
-          "supports_claim": "Shows DMA register access depends on the access-control matrix."
+          "evidence_type": "source_read",
+          "description": "Wrapper-local AXI-lite enable is gated by acct_ctrl_i.",
+          "supports_claim": "Shows acct_ctrl_i high grants access inside DMA wrapper."
         },
         {
-          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 129,
-          "line_end": 129,
-          "module": "dma_wrapper",
-          "object": "else if(en && we)",
-          "evidence_type": "source_condition",
-          "description": "DMA register write side updates control registers when en and we are asserted.",
-          "supports_claim": "Shows successful permission gating permits writes to DMA command registers."
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "pkt_wrapper",
+          "object": "assign en = en_acct && acct_ctrl_i;",
+          "evidence_type": "source_read",
+          "description": "Wrapper-local AXI-lite enable is gated by acct_ctrl_i.",
+          "supports_claim": "Shows acct_ctrl_i high grants access inside PKT wrapper."
         },
         {
-          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 131,
-          "line_end": 143,
-          "module": "dma_wrapper",
-          "object": "case(address[7:3]) updates start_reg, length_reg, source_addr_lsb_reg, source_addr_msb_reg, dest_addr_lsb_reg, dest_addr_msb_reg",
-          "evidence_type": "source_behavior",
-          "description": "The visible write case assigns start, length, source address, and destination address registers, which are later connected to the DMA engine.",
-          "supports_claim": "Shows a permitted writer can program DMA transfer parameters."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 198,
-          "line_end": 207,
-          "module": "dma_wrapper",
-          "object": ".start_i(start_reg), .length_i(length_reg), .source_addr_lsb_i(source_addr_lsb_reg), .source_addr_msb_i(source_addr_msb_reg), .dest_addr_lsb_i(dest_addr_lsb_reg), .dest_addr_msb_i(dest_addr_msb_reg), .pmpcfg_i(pmpcfg_i), .pmpaddr_i(pmpaddr_i), .we_flag(we_flag)",
-          "evidence_type": "module_connection",
-          "description": "Programmed DMA control and address registers are passed into the external dma instance along with PMP inputs and we_flag.",
-          "supports_claim": "Shows DMA operations are driven by registers reachable through the permission gate."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1906,
-          "line_end": 1906,
-          "module": "riscv_peripherals",
-          "object": ".acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][8]),",
-          "evidence_type": "module_connection",
-          "description": "DMA wrapper permission input is wired from acc_ctrl_c indexed by priv_lvl_i.",
-          "supports_claim": "Shows DMA access inherits the default-open access-control matrix."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1963,
-          "line_end": 1963,
-          "module": "riscv_peripherals",
-          "object": "assign dma_axi_req.aw.prot   = '0;",
-          "evidence_type": "source_assignment",
-          "description": "DMA AXI write protection attributes are hardwired to zero.",
-          "supports_claim": "Shows the visible integration does not propagate dynamic privilege/security metadata on DMA write requests."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1974,
-          "line_end": 1974,
-          "module": "riscv_peripherals",
-          "object": "assign dma_axi_req.ar.prot   = '0;",
-          "evidence_type": "source_assignment",
-          "description": "DMA AXI read protection attributes are hardwired to zero.",
-          "supports_claim": "Shows the visible integration does not propagate dynamic privilege/security metadata on DMA read requests."
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "reglk_wrapper",
+          "object": "assign en = en_acct && acct_ctrl_i;",
+          "evidence_type": "source_read",
+          "description": "Wrapper-local AXI-lite enable is gated by acct_ctrl_i.",
+          "supports_claim": "Shows acct_ctrl_i high grants access inside REGLK wrapper."
         }
       ],
-      "reasoning_summary": "The DMA register interface is protected by acct_ctrl_i, but that signal comes from acc_ctrl_c[priv_lvl_i][8], which is derived from access-control storage that resets to all ones. A permitted write can program start, length, source address, and destination address registers. Those values feed the external dma engine. The wrapper passes PMP configuration to the dma instance, but the actual dma implementation is not in scope, so the source evidence cannot confirm effective PMP enforcement. The integration also hardwires AXI prot attributes for DMA requests to zero, so no visible dynamic privilege/security context accompanies DMA bus requests.",
-      "security_impact": "If lower-privilege software can access the DMA registers during the fail-open window, it may initiate DMA transfers. If the hidden DMA engine does not correctly enforce PMP or other address restrictions, this could cause unauthorized memory reads, unauthorized writes, privilege escalation, or corruption of privileged state.",
+      "reasoning_summary": "The access-control bits appear to be positive enables: requests or wrapper-local accesses proceed when acc_ctrl_c/ acct_ctrl_i is one. The ACCT state resets to all ones, which makes the reset/default state permissive. If software or secure boot code does not immediately reprogram and lock the ACCT table before any untrusted requester can access the bus, lower privilege modes may access all protected peripherals by default. A permission system generally should fail closed until policy is configured.",
+      "security_impact": "During reset release or after a reset of the ACCT block, protected peripherals may become accessible to all privilege levels. This can permit unauthorized reads/writes to security-critical blocks before policy lockdown, including register-lock configuration, packet/fuse/key data, or DMA setup.",
       "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The actual dma module is absent from the scoped files; searches for 'module dma ' returned no implementation. Therefore, arbitrary memory access is not proven from visible source. External filters, firmware sequencing, or hidden PMP logic may mitigate the issue.",
+      "uncertainty_or_missing_evidence": "The complete boot/reset sequencing and whether untrusted masters can access the bus before ACCT reprogramming were not visible. Therefore this is reported as a potential warning rather than a fully confirmed exploit path.",
       "recommended_follow_up": [
-        "Audit or provide the dma module implementation to confirm PMP checks cover both source and destination ranges, transfer lengths, and boundary cases.",
-        "Ensure DMA register access is denied by default for untrusted privilege levels after reset.",
-        "Propagate or enforce appropriate DMA requester privilege/security context instead of relying only on mutable register access permissions."
+        "Change reset defaults for access-control bits to deny-by-default unless a documented secure boot stage explicitly requires temporary access.",
+        "Gate external/untrusted bus access until ACCT and REGLK policy programming is complete and locked.",
+        "Document the intended boot-time trust model and verify that no lower-privilege or DMA/NOC request can occur while acct_mem is all ones."
       ]
     },
     {
-      "finding_id": "PERM-003",
+      "finding_id": "PERM-PKT-001",
       "status": "potential_warning",
-      "summary": "we_flag can force selected access-control bits enabled, creating a possible permission override path.",
-      "vulnerability_category": "Permission bypass via override signal",
+      "summary": "PKT read path can expose fuse/key-related data under weak permission and lock conditions and is not fail-closed for all address paths.",
+      "vulnerability_category": "Sensitive data exposure due to insufficient permission gating",
       "affected_locations": [
         {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 49,
-          "line_end": 49,
-          "module": "acct_wrapper",
-          "signal_or_register": "acc_ctrl_o/we_flag override"
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "pkt_wrapper",
+          "signal_or_register": "rdata / fuse_rdata_i / pkey_loc"
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1731,
-          "line_end": 1731,
+          "line_start": 1627,
+          "line_end": 1627,
           "module": "riscv_peripherals",
-          "signal_or_register": "we_flag_0 to ACCT"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1909,
-          "line_end": 1909,
-          "module": "riscv_peripherals",
-          "signal_or_register": "we_flag_3 to DMA"
+          "signal_or_register": "acct_ctrl_i for PKT"
         }
       ],
       "evidence": [
         {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 49,
-          "line_end": 49,
-          "module": "acct_wrapper",
-          "object": "assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};",
-          "evidence_type": "source_assignment",
-          "description": "The low byte of acct_mem[0] is ORed with eight copies of we_flag before becoming access-control output.",
-          "supports_claim": "Shows assertion of we_flag can force selected access-control bits to one regardless of stored policy."
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1627,
+          "line_end": 1627,
+          "module": "riscv_peripherals",
+          "object": ".acct_ctrl_i ( acc_ctrl_c[priv_lvl_i][5] )",
+          "evidence_type": "source_search",
+          "description": "PKT wrapper is access-gated by acct_ctrl_i derived from acc_ctrl_c[priv_lvl_i][5].",
+          "supports_claim": "Shows PKT access depends on the ACCT permission bit for the current privilege level."
         },
         {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1731,
-          "line_end": 1731,
-          "module": "riscv_peripherals",
-          "object": ".we_flag       ( we_flag_0 ),",
-          "evidence_type": "module_connection",
-          "description": "Top-level integration connects we_flag_0 into the access-control wrapper.",
-          "supports_claim": "Shows the override input originates outside the ACCT wrapper."
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "pkt_wrapper",
+          "object": "assign en = en_acct && acct_ctrl_i;",
+          "evidence_type": "source_read",
+          "description": "PKT wrapper gates AXI-lite internal enable with acct_ctrl_i.",
+          "supports_claim": "If the PKT permission bit is high, the read-side logic can return PKT/fuse data."
         },
         {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1909,
-          "line_end": 1909,
-          "module": "riscv_peripherals",
-          "object": ".we_flag       ( we_flag_3 ),",
-          "evidence_type": "module_connection",
-          "description": "Top-level integration connects we_flag_3 into the DMA wrapper.",
-          "supports_claim": "Shows related write-enable flag plumbing also reaches DMA logic."
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "pkt_wrapper",
+          "object": "rdata = fuse_rdata_i; case(address[7:3]) ... rdata = reglk_ctrl_i[4] ? 'b0 : pkey_loc[63:32]; ... rdata = reglk_ctrl_i[6] ? 'b0 : fuse_rdata_i; default: if (fuse_addr_o <= 110) rdata = 32'b0;",
+          "evidence_type": "source_read",
+          "description": "PKT read-side initializes rdata to fuse_rdata_i for any enabled read before decoding the address; specific addresses expose pkey_loc halves when corresponding reglk bits are not set and fuse_rdata_i at address 4 when reglk_ctrl_i[6] is not set.",
+          "supports_claim": "Shows sensitive fuse/key-related data can be returned when permission and lock bits allow it; the default preassignment to fuse_rdata_i can leak data for addresses not zeroed by the default branch."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "pkt_wrapper",
+          "object": ".req_i(1'b1), .fuse_indx_i(fuse_addr_o), .pkey_loc_o(pkey_loc)",
+          "evidence_type": "source_read",
+          "description": "PKT instance always receives req_i tied high and uses fuse_addr_o to produce pkey_loc_o.",
+          "supports_claim": "PKT key-location logic is continuously active rather than only on an authorized request signal."
         }
       ],
-      "reasoning_summary": "acct_wrapper constructs acc_ctrl_o by ORing acct_mem[0] with {8{we_flag}} for the low byte. When we_flag is high, those permission bits are forced enabled independent of the stored access-control policy. The top-level shows we_flag_* as inputs, but their generation and trust boundary are not visible. If these flags can be asserted by an untrusted or insufficiently protected source, they become a hardware permission bypass.",
-      "security_impact": "A compromised or improperly controlled we_flag path could force selected access permissions open, bypassing programmed restrictions and enabling access to sensitive peripherals.",
+      "reasoning_summary": "The PKT wrapper contains sensitive outputs: fuse_rdata_i and pkey_loc. Access is gated only by acct_ctrl_i, and key/fuse reads are masked only by specific reglk_ctrl_i bits. The read-side logic preloads rdata with fuse_rdata_i for any enabled access before address decode, and only some default cases overwrite it with zero depending on fuse_addr_o <= 110. This creates a risky permission boundary: if ACCT is permissive or misconfigured, a requester can read key/fuse-related data; additionally, certain out-of-map address/default paths may return fuse_rdata_i instead of denying by default.",
+      "security_impact": "Unauthorized software with PKT access, or any privilege level erroneously granted by the ACCT issues above, may read fuse contents or private key location data. Leakage of fuse/key material can compromise device secrets, secure boot, or cryptographic isolation.",
       "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The scoped source only exposes we_flag_* as top-level inputs and does not show their origin. The finding depends on whether those inputs are fully trusted and protected elsewhere.",
+      "uncertainty_or_missing_evidence": "The implementation of pkt and fuse memory contents was not present in the visible scope, and exact AXI address behavior for out-of-map reads was not simulated. The finding is based on visible read-data assignment and permission/lock gating logic.",
       "recommended_follow_up": [
-        "Trace we_flag_* generation in the full design and prove only trusted hardware can assert them.",
-        "Avoid OR-based permission enables that can override programmed denial unless the override source is part of a documented trusted root.",
-        "Add assertions or design checks that we_flag cannot enable access for untrusted privilege levels."
+        "Make PKT read data fail-closed: initialize rdata to zero and explicitly return fuse/key data only for authorized, valid addresses.",
+        "Require both a positive access-control permission and appropriate lock/key-read authorization before exposing pkey_loc or fuse_rdata_i.",
+        "Avoid tying PKT req_i permanently high; drive it from a validated, authorized read request.",
+        "Verify that all unmapped addresses return zero or an error, independent of fuse_addr_o."
       ]
     }
   ],
   "no_finding_reason": "",
-  "global_uncertainty": "The scoped source is sanitized and incomplete. The actual dma module, axi_lite_interface, NoC filters, firmware boot sequence, and generation of we_flag_* are not present. These missing pieces affect exploitability, but the visible source is sufficient to identify fail-open access-control defaults and DMA register exposure through that policy."
+  "global_uncertainty": "Analysis was limited to source files visible via the provided tool outputs. Several instantiated modules, including axi_lite_interface, dma, pkt internals, and other peripheral wrappers, were not available or not fully visible. No simulation, elaboration, lint, formal checks, or synthesis were performed, so tool-specific effects of width mismatches/out-of-range indexing are inferred from source structure only."
 }

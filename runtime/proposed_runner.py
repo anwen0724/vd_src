@@ -31,6 +31,7 @@ class ProposedRunConfig:
     max_steps: int = 20
     max_closure_iterations: int = 1
     max_tool_result_chars: int = 8_000
+    request_timeout: float | None = 600
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class ProposedRunRecord:
     permission_fact_layer_path: str
     obligations_path: str
     inspection_records_path: str
+    tool_observations_path: str
     closure_records_path: str
     final_answer_path: str
     structured_output_path: str
@@ -89,10 +91,12 @@ class ProposedRunner:
             "max_steps": config.max_steps,
             "max_closure_iterations": config.max_closure_iterations,
             "max_tool_result_chars": config.max_tool_result_chars,
+            "request_timeout": config.request_timeout,
             "started_at": started_at,
             "completed_at": completed_at,
             "final_answer_path": str(result.final_answer_path),
             "structured_output_path": str(result.structured_output_path),
+            "tool_observations_path": str(result.tool_observations_path),
         }
         metadata_out.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -103,6 +107,7 @@ class ProposedRunner:
             permission_fact_layer_path=str(result.permission_fact_layer_path),
             obligations_path=str(result.obligations_path),
             inspection_records_path=str(result.inspection_records_path),
+            tool_observations_path=str(result.tool_observations_path),
             closure_records_path=str(result.closure_records_path),
             final_answer_path=str(result.final_answer_path),
             structured_output_path=str(result.structured_output_path),
@@ -121,6 +126,7 @@ class ProposedRunner:
                 model=config.model or _default_model(config.provider),
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
+                request_timeout=config.request_timeout,
             )
         )
         return LangChainInitialVersionLLM(

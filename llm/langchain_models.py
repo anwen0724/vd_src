@@ -21,6 +21,7 @@ class LangChainModelConfig:
     max_tokens: int = 8192
     api_key: Optional[str] = None
     base_url: Optional[str] = None
+    request_timeout: float | None = 600
 
 
 def create_chat_model(cfg: LangChainModelConfig):
@@ -37,6 +38,7 @@ def create_chat_model(cfg: LangChainModelConfig):
             max_tokens=cfg.max_tokens,
             api_key=cfg.api_key or get_first_env("V3_OPENAI_API_KEY", "OPENAI_API_KEY"),
             base_url=cfg.base_url or get_first_env("V3_OPENAI_BASE_URL", "OPENAI_BASE_URL"),
+            timeout=cfg.request_timeout,
         )
 
     if cfg.provider == "claude":
@@ -48,6 +50,7 @@ def create_chat_model(cfg: LangChainModelConfig):
             max_tokens=cfg.max_tokens,
             api_key=cfg.api_key or get_first_env("V3_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
             base_url=cfg.base_url or get_first_env("V3_ANTHROPIC_BASE_URL", "ANTHROPIC_BASE_URL"),
+            timeout=cfg.request_timeout,
         )
 
     if cfg.provider == "deepseek":
@@ -59,6 +62,7 @@ def create_chat_model(cfg: LangChainModelConfig):
             max_tokens=cfg.max_tokens,
             api_key=cfg.api_key or get_first_env("V3_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"),
             base_url=cfg.base_url or get_first_env("V3_DEEPSEEK_BASE_URL", "DEEPSEEK_BASE_URL"),
+            timeout=cfg.request_timeout,
         )
 
     if cfg.provider == "qwen":
@@ -70,6 +74,7 @@ def create_chat_model(cfg: LangChainModelConfig):
             max_tokens=cfg.max_tokens,
             api_key=cfg.api_key or get_first_env("V3_QWEN_API_KEY", "QWEN_API_KEY"),
             base_url=cfg.base_url or get_first_env("V3_QWEN_BASE_URL", "QWEN_BASE_URL"),
+            timeout=cfg.request_timeout,
         )
 
     raise ValueError(f"Unsupported provider: {cfg.provider}")

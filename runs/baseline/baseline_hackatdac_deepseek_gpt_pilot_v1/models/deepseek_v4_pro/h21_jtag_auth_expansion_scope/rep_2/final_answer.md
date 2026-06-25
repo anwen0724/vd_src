@@ -1,0 +1,107 @@
+{
+  "analysis_summary": "Analysis of the Hack@DAC21 JTAG authentication RTL scope reveals a critical permission-related vulnerability in the dmi_jtag debug module. The JTAG DMI access control logic allows unauthenticated read access when the `we_flag` input is deasserted (logic 0), completely bypassing the HMAC-based password authentication. Additionally, hardcoded cryptographic secrets (AES keys, HMAC keys, JTAG hash, SHA key, access control matrices) are exposed in plaintext in fuse_mem.sv source code. The HMAC-based password check also uses only 32 bits of entropy for the password, weakening the authentication strength.",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "JTAG DMI read access control bypass via we_flag: when we_flag=0, unauthenticated reads are permitted to all debug registers, bypassing the HMAC-based password authentication.",
+      "vulnerability_category": "Insufficient Access Control / Authentication Bypass",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": 123,
+          "line_end": 127,
+          "module": "dmi_jtag",
+          "signal_or_register": "we_flag, pass_check"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": 24,
+          "line_end": 26,
+          "module": "dmi_jtag",
+          "signal_or_register": "we_flag (input port)"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": 123,
+          "line_end": 127,
+          "module": "dmi_jtag",
+          "object": "Read access condition in Idle state",
+          "evidence_type": "source_code",
+          "description": "The read gate: if ((dm::dtm_op_e'(dmi.op) == dm::DTM_READ) && (pass_check | ~we_flag == 1)). Verilog precedence gives pass_check | (we_flag == 0). When we_flag is 0, the OR term is true regardless of pass_check, granting unauthenticated reads.",
+          "supports_claim": "Directly proves we_flag=0 unconditionally permits debug reads without HMAC authentication."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": 24,
+          "line_end": 26,
+          "module": "dmi_jtag",
+          "object": "we_flag input port declaration",
+          "evidence_type": "source_code",
+          "description": "we_flag is an external single-bit input to dmi_jtag, controllable from outside the module at integration time or potentially at runtime.",
+          "supports_claim": "Shows we_flag is an external, potentially attacker-controllable signal that gates read access."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": 149,
+          "line_end": 151,
+          "module": "dmi_jtag",
+          "object": "Write access condition in Idle state",
+          "evidence_type": "source_code",
+          "description": "Write path requires pass_check == 1 unconditionally: state_d = Write only when (dm::dtm_op_e'(dmi.op) == dm::DTM_WRITE) && (pass_check == 1). No we_flag bypass exists for writes.",
+          "supports_claim": "Confirms asymmetric protection: writes are always gated by authentication; reads are bypassable via we_flag=0."
+        }
+      ],
+      "reasoning_summary": "The dmi_jtag FSM controls JTAG-to-DMI access. In the Idle state, read requests are evaluated against the condition (pass_check | ~we_flag == 1). pass_check is a combinational signal that is only 1 momentarily during the PassChkValid state; in Idle it defaults to 0. Therefore when we_flag=0, the term (~we_flag == 1) is always true, and reads succeed without any prior HMAC password verification. An attacker who can drive we_flag to 0—or a system that defaults to we_flag=0—can read all DMI-accessible state (core registers, memory, peripheral registers) without authentication. Writes remain protected, but the information disclosure impact is severe.",
+      "security_impact": "High — Unauthenticated read access to the entire RISC-V debug module interface. Sensitive system state (memory contents, CPU registers, cryptographic accelerator state, access control configurations) can be exfiltrated without needing the JTAG password. This completely defeats the HMAC-based JTAG lock mechanism for confidentiality.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Uncertainty: (1) How we_flag is driven in the full SoC—whether it is hardwired, tied to fuses, or software-configurable. If hardwired to 1 in production, read bypass is mitigated, but the conditional bypass path remains in RTL. (2) The HMAC instantiation port connections were truncated in the tool output; key_hash_bypass_i and other connections could not be fully verified. (3) The riscv_peripherals.sv file was truncated; full mapping of we_flag_0..4 signals to dmi_jtag.we_flag is only partially visible.",
+      "recommended_follow_up": [
+        "Trace and harden the we_flag signal: it should be tied to a secure fuse value or hardwired to 1 in production.",
+        "Remove the we_flag bypass from the read condition; require pass_check for all DMI operations when authentication is enabled.",
+        "Verify that key_hash_bypass_i in the HMAC instantiation is tied to 0 to prevent hash chaining bypass.",
+        "Consider expanding the JTAG password from 32 bits to at least 128 bits to match the HMAC-SHA256 security level."
+      ]
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Hardcoded cryptographic secrets (AES keys, HMAC keys, JTAG hash, SHA key, access control matrices) exposed in plaintext in fuse_mem.sv RTL source code.",
+      "vulnerability_category": "Hardcoded Cryptographic Material / Information Leakage via Source Code",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": 16,
+          "line_end": 94,
+          "module": "fuse_mem",
+          "signal_or_register": "mem (const logic array)"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": 16,
+          "line_end": 94,
+          "module": "fuse_mem",
+          "object": "mem constant declaration",
+          "evidence_type": "source_code",
+          "description": "The const mem array contains: JTAG expected HMAC hash (8 words), RNG polynomials, HMAC okey/ikey hashes (8 words each), HMAC key string (8 words), access control matrices for masters 0-2 (9 words), SHA key (6 words), AES2 keys (12 words), AES1 keys (14 words), AES0 keys (18 words). All values are hardcoded plaintext constants.",
+          "supports_claim": "Proves all system cryptographic secrets and access control policies are embedded directly in synthesizable RTL source."
+        }
+      ],
+      "reasoning_summary": "The fuse_mem module models a fuse-based non-volatile storage holding all system secrets. However, every secret—including AES encryption keys, HMAC authentication keys, the JTAG password hash, and peripheral access control matrices—is written as a const literal in the RTL. Anyone with access to the source repository can extract all secrets. If this module is synthesized as-is into silicon, the secrets are permanently compromised.",
+      "security_impact": "High — Complete exposure of all cryptographic key material and access control policies to any party with source code access. Compromises confidentiality of all AES-encrypted data, integrity of HMAC authentication (JTAG unlock password can be reversed/brute-forced with known keys), and the entire peripheral access control scheme.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "This module is likely intended as a simulation model to be replaced by an actual fuse macro in production. Without visibility into the synthesis flow and whether a different fuse implementation is substituted at tape-out, it is unclear if these secrets persist in the final netlist. The const declaration does synthesize to fixed values in hardware if not replaced.",
+      "recommended_follow_up": [
+        "Replace fuse_mem with a generic behavioral model using zero/placeholder values for simulation.",
+        "Ensure the production design uses a real fuse macro or secure key storage IP, not this RTL.",
+        "Restrict access to any files containing production fuse values; inject real keys via a secure provisioning flow."
+      ]
+    }
+  ],
+  "no_finding_reason": "Not applicable — permission-related security vulnerabilities were identified.",
+  "global_uncertainty": "The analysis scope is limited to JTAG authentication RTL files under the provided directory. The complete SoC hierarchy is not visible: (a) the origin and control of we_flag cannot be fully assessed; (b) riscv_peripherals.sv and dmi_jtag.sv file outputs were truncated, preventing full HMAC instantiation review; (c) the synthesis/integration flow is unknown, so it is unclear whether fuse_mem is a simulation-only placeholder. Some vulnerability paths may be conditional on system-level integration choices not visible in this scope."
+}

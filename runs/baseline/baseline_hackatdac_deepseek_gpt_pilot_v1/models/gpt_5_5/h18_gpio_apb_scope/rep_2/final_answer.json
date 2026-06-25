@@ -1,221 +1,182 @@
 {
-  "analysis_summary": "The scoped RTL shows a permission-related weakness in the APB GPIO block. GPIO control registers are exposed through an APB address range and are writable based only on APB transaction signals. The visible APB node performs address-only decode and forwards writes without privilege, requester identity, or secure/non-secure checks. The GPIO module has a GPIOLOCK register, but that lock register is itself directly writable through APB, so it does not form a robust authorization boundary. Any requester that can reach the GPIO APB range can modify or clear the lock and then control GPIO direction/output/enable and related configuration.",
+  "analysis_summary": "Inspected the GPIO APB RTL and integration evidence visible under the input scope. The GPIO peripheral exposes a memory-mapped APB register interface and implements a GPIO lock register (`REG_GPIOLOCK`) that appears intended to restrict access to direction, input, and output registers. The visible source evidence shows two permission-related weaknesses: (1) the lock register itself is freely writable over APB, so any APB bus master that can access the GPIO block can clear or change the lock bits and regain access; and (2) the lock enforcement for GPIO output is incomplete because PADOUTSET and PADOUTCLR update `r_gpio_out` without checking `r_gpio_lock[2]`, bypassing the lock applied to direct PADOUT writes/reads. No evidence was visible of privilege/security attributes on the APB transaction or a separate trusted-only path for changing the lock register.",
   "findings": [
     {
-      "finding_id": "GPIO_APB_PERMISSION_001",
+      "finding_id": "GPIO_APB_PERM_001",
       "status": "confirmed_finding",
-      "summary": "GPIO APB registers, including the lock register, are writable without visible permission enforcement.",
-      "vulnerability_category": "Missing authorization / improper access control for memory-mapped peripheral registers",
+      "summary": "GPIO lock register is freely writable over the same APB interface it is meant to protect, allowing lock bypass by clearing/changing `r_gpio_lock`.",
+      "vulnerability_category": "Permission control bypass / insecure lock register",
       "affected_locations": [
         {
           "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 298,
-          "line_end": 298,
+          "line_start": 31,
+          "line_end": 31,
           "module": "apb_gpio",
-          "signal_or_register": "PSEL/PENABLE/PWRITE write gate"
+          "signal_or_register": "REG_GPIOLOCK / r_gpio_lock"
         },
         {
           "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 325,
+          "line_start": 324,
           "line_end": 325,
           "module": "apb_gpio",
           "signal_or_register": "r_gpio_lock"
         },
         {
           "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 305,
-          "line_end": 305,
+          "line_start": 409,
+          "line_end": 410,
           "module": "apb_gpio",
-          "signal_or_register": "r_gpio_dir"
+          "signal_or_register": "r_gpio_lock"
         },
         {
-          "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 310,
-          "line_end": 310,
-          "module": "apb_gpio",
-          "signal_or_register": "r_gpio_out"
-        },
-        {
-          "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 313,
-          "line_end": 313,
-          "module": "apb_gpio",
-          "signal_or_register": "r_gpio_out / REG_PADOUTSET"
-        },
-        {
-          "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 315,
-          "line_end": 315,
-          "module": "apb_gpio",
-          "signal_or_register": "r_gpio_out / REG_PADOUTCLR"
-        },
-        {
-          "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 323,
-          "line_end": 323,
-          "module": "apb_gpio",
-          "signal_or_register": "r_gpio_en"
-        },
-        {
-          "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 433,
-          "line_end": 432,
-          "module": "apb_gpio",
-          "signal_or_register": "gpio_out/gpio_dir"
-        },
-        {
-          "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 435,
-          "line_end": 436,
-          "module": "apb_gpio",
-          "signal_or_register": "PREADY/PSLVERR"
-        },
-        {
-          "file": "ips/apb/apb_node/apb_node.sv",
-          "line_start": 63,
-          "line_end": 63,
-          "module": "apb_node",
-          "signal_or_register": "psel_o"
-        },
-        {
-          "file": "ips/apb/apb_node/apb_node.sv",
-          "line_start": 90,
-          "line_end": 90,
-          "module": "apb_node",
-          "signal_or_register": "pwrite_o"
-        },
-        {
-          "file": "rtl/includes/periph_bus_defines.sv",
-          "line_start": 25,
-          "line_end": 26,
-          "module": "periph_bus_defines",
-          "signal_or_register": "GPIO_START_ADDR/GPIO_END_ADDR"
+          "file": "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+          "line_start": 352,
+          "line_end": 365,
+          "module": "soc_peripherals",
+          "signal_or_register": "apb_gpio_i / s_gpio_bus"
         }
       ],
       "evidence": [
         {
           "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 298,
-          "line_end": 298,
+          "line_start": 31,
+          "line_end": 31,
           "module": "apb_gpio",
-          "object": "if (PSEL && PENABLE && PWRITE)",
+          "object": "`REG_GPIOLOCK",
           "evidence_type": "source_line",
-          "description": "GPIO writes are accepted when APB select, enable, and write are asserted. No permission, privilege, secure-state, requester identity, key, or owner signal is visible in this write condition.",
-          "supports_claim": "The GPIO register file authorizes writes solely using APB transaction controls."
+          "description": "The GPIO lock register is defined as an APB-addressable register at BASEADDR+0x48.",
+          "supports_claim": "Shows `REG_GPIOLOCK` is part of the GPIO register map and therefore accessible through the same APB register interface."
         },
         {
           "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 303,
-          "line_end": 305,
-          "module": "apb_gpio",
-          "object": "if(r_gpio_lock[0] == '0) pwdata_l = PWDATA; ... r_gpio_dir <= pwdata_l;",
-          "evidence_type": "source_line",
-          "description": "The GPIO direction register update is only gated by r_gpio_lock[0], then assigned from APB write data-derived pwdata_l.",
-          "supports_claim": "GPIO direction can be modified by APB writes unless the mutable lock bit blocks it."
-        },
-        {
-          "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 308,
-          "line_end": 310,
-          "module": "apb_gpio",
-          "object": "if(r_gpio_lock[2] == '0) pwdata_l = PWDATA; ... r_gpio_out <= pwdata_l;",
-          "evidence_type": "source_line",
-          "description": "The GPIO output register update is only gated by r_gpio_lock[2], then assigned from APB write data-derived pwdata_l.",
-          "supports_claim": "GPIO output can be modified by APB writes unless the mutable lock bit blocks it."
-        },
-        {
-          "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 313,
-          "line_end": 315,
-          "module": "apb_gpio",
-          "object": "r_gpio_out <= r_gpio_out | PWDATA; r_gpio_out <= r_gpio_out & ~PWDATA;",
-          "evidence_type": "source_line",
-          "description": "PADOUTSET and PADOUTCLR directly modify r_gpio_out from PWDATA. The search evidence showed these update lines and no lock check attached to these specific update paths.",
-          "supports_claim": "GPIO output can be changed through set/clear registers using APB write data."
-        },
-        {
-          "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 323,
-          "line_end": 323,
-          "module": "apb_gpio",
-          "object": "r_gpio_en <= PWDATA;",
-          "evidence_type": "source_line",
-          "description": "The GPIO enable register is directly assigned from APB write data.",
-          "supports_claim": "GPIO enable control is writable through APB without a visible permission check."
-        },
-        {
-          "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 325,
+          "line_start": 324,
           "line_end": 325,
           "module": "apb_gpio",
-          "object": "r_gpio_lock <= PWDATA;",
+          "object": "r_gpio_lock",
           "evidence_type": "source_line",
-          "description": "The GPIO lock register is directly assigned from APB write data.",
-          "supports_claim": "The lock protecting some GPIO fields is itself mutable by the same APB write path."
+          "description": "The write decode includes `REG_GPIOLOCK: r_gpio_lock <= PWDATA;` with no visible condition other than the general APB write condition reported at line 298 (`if (PSEL && PENABLE && PWRITE)`).",
+          "supports_claim": "Shows any APB write to the lock register can overwrite the lock state; no privilege, once-set-only, key, or sticky protection is visible."
         },
         {
           "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 432,
-          "line_end": 433,
+          "line_start": 409,
+          "line_end": 410,
           "module": "apb_gpio",
-          "object": "assign gpio_out = r_gpio_out; assign gpio_dir = r_gpio_dir;",
+          "object": "PRDATA / r_gpio_lock",
           "evidence_type": "source_line",
-          "description": "The APB-controlled GPIO registers directly drive external GPIO output and direction signals.",
-          "supports_claim": "Unauthorized register writes can have direct external pin effects."
+          "description": "The lock register can also be read through the APB read path: `REG_GPIOLOCK: PRDATA = r_gpio_lock;`.",
+          "supports_claim": "Confirms the lock state is a normal APB-visible register rather than a hidden security control."
         },
         {
-          "file": "ips/apb/apb_gpio/apb_gpio.sv",
-          "line_start": 435,
-          "line_end": 436,
-          "module": "apb_gpio",
-          "object": "assign PREADY = 1'b1; assign PSLVERR = 1'b0;",
+          "file": "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+          "line_start": 352,
+          "line_end": 365,
+          "module": "soc_peripherals",
+          "object": "apb_gpio_i / s_gpio_bus",
           "evidence_type": "source_line",
-          "description": "The GPIO APB slave always reports ready and never reports an error.",
-          "supports_claim": "The GPIO block has no visible error response for unauthorized or locked access attempts."
-        },
-        {
-          "file": "ips/apb/apb_node/apb_node.sv",
-          "line_start": 63,
-          "line_end": 63,
-          "module": "apb_node",
-          "object": "assign psel_o[i] = (paddr_i >= START_ADDR_i[i]) && (paddr_i <= END_ADDR_i[i]);",
-          "evidence_type": "source_line",
-          "description": "The APB node selects a target based only on address range.",
-          "supports_claim": "Downstream APB routing does not enforce permissions; it only decodes addresses."
-        },
-        {
-          "file": "ips/apb/apb_node/apb_node.sv",
-          "line_start": 90,
-          "line_end": 90,
-          "module": "apb_node",
-          "object": "pwrite_o[s_loop2] = pwrite_i;",
-          "evidence_type": "source_line",
-          "description": "The APB node forwards pwrite_i to the selected master port.",
-          "supports_claim": "Write intent is propagated without requester authorization checks in the visible APB node."
-        },
-        {
-          "file": "rtl/includes/periph_bus_defines.sv",
-          "line_start": 25,
-          "line_end": 26,
-          "module": "periph_bus_defines",
-          "object": "`define GPIO_START_ADDR 32'h1A10_1000; `define GPIO_END_ADDR 32'h1A10_AFFF",
-          "evidence_type": "source_line",
-          "description": "GPIO is mapped into a defined APB address range.",
-          "supports_claim": "The GPIO block is exposed as a memory-mapped peripheral range."
+          "description": "The GPIO block is instantiated in `soc_peripherals` and connected directly to APB bus signals from `s_gpio_bus` (`PADDR`, `PWDATA`, `PWRITE`, `PSEL`, `PENABLE`, `PRDATA`, `PREADY`, `PSLVERR`).",
+          "supports_claim": "Shows the GPIO lock control is exposed through the normal peripheral APB bus connection; no separate secure/privileged control interface is visible in the instantiation evidence."
         }
       ],
-      "reasoning_summary": "The GPIO block controls security-relevant external-facing signals, but its write path checks only PSEL, PENABLE, and PWRITE. The only visible restriction for some fields is r_gpio_lock, yet r_gpio_lock is directly writable via the same APB interface. Therefore, any APB requester able to access the GPIO range can change the lock state and then alter GPIO direction, output, enable, interrupt, and pad configuration. The APB node visible in scope reinforces this because it performs address-only selection and forwards writes without privilege or identity checks.",
-      "security_impact": "An unauthorized or lower-privileged APB requester with access to the GPIO address range could reconfigure GPIO direction, drive external pins, enable or disable GPIOs, alter interrupts and pad configuration, and modify or clear the GPIO lock. Depending on board wiring, this could enable privilege escalation, debug/boot manipulation, tampering, denial of service, unsafe actuation, or leakage through externally controlled pins.",
-      "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The input scope does not include a full SoC security specification or all possible upstream access-control logic. An external firewall, MPU/PMP, MMU, or trusted software policy outside the visible source could restrict access to the GPIO APB range. The intended semantics of GPIOLOCK and the security sensitivity of individual GPIO pins are not documented in the visible files.",
+      "reasoning_summary": "The design includes a lock register that gates access to selected GPIO registers, but the lock register is itself writable using the same APB register write mechanism as ordinary configuration registers. Since no APB privilege/security qualifier or write-once/sticky behavior is visible, software or any APB master with access to the GPIO address range can write `REG_GPIOLOCK` to clear lock bits and then read or modify protected GPIO state. This undermines the intended permission boundary represented by `r_gpio_lock`.",
+      "security_impact": "An unauthorized or compromised APB master/software context could disable GPIO protections, read locked GPIO input/direction/output state, and reconfigure GPIO direction/output values. Depending on board-level pin use, this could alter external control signals, leak pin state, or interfere with connected peripherals.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The visible source evidence does not include a complete system-level security policy or APB firewall. If an external address-protection unit guarantees only trusted firmware can access the GPIO block or the lock register, impact may be reduced; however, no such control was visible in the provided evidence.",
       "recommended_follow_up": [
-        "Determine whether an upstream interconnect/firewall/MPU outside this scope restricts which masters or privilege levels can access the GPIO APB range.",
-        "If GPIO access must be restricted, add hardware-enforced authorization using master identity, privilege/security attributes, or a SoC-level peripheral firewall before writes reach apb_gpio.",
-        "Make GPIOLOCK write-once, reset-only-clearable, or protected by an authenticated/keyed privileged path if it is intended as a security control.",
-        "Review board integration to identify GPIO pins connected to reset, boot mode, debug, power, sensors, actuators, or other security-sensitive signals."
+        "Make lock bits sticky until reset, or require a trusted-only unlock mechanism/key sequence that is not available to unprivileged APB masters.",
+        "Gate writes to `REG_GPIOLOCK` using an SoC-level privilege/security attribute if available in the full design.",
+        "Verify the APB address decoder/firewall restricts GPIO and especially `REG_GPIOLOCK` to authorized masters; no such evidence was visible in the inspected results.",
+        "Add security assertions that once a GPIO lock bit is set, untrusted APB accesses cannot clear it or access the protected register."
+      ]
+    },
+    {
+      "finding_id": "GPIO_APB_PERM_002",
+      "status": "confirmed_finding",
+      "summary": "GPIO output lock is bypassable through PADOUTSET/PADOUTCLR because these registers update `r_gpio_out` without checking `r_gpio_lock[2]`.",
+      "vulnerability_category": "Permission check bypass through alternate register alias",
+      "affected_locations": [
+        {
+          "file": "ips/apb/apb_gpio/apb_gpio.sv",
+          "line_start": 29,
+          "line_end": 30,
+          "module": "apb_gpio",
+          "signal_or_register": "REG_PADOUTSET / REG_PADOUTCLR"
+        },
+        {
+          "file": "ips/apb/apb_gpio/apb_gpio.sv",
+          "line_start": 312,
+          "line_end": 315,
+          "module": "apb_gpio",
+          "signal_or_register": "r_gpio_out"
+        },
+        {
+          "file": "ips/apb/apb_gpio/apb_gpio.sv",
+          "line_start": 307,
+          "line_end": 310,
+          "module": "apb_gpio",
+          "signal_or_register": "r_gpio_out / r_gpio_lock[2]"
+        },
+        {
+          "file": "ips/apb/apb_gpio/apb_gpio.sv",
+          "line_start": 396,
+          "line_end": 398,
+          "module": "apb_gpio",
+          "signal_or_register": "PRDATA / r_gpio_out / r_gpio_lock[2]"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/apb/apb_gpio/apb_gpio.sv",
+          "line_start": 29,
+          "line_end": 30,
+          "module": "apb_gpio",
+          "object": "`REG_PADOUTSET / `REG_PADOUTCLR",
+          "evidence_type": "source_line",
+          "description": "PADOUTSET and PADOUTCLR are defined as APB-addressable registers at BASEADDR+0x40 and BASEADDR+0x44.",
+          "supports_claim": "Shows alternate GPIO output mutation registers exist in the APB register map."
+        },
+        {
+          "file": "ips/apb/apb_gpio/apb_gpio.sv",
+          "line_start": 307,
+          "line_end": 310,
+          "module": "apb_gpio",
+          "object": "r_gpio_out / r_gpio_lock[2]",
+          "evidence_type": "source_line",
+          "description": "Direct writes to `REG_PADOUT` check `r_gpio_lock[2]` before assigning `PWDATA` to `r_gpio_out`: if locked, `pwdata_l` is forced to zero.",
+          "supports_claim": "Shows the intended lock protection for GPIO output register writes."
+        },
+        {
+          "file": "ips/apb/apb_gpio/apb_gpio.sv",
+          "line_start": 312,
+          "line_end": 315,
+          "module": "apb_gpio",
+          "object": "r_gpio_out",
+          "evidence_type": "source_line",
+          "description": "PADOUTSET and PADOUTCLR update `r_gpio_out` directly as `r_gpio_out <= r_gpio_out | PWDATA;` and `r_gpio_out <= r_gpio_out & ~PWDATA;` with no `r_gpio_lock[2]` check visible.",
+          "supports_claim": "Demonstrates a bypass path for modifying GPIO outputs despite the output lock bit."
+        },
+        {
+          "file": "ips/apb/apb_gpio/apb_gpio.sv",
+          "line_start": 396,
+          "line_end": 398,
+          "module": "apb_gpio",
+          "object": "PRDATA / r_gpio_out / r_gpio_lock[2]",
+          "evidence_type": "source_line",
+          "description": "GPIO output reads are hidden when `r_gpio_lock[2]` is set: `if(r_gpio_lock[2] == '0) PRDATA = r_gpio_out; else PRDATA = '0;`.",
+          "supports_claim": "Confirms `r_gpio_lock[2]` is intended to protect GPIO output state, making the unchecked set/clear paths inconsistent with the permission model."
+        }
+      ],
+      "reasoning_summary": "The GPIO output register has three write mechanisms: direct PADOUT write, PADOUTSET, and PADOUTCLR. The visible RTL applies the output lock bit (`r_gpio_lock[2]`) to direct PADOUT writes and output reads, but the set/clear aliases modify the same `r_gpio_out` state without testing the lock. Therefore, a requester can change locked GPIO outputs by writing to PADOUTSET/PADOUTCLR even when direct output writes are blocked.",
+      "security_impact": "A requester that is denied direct GPIO output access can still drive external pins high or low through set/clear aliases. This can manipulate board-level control signals, peripheral resets/enables, chip selects, or other security-sensitive GPIO-connected functions.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact intended semantics of `REG_GPIOLOCK` are not documented in the visible excerpts. However, the direct PADOUT read/write guards using `r_gpio_lock[2]` provide strong source-level evidence that output access is meant to be protected, and the unchecked set/clear aliases are inconsistent with that model.",
+      "recommended_follow_up": [
+        "Apply the same `r_gpio_lock[2]` check to `REG_PADOUTSET` and `REG_PADOUTCLR` as is applied to `REG_PADOUT`.",
+        "Consider masking set/clear operations per bit so locked output bits cannot be changed while unlocked bits remain writable, if per-bit locking is intended.",
+        "Add assertions/tests covering all aliases that can modify `r_gpio_out` under locked and unlocked states."
       ]
     }
   ],
   "no_finding_reason": "",
-  "global_uncertainty": "Analysis was limited to files under the provided input scope and used only source inspection. No simulation, formal verification, synthesis, or external documentation was used. The main residual uncertainty is whether upstream logic outside this scope prevents untrusted requesters from reaching the GPIO APB address range."
+  "global_uncertainty": "Analysis was limited to visible tool results and truncated file views. A complete SoC-level access-control block, firmware-only policy, or external bus firewall may exist elsewhere but was not evidenced in the available outputs. Line-number evidence comes from search/read tool outputs above."
 }

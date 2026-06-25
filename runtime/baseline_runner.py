@@ -46,6 +46,7 @@ class BaselineRunConfig:
     max_steps: int = 20
     max_file_chars: int = 20_000
     max_tool_result_chars: int = 8_000
+    request_timeout: float | None = 600
 
 
 @dataclass(frozen=True)
@@ -77,9 +78,13 @@ class BaselineRunner:
         run_dir = self._resolve_path(config.output_dir) / config.run_id
         run_dir.mkdir(parents=True, exist_ok=True)
 
+        _log_stage(config.run_id, "build_prompt", "START")
         final_prompt = self._build_prompt(prompt_template_path, input_scope_path)
+        _log_stage(config.run_id, "build_prompt", "OK")
+        _log_stage(config.run_id, "run_method", "START")
         tools = ReadSearchTools(input_scope_path, max_file_chars=config.max_file_chars)
         result = self._run_method(config, final_prompt, tools)
+        _log_stage(config.run_id, "run_method", "OK")
         completed_at = _now_iso()
 
         prompt_out = run_dir / "prompt.txt"
@@ -89,6 +94,7 @@ class BaselineRunner:
         raw_outputs_out = run_dir / "raw_model_outputs.jsonl"
         metadata_out = run_dir / "run_metadata.json"
 
+        _log_stage(config.run_id, "write_outputs", "START")
         prompt_out.write_text(final_prompt, encoding="utf-8")
         final_answer_out.write_text(result["final_answer"], encoding="utf-8")
         structured_output_path: str | None = None
@@ -114,6 +120,7 @@ class BaselineRunner:
             "max_steps": config.max_steps,
             "max_file_chars": config.max_file_chars,
             "max_tool_result_chars": config.max_tool_result_chars,
+            "request_timeout": config.request_timeout,
             "started_at": started_at,
             "completed_at": completed_at,
             "stopped_reason": result["stopped_reason"],
@@ -121,6 +128,7 @@ class BaselineRunner:
             "structured_output_path": structured_output_path,
         }
         metadata_out.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        _log_stage(config.run_id, "write_outputs", "OK")
 
         return BaselineRunRecord(
             run_id=config.run_id,
@@ -168,6 +176,7 @@ class BaselineRunner:
                     model=_model_name(config),
                     temperature=config.temperature,
                     max_tokens=config.max_tokens,
+                    request_timeout=config.request_timeout,
                 )
             )
             baseline = LangChainReadSearchLLMBaseline(
@@ -261,6 +270,10 @@ def _model_name(config: BaselineRunConfig) -> str:
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     lines = [json.dumps(row, ensure_ascii=False) for row in rows]
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def _log_stage(run_id: str, stage: str, status: str) -> None:
+    print(f"[baseline-stage] run={run_id} stage={stage} {status}", flush=True)
 
 
 def _now_iso() -> str:

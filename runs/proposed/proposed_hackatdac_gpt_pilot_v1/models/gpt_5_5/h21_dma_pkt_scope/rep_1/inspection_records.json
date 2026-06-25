@@ -1,0 +1,934 @@
+{
+  "scope_id": "piton_ariane_riscv_peripherals_permission_scope",
+  "obligations": [
+    {
+      "obligation_id": "M2_PERM_DEBUG_JTAG_AUTH_001",
+      "reason": "Visible JTAG/DTM ports, debug request handshakes, jtag_hash/jtag_unlock, debug_req_o, and dm_slave/dm_master signals indicate an externally controlled debug subject that must be mediated before reaching protected debug capabilities or bus transactions.",
+      "subject": "external JTAG/DTM or simulation debug requester",
+      "operation": "trigger debug request and issue debug read/write transactions",
+      "object": "hart debug control and debug module bus-access signals",
+      "expected_guard": "debug authorization or jtag_unlock/authentication state before any debug request can control hart debug entry or access debug-module/memory-facing transactions",
+      "candidate_path": "JTAG/DTM inputs -> dmi_jtag/SimJTAG/Debug Module request path -> debug_req_o / dm_slave_* / dm_master_*",
+      "state_conditions_to_check": [
+        "jtag_unlock derivation from jtag_hash or auth comparison",
+        "whether testmode_i or simulation JTAG path changes guard requirements",
+        "reset state of debug authorization",
+        "whether dm_master is disabled or still reachable"
+      ],
+      "required_evidence_slots": [
+        "subject: tck_i/tms_i/trst_ni/td_i or SimJTAG/DTM requester",
+        "operation: debug request, DMI read/write, hart debug entry, bus read/write",
+        "object: debug_req_o, dm_slave_* or dm_master_*",
+        "expected guard: jtag_unlock/debug authorization/debug_mode policy",
+        "observed RTL condition on request path",
+        "source locations for assignments/instances/connections"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "evidence closure: subject, operation, object, guard, reachability"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer shows relevant signals and instances but not all connections/guards; inspect visible RTL around lines 233-351 and debug instantiations."
+    },
+    {
+      "obligation_id": "M2_PERM_REGLK_STICKY_002",
+      "reason": "reglk_wrapper exposes a software-visible AXI path and jtag_unlock input producing a lock-control vector used by wrappers; lock bits are protected assets only if all updates and clears are mediated and sticky where required.",
+      "subject": "software-visible AXI requester, with possible JTAG unlock override",
+      "operation": "write, clear, or update lock bits",
+      "object": "reglk_ctrl_o/reglk_ctrl lock vector controlling peripheral register writes",
+      "expected_guard": "writes that set lock state should be sticky or only modifiable under an authorized unlock condition; clears/overwrites after lock should require jtag_unlock or equivalent privileged authorization",
+      "candidate_path": "reglk_wrapper AXI register write path -> reglk_ctrl_o -> reglk_ctrl consumers in peripheral wrappers",
+      "state_conditions_to_check": [
+        "reset value of reglk_ctrl",
+        "whether writing 0 can clear previously set lock bits",
+        "whether jtag_unlock bypass permits intended unlock only",
+        "whether rst_9 or rst_ni can clear locks during operation"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI register interface requester",
+        "operation: write/clear lock bits",
+        "object: reglk_ctrl_o and internal reglk_ctrl registers",
+        "expected guard: prior lock state plus jtag_unlock/privilege/accounting gate",
+        "observed write enable/address decode/data update logic",
+        "source locations for update and output assignments"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need inspect sequential block around reglk_wrapper line ~86 and top-level connections."
+    },
+    {
+      "obligation_id": "M2_PERM_ACCT_POLICY_UPDATE_USE_003",
+      "reason": "The fact layer shows acc_ctrl as a central access-control matrix and at least one use site `rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]`; policy register update and all use sites must be checked for consistent mediation.",
+      "subject": "software-visible AXI requester and current priv_lvl_i requester",
+      "operation": "configure access policy and gate peripheral requests",
+      "object": "acc_ctrl/acc_ctrl_o access-control matrix and gated peripheral request enables such as rom_req",
+      "expected_guard": "access-control policy updates should be writable only by authorized privilege/locked configuration, and request gating should consistently require acc_ctrl_c indexed by the current requester privilege for each protected peripheral",
+      "candidate_path": "AXI/NOC requester -> acct_wrapper -> acc_ctrl_o -> acc_ctrl_c[priv_lvl_i][peripheral] gating of peripheral requests",
+      "state_conditions_to_check": [
+        "reset/default value of acc_ctrl",
+        "whether lower privilege can grant itself access",
+        "whether reglk_ctrl_i protects acct writes",
+        "whether acc_ctrl_c alias expression for j==5 and j==4 is intended and safe",
+        "whether all peripheral paths use acc_ctrl consistently"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/MMIO requester writing acct registers",
+        "operation: policy write and peripheral request",
+        "object: acc_ctrl bits and per-peripheral request enables",
+        "expected guard: privilege/lock guard for policy writes and acc_ctrl_c use for accesses",
+        "observed write enable/address decode and request assignments",
+        "source locations for update logic and use sites"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer includes one explicit use site and wrapper ports; inspect full riscv_peripherals for all acc_ctrl_c consumers."
+    },
+    {
+      "obligation_id": "M2_PERM_PKT_FUSE_READ_004",
+      "reason": "pkt_wrapper has fuse_req_o, fuse_addr_o, fuse_rdata_i and pkey_loc, which are protected/secret-like assets; check that AXI reads cannot directly expose fuse contents without policy guard.",
+      "subject": "software-visible AXI/NOC requester",
+      "operation": "request and read fuse or key-location data",
+      "object": "fuse interface data and addresses, including fuse_rdata_i/fuse_rdata and pkey_loc",
+      "expected_guard": "fuse reads and fuse address selection should require an authorized access policy/lock/privilege condition and should not expose fuse data to unauthorized AXI/NOC requesters",
+      "candidate_path": "pkt_wrapper AXI register path -> fuse_req_o/fuse_addr_o -> fuse_rdata_i -> rdata/AXI response",
+      "state_conditions_to_check": [
+        "reset/default of fuse-related registers",
+        "whether fuse_rdata is latched and remains readable after authorization changes",
+        "whether read and write enables are separately guarded",
+        "whether acct_ctrl_i and reglk_ctrl_i actually affect fuse_req or rdata"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/NOC requester to pkt_wrapper",
+        "operation: fuse request/read and AXI read response",
+        "object: fuse_rdata_i/fuse_rdata, fuse_addr_o, pkey_loc, rdata",
+        "expected guard: acct_ctrl_i/reglk_ctrl_i/privilege or lock condition",
+        "observed address decode, read mux, and fuse_req generation",
+        "source locations for fuse path and response path"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Only interface-level facts are visible; inspect pkt_wrapper body around lines 38-80 and top-level fuse wiring."
+    },
+    {
+      "obligation_id": "M2_PERM_DMA_CONFIG_RANGE_005",
+      "reason": "DMA can act as an independent bus master; visible configuration registers and lock/control inputs require checks that unprivileged software cannot program arbitrary protected memory/peripheral accesses or change config during active transfer.",
+      "subject": "software-visible AXI requester and DMA engine as bus master",
+      "operation": "configure and start DMA transfer",
+      "object": "DMA configuration registers start_reg, length_reg, source_addr_*_reg, dest_addr_*_reg, core_lock_reg and transfer access",
+      "expected_guard": "DMA start, source/destination address, length, and lock/control registers should be writable only when authorized and should enforce address-range/access-control checks for the DMA subject before active transfer",
+      "candidate_path": "dma_wrapper AXI configuration registers -> DMA engine control/address/length -> memory or NOC transfer",
+      "state_conditions_to_check": [
+        "reset values of config/start/done/valid registers",
+        "whether config writes are blocked when core_lock_reg or active transfer is set",
+        "whether source and destination address ranges are checked",
+        "whether start can be asserted with stale unauthorized addresses",
+        "whether rst_8 can reset locks or active state"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI requester writing DMA wrapper",
+        "operation: write config/start and perform transfer",
+        "object: DMA source/destination/length/core lock registers and downstream bus transaction",
+        "expected guard: acct_ctrl_i/reglk_ctrl_i plus address range/PMP-like check",
+        "observed write enables/address decode/start logic",
+        "source locations for config update and transfer outputs"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer lists registers but not downstream DMA engine wiring; inspect dma_wrapper around line ~129 and top-level NOC/DMA connections."
+    },
+    {
+      "obligation_id": "M2_PERM_PERIPH_NOC_GATING_006",
+      "reason": "The top-level exposes many NOC ports for crypto and control peripherals plus acc_ctrl_c gating; obligation is to verify all security-sensitive request enables are mediated, not just boot ROM.",
+      "subject": "CPU/NOC/AXI requester",
+      "operation": "route reads/writes to peripherals over NOC/AXI",
+      "object": "peripheral request/response paths and protected accelerator/control registers",
+      "expected_guard": "each peripheral request should be gated by the access-control matrix or an equivalent address/privilege guard; security-sensitive peripherals should not have ungated NOC request or response paths",
+      "candidate_path": "top-level NOC/AXI peripheral request routing -> crypto/security peripherals (AES0/1/2, RSA, RNG, SHA256, HMAC, RST, DEBUG, BOOTROM, CLINT, PLIC, PKT, ACCT, REGLK, DMA)",
+      "state_conditions_to_check": [
+        "whether response data can be returned when request was denied",
+        "whether read and write paths use same guard consistently",
+        "whether default acc_ctrl permits all access after reset",
+        "whether debug/test paths bypass NOC gating"
+      ],
+      "required_evidence_slots": [
+        "subject: NOC/AXI requester with priv_lvl_i",
+        "operation: peripheral read/write routing",
+        "object: request valid/ready and response data for each peripheral",
+        "expected guard: acc_ctrl_c[priv_lvl_i][peripheral] or equivalent",
+        "observed request assignment/decode and response mux behavior",
+        "source locations for each gated/ungated path"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Assignments are truncated; inspect riscv_peripherals full request generation and response mux sections."
+    },
+    {
+      "obligation_id": "M2_PERM_WE_FLAG_BYPASS_007",
+      "reason": "Top-level ports named we_flag_* and wrapper we_flag inputs may be intended test/override controls; verify they cannot force writes to protected registers without the normal lock/accounting guards.",
+      "subject": "external/top-level write-enable flag source",
+      "operation": "override or enable register writes",
+      "object": "protected configuration/control registers in wrappers, especially acc_ctrl and DMA registers",
+      "expected_guard": "external or top-level write-enable override flags should not bypass reglk_ctrl/acct_ctrl/privilege checks for protected configuration registers",
+      "candidate_path": "write-enable flags we_flag_0..we_flag_4 and wrapper we_flag inputs -> protected register update logic",
+      "state_conditions_to_check": [
+        "whether we_flag is active during normal operation",
+        "whether testmode_i qualifies we_flag usage",
+        "whether we_flag can update registers while locked",
+        "reset behavior of registers affected by we_flag"
+      ],
+      "required_evidence_slots": [
+        "subject: external we_flag input or test/control source",
+        "operation: force write enable",
+        "object: acc_ctrl/DMA or other protected registers",
+        "expected guard: reglk_ctrl/acct_ctrl/privilege/test authorization",
+        "observed logic combining we_flag with normal we/address decode",
+        "source locations for we_flag connections and update conditions"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "Fact layer shows ports but limited assignment data; inspect connections from riscv_peripherals to wrappers and wrapper write conditions."
+    },
+    {
+      "obligation_id": "M2_PERM_RESET_LIFECYCLE_008",
+      "reason": "Multiple per-peripheral reset signals feed wrappers containing access-control, lock, DMA, and fuse paths; reset generation and effects must be checked for unauthorized policy clearing or unsafe residue.",
+      "subject": "software/NOC/external reset controller path",
+      "operation": "reset or clear protected state",
+      "object": "lock/access-control/DMA/fuse-related wrapper state affected by rst_*",
+      "expected_guard": "software- or externally-controlled resets of security wrappers should be authorized and should not clear locks/access policy or leave stale secret/control data observable in an unsafe state",
+      "candidate_path": "peripheral-specific reset controls rst_1..rst_13 -> wrapper reset inputs rst_5/rst_6/rst_8/rst_9 and protected state",
+      "state_conditions_to_check": [
+        "reset default of lock and access-control state",
+        "whether local resets differ from global rst_ni",
+        "whether reset can be triggered through unguarded MMIO/NOC writes",
+        "whether rdata/output registers are cleared on reset"
+      ],
+      "required_evidence_slots": [
+        "subject: requester or logic controlling rst_*",
+        "operation: assert reset/clear state",
+        "object: reglk_ctrl, acc_ctrl, DMA config/status, fuse-related state",
+        "expected guard: privileged reset authorization/lifecycle condition",
+        "observed reset generation and sequential reset effects",
+        "source locations for reset generation and reset branches"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need inspect top-level reset-generation logic around rst_1..rst_13 declarations and wrapper sequential blocks."
+    }
+  ],
+  "inspection_records": [
+    {
+      "obligation_id": "M2_PERM_DEBUG_JTAG_AUTH_001",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "External JTAG/DTM inputs tck_i/tms_i/trst_ni/td_i, SimDTM/SimJTAG requester, and debug NOC requester via buf_ariane_debug_noc2_*",
+        "operation": "Issue DMI debug requests/responses, trigger hart debug_req_o, and access debug module slave bus transactions",
+        "object": "debug_req_o, debug_req/debug_req_valid, dm_slave_req/we/addr/wdata/rdata, dm_master AXI/NOC bridge",
+        "expected_guard": "debug authorization or jtag_unlock/authenticated state before debug request controls hart debug entry or debug-module/memory-facing transactions",
+        "observed_behavior": "dmi_jtag receives jtag_hash/okey_hash/ikey_hash and outputs jtag_unlock, but debug_req/debug_req_valid are wired toward dm_top without a visible jtag_unlock guard. Under RISCV_FESVR_SIM, SimDTM directly drives debug_req_valid and debug_req fields. The debug NOC AXI-lite bridge drives dm_master, converted by axi2mem to dm_slave_* into dm_top. dm_master_gnt/r_valid/r_rdata are tied off, limiting unsupported system bus access, but not the DMI/debug-module slave path.",
+        "path": "JTAG/SimDTM/SimJTAG or debug NOC -> dmi_jtag/SimDTM or noc_axilite_bridge -> debug_req/debug_req_valid or dm_master -> axi2mem -> dm_slave_* -> dm_top -> debug_req_o",
+        "state_condition": "jtag_unlock is generated by dmi_jtag but visible observations show it used later for reglk_wrapper reset/unlock rather than as a guard on dm_top DMI inputs. testmode_i is passed to dmi_jtag/dm_top with no visible top-level authorization condition. dm_master system bus responses are tied off at riscv_peripherals.sv:457-459.",
+        "impact": "External or simulation debug requester may control hart debug entry or debug module state without visible authentication mediation.",
+        "rtl_evidence": [
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "238-239",
+            "evidence": "declares jtag_hash/ikey_hash/okey_hash and jtag_unlock"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "256-268",
+            "evidence": "SimDTM directly drives debug_req_valid and debug_req fields under RISCV_FESVR_SIM"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "275-289",
+            "evidence": "dmi_jtag connects hash inputs and jtag_unlock_o, while DMI request/valid signals drive the debug request path"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "397-412,414-453",
+            "evidence": "debug NOC bridge drives dm_master AXI, converted by axi2mem to dm_slave_*"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "457-459",
+            "evidence": "dm_master_gnt, dm_master_r_valid, dm_master_r_rdata tied off"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Full dm_top instance lines were not fully present in observations, but tool/model observations identify dm_top receiving debug_req_valid/debug_req and outputting debug_req_o around lines 353-388.",
+      "candidate_finding": "DMI/JTAG and simulation debug request paths reach debug module controls without a visible top-level jtag_unlock/authentication guard; debug NOC slave access to the debug module is also reachable, although dm_master system-bus responses are tied off.",
+      "notes": "High-priority candidate because auth signal exists but is not visibly interposed on request path."
+    },
+    {
+      "obligation_id": "M2_PERM_REGLK_STICKY_002",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "Software-visible AXI requester through reglk NOC AXI-lite bridge, with JTAG unlock override",
+        "operation": "Write, clear, or update lock bits",
+        "object": "reglk_mem and exported reglk_ctrl_o/reglk_ctrl vector controlling wrapper register writes",
+        "expected_guard": "Lock state should be sticky or clears/overwrites should require authorized jtag_unlock/equivalent privileged condition",
+        "observed_behavior": "reglk_ctrl_o is concatenated from reglk_mem. en is only en_acct && acct_ctrl_i. Reset condition ~(rst_ni && ~jtag_unlock && ~rst_9) clears all reglk_mem entries. During en && we, address cases assign reglk_mem[n] <= wdata when selected reglk_ctrl_i bit is clear; writing 0 can clear previously set bits in that situation. No OR-with-prior-value/set-only update is visible.",
+        "path": "reglk NOC -> noc_axilite_bridge -> reglk_axi_req -> reglk_wrapper AXI-lite interface -> reglk_mem -> reglk_ctrl_o -> peripheral wrapper reglk_ctrl_i consumers",
+        "state_condition": "reglk_mem reset value is zero; jtag_unlock assertion and rst_9 assertion clear locks. Writes at address[7:3] 0-5 overwrite lock words if current upstream reglk_ctrl_i write lock bit is not set.",
+        "impact": "A requester with reglk access can clear or weaken register locks before corresponding lock controls are asserted; unlock/reset paths clear lock vector and may defeat lifecycle stickiness.",
+        "rtl_evidence": [
+          {
+            "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+            "lines": "48",
+            "evidence": "assign reglk_ctrl_o = {reglk_mem[5], ..., reglk_mem[0]}"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+            "lines": "72",
+            "evidence": "assign en = en_acct && acct_ctrl_i"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+            "lines": "78-85",
+            "evidence": "reset branch clears all reglk_mem when ~(rst_ni && ~jtag_unlock && ~rst_9)"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+            "lines": "86-99",
+            "evidence": "en && we writes wdata into reglk_mem unless selected reglk_ctrl bit is set"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "1819-1823",
+            "evidence": "reglk_wrapper receives acct_ctrl_i(acc_ctrl_c[priv_lvl_i][9]), jtag_unlock, rst_9, and outputs reglk_ctrl"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Complete reglk_wrapper read-side was truncated, but write/reset behavior is sufficient for sticky-lock candidate.",
+      "candidate_finding": "reglk_wrapper lock state is overwriteable with raw wdata when selected lock bits are not asserted; no set-only sticky behavior is visible, and jtag_unlock/rst_9 clear all lock memory.",
+      "notes": "There is also a likely typo at reglk_wrapper.sv:93 assigning reglk_mem[2] <= reglk_mem[3] when locked, but the permission issue is non-sticky overwrite/clear behavior."
+    },
+    {
+      "obligation_id": "M2_PERM_ACCT_POLICY_UPDATE_USE_003",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "Software-visible AXI/NOC requester writing acct_wrapper and current requester selected by priv_lvl_i",
+        "operation": "Configure access policy and gate peripheral requests",
+        "object": "acct_mem/acc_ctrl_o, acc_ctrl_c[priv_lvl_i][peripheral], rom_req, wrapper acct_ctrl_i, PLIC request path",
+        "expected_guard": "Policy updates only by authorized privilege/locked configuration; peripheral access consistently gated by acc_ctrl_c indexed by requester privilege",
+        "observed_behavior": "acct_wrapper reset sets acct_mem entries to 32'hffffffff, yielding default-open policy. acc_ctrl_o ORs acct_mem[0] with {8{we_flag}}, allowing we_flag_0 to force access bits. Writes are allowed when en_acct && acct_ctrl_i && we and selected reglk_ctrl bits permit, with acct_ctrl_i sourced from acc_ctrl_c[priv_lvl_i][6], making policy update self-referential. Top-level gates ROM and many wrappers with acc_ctrl_c, but observed PLIC request state machine asserts plic_req.valid from AXI valid/ready without visible acc_ctrl_c term.",
+        "path": "acct NOC -> acct_axilite_bridge -> acct_wrapper -> acc_ctrl -> acc_ctrl_c[priv_lvl_i][j] -> ROM/wrapper gates; PLIC AXI-lite path lacks visible acc_ctrl_c gate",
+        "state_condition": "Reset/rst_6 initializes acct_mem to all ones. acc_ctrl_c includes alias expression acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]). we_flag_0 can force low acc_ctrl_o bits.",
+        "impact": "Lower-privilege or unauthorized software may inherit broad default access, force policy bits, or encounter inconsistent peripheral mediation.",
+        "rtl_evidence": [
+          {
+            "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+            "lines": "49",
+            "evidence": "acc_ctrl_o = {acct_mem[2], acct_mem[1], acct_mem[0] | {8{we_flag}}}"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+            "lines": "73",
+            "evidence": "assign en = en_acct && acct_ctrl_i"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+            "lines": "81-85",
+            "evidence": "reset sets each acct_mem entry to 32'hffffffff"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+            "lines": "87-109",
+            "evidence": "writes update acct_mem entries with wdata unless selected reglk_ctrl bit is set"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "222",
+            "evidence": "acc_ctrl_c alias expression"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "517",
+            "evidence": "rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "1725-1734",
+            "evidence": "acct_wrapper receives acct_ctrl_i(acc_ctrl_c[priv_lvl_i][6]) and we_flag_0"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "811-825",
+            "evidence": "PLIC state machine asserts plic_req.valid based on plic_master valid/ready without visible acc_ctrl_c"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Full acct_wrapper write cases and all peripheral wrappers were truncated; however search observations list acc_ctrl_c consumers and PLIC path excerpt lacks guard.",
+      "candidate_finding": "Access-control policy defaults open, can be forced by we_flag_0, and is self-gated by the same acc_ctrl matrix it configures; at least one observed peripheral path (PLIC state machine) lacks a visible acc_ctrl_c guard.",
+      "notes": "Default-open reset may be intentional for boot, but it violates strict least-privilege policy unless lifecycle constrained."
+    },
+    {
+      "obligation_id": "M2_PERM_PKT_FUSE_READ_004",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "Software-visible AXI/NOC requester to pkt_wrapper",
+        "operation": "Request/read fuse or key-location data",
+        "object": "fuse_req_o, fuse_addr_o, fuse_rdata_i/fuse_rdata, pkey_loc, AXI rdata",
+        "expected_guard": "Fuse reads and address selection require authorized access policy/lock/privilege and should not expose fuse contents to unauthorized AXI/NOC requesters",
+        "observed_behavior": "pkt_wrapper uses en = en_acct && acct_ctrl_i. On en && we, address 0 writes fuse_req_o from wdata[0], address 1 writes fuse_addr_o from wdata. Read mux initializes rdata to fuse_rdata_i when en, returns pkey_loc halves when reglk_ctrl_i[4]/[5] are not set, returns fuse_rdata_i at address 4 when reglk_ctrl_i[6] is not set, and default path can also leave rdata as fuse_rdata_i unless fuse_addr_o <= 110 forces zero. Top-level connects pkt acct_ctrl_i to acc_ctrl_c[priv_lvl_i][5] and routes responses over NOC.",
+        "path": "pkt NOC -> noc_axilite_bridge -> pkt_axi_req -> pkt_wrapper -> fuse_req_o/fuse_addr_o -> fuse_rdata_i/pkey_loc -> rdata -> pkt AXI/NOC response",
+        "state_condition": "Reset/rst_5 clears fuse_req_o and fuse_addr_o. There is no latch-clearing issue shown for fuse_rdata_i because it is directly read from input. Access depends on acct_ctrl_i and selected reglk_ctrl_i read-mask bits.",
+        "impact": "Authorized-by-default or misconfigured acc_ctrl/reglk state can directly expose fuse data/key-location values to software-visible AXI/NOC reads.",
+        "rtl_evidence": [
+          {
+            "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+            "lines": "68",
+            "evidence": "assign en = en_acct && acct_ctrl_i"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+            "lines": "73-88",
+            "evidence": "writes control fuse_req_o and fuse_addr_o on en && we"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+            "lines": "92-111",
+            "evidence": "read mux exposes fuse_rdata_i and pkey_loc subject only to en and reglk_ctrl_i bits"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+            "lines": "115-123",
+            "evidence": "pkt instance derives pkey_loc from fuse_addr_o with req_i tied to 1'b1"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "1618-1633",
+            "evidence": "top-level pkt_wrapper connects acct_ctrl_i(acc_ctrl_c[priv_lvl_i][5]), fuse signals, and rst_5"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "1636-1675",
+            "evidence": "pkt NOC AXI-lite bridge connects NOC request/response to pkt_axi_req/resp"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Top-level source of fuse_rdata was not included; authorization of external fuse memory is unknown.",
+      "candidate_finding": "pkt_wrapper exposes fuse_rdata_i and pkey_loc through AXI read mux under only acct_ctrl_i/reglk read-mask bits; fuse_req_o/fuse_addr_o are writable when acct_ctrl_i permits and no separate privilege/lock authorization is visible.",
+      "notes": "Candidate hinges on acc_ctrl default/open policy and reglk bits; if these are lifecycle-secure, exposure could be intended but evidence does not show that."
+    },
+    {
+      "obligation_id": "M2_PERM_DMA_CONFIG_RANGE_005",
+      "inspection_status": "inconclusive",
+      "evidence_slots": {
+        "subject": "Software-visible AXI requester configuring DMA wrapper; DMA engine as possible bus master",
+        "operation": "Configure and start DMA transfer",
+        "object": "core_lock_reg, start_reg, length_reg, source_addr_lsb/msb_reg, dest_addr_lsb/msb_reg, done/end/valid and downstream transfer",
+        "expected_guard": "DMA config/start/address/length writes require acct_ctrl_i/reglk_ctrl_i and address-range/PMP-like checks; config should be blocked during active/locked transfer",
+        "observed_behavior": "dma_wrapper declares PMP inputs pmpcfg_i/pmpaddr_i and config registers. AXI-lite en is en_acct && acct_ctrl_i. Reset/rst_8 clears configuration registers. Observations are truncated before the write-case and any PMP/range/active-transfer logic. Top-level connects reglk_ctrl[8], acct_ctrl_i(acc_ctrl_c[priv_lvl_i][8]), pmpcfg_i/pmpaddr_i, we_flag_3, and NOC AXI-lite bridge.",
+        "path": "dma NOC -> noc_axilite_bridge -> dma_axi_req -> dma_wrapper config registers -> potential DMA transfer path",
+        "state_condition": "Reset branch at dma_wrapper.sv:117-124 clears core_lock/start/length/source/destination registers. Whether writes are blocked when active/core_lock set and whether PMP range checks occur is not visible.",
+        "impact": "If no hidden range/active checks exist, software could program arbitrary DMA transfers; current evidence is insufficient to classify as violation.",
+        "rtl_evidence": [
+          {
+            "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+            "lines": "42-51",
+            "evidence": "ports include pmpcfg_i, pmpaddr_i, reglk_ctrl_i, acct_ctrl_i, we_flag, AXI req/resp"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+            "lines": "54-63",
+            "evidence": "declares core_lock/start/length/source/dest/done/end/valid registers"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+            "lines": "95",
+            "evidence": "assign en = en_acct && acct_ctrl_i"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+            "lines": "115-124",
+            "evidence": "reset/rst_8 clears configuration registers; remaining write logic truncated"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "1898-1912",
+            "evidence": "top-level dma_wrapper connects reglk_ctrl[8], acct_ctrl_i(acc_ctrl_c[priv_lvl_i][8]), pmpcfg_i/pmpaddr_i, we_flag_3, rst_8"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "1915-1954",
+            "evidence": "DMA NOC AXI-lite bridge connects NOC to dma_axi_req/resp"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Write-case details after dma_wrapper.sv:124, PMP/range checking, active transfer state, and downstream bus master wiring are not provided.",
+      "candidate_finding": "dma_wrapper configuration registers are software-visible and gated by acct_ctrl_i/reglk_ctrl_i; PMP inputs exist, but provided observations do not show actual address-range enforcement or downstream transfer outputs, so range permission cannot be confirmed.",
+      "notes": "Do not mark satisfied; key required evidence slots are missing."
+    },
+    {
+      "obligation_id": "M2_PERM_PERIPH_NOC_GATING_006",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "CPU/NOC/AXI requester with priv_lvl_i",
+        "operation": "Route reads/writes to peripherals over NOC/AXI",
+        "object": "Peripheral request/response paths for BOOTROM, RST, RNG, AES0/1/2, RSA, SHA256, HMAC, PKT, ACCT, REGLK, DMA, PLIC and other protected registers",
+        "expected_guard": "Each peripheral request should be gated by acc_ctrl_c[priv_lvl_i][peripheral] or equivalent address/privilege guard; denied requests should not leak response data",
+        "observed_behavior": "Search observations show acc_ctrl_c used for ROM and many wrappers, including rst/rng/aes/rsa/sha/hmac/pkt/acct/reglk/dma. However the PLIC state machine excerpt asserts plic_req.valid based on plic_master valid/ready with no visible acc_ctrl_c term. NOC bridges for wrappers drive AXI request channels directly; wrapper internals often gate en = en_acct && acct_ctrl_i, but full response behavior for denied access is not shown.",
+        "path": "NOC/AXI peripheral request routing -> noc_axilite_bridge -> peripheral AXI req/resp and wrapper acct_ctrl_i gates",
+        "state_condition": "acc_ctrl reset default in acct_wrapper is all ones, meaning after reset gating permits all observed acc_ctrl_c-controlled peripherals. Debug/test paths may bypass NOC gating and are separately concerning.",
+        "impact": "At least PLIC appears ungated by central access matrix, and default-open policy weakens protection across gated paths; denied-response leakage cannot be ruled out.",
+        "rtl_evidence": [
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "222",
+            "evidence": "defines acc_ctrl_c matrix"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "517",
+            "evidence": "ROM request gated with acc_ctrl_c[priv_lvl_i][0]"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "926,1022,1108,1195,1281,1366,1451,1536,1627,1729,1819,1906",
+            "evidence": "search results show many wrapper acct_ctrl_i ports connected to acc_ctrl_c[priv_lvl_i][index]"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "811-825",
+            "evidence": "PLIC state machine drives plic_req.valid from plic_master AXI valid/ready, no visible acc_ctrl_c condition"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "944-983,1202-1240,1636-1675,1915-1954",
+            "evidence": "representative NOC AXI-lite bridges feed peripheral AXI req/resp paths"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Full request generation/response mux for every peripheral was not provided; PLIC wrapper/top-level gating outside excerpt could not be excluded, but no evidence was observed.",
+      "candidate_finding": "Most wrapper instances receive acc_ctrl_c[priv_lvl_i][peripheral], but observed PLIC request generation lacks an acc_ctrl_c guard, and NOC bridges feed AXI request signals directly before wrapper-level gating; response behavior on denied requests is not fully established.",
+      "notes": "Candidate violation due to at least one ungated path plus default-open policy."
+    },
+    {
+      "obligation_id": "M2_PERM_WE_FLAG_BYPASS_007",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "External/top-level write-enable flag source we_flag_0..we_flag_4",
+        "operation": "Override or enable protected register/control behavior",
+        "object": "acc_ctrl policy outputs, DMA protected registers, AES0 lock controls, JTAG/debug authentication path",
+        "expected_guard": "we_flag overrides should not bypass reglk_ctrl/acct_ctrl/privilege/test authorization and should be qualified by testmode or secure lifecycle state",
+        "observed_behavior": "Top-level exposes we_flag_0..we_flag_4 as inputs. acct_wrapper ORs acct_mem[0] with {8{we_flag}}, forcing access-control output bits. Top-level ORs we_flag_1 into AES0 reglk_ctrl_i. DMA wrapper receives we_flag_3, though truncated evidence does not show exact use. dmi_jtag receives we_flag_4. No observed connection qualifies these flags with testmode_i at top-level.",
+        "path": "we_flag_0..4 top-level inputs -> dmi_jtag/acct_wrapper/aes0_wrapper/dma_wrapper -> protected control/policy/register paths",
+        "state_condition": "we_flag can be active during normal operation unless externally constrained; no top-level reset/testmode qualification is visible. acct force affects acc_ctrl_o combinationally independent of acct_mem writes.",
+        "impact": "External flag source may bypass or modify normal permission/lock checks, granting access or altering protected debug/DMA/AES behavior.",
+        "rtl_evidence": [
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "56-60",
+            "evidence": "top-level inputs we_flag_0 through we_flag_4"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "279",
+            "evidence": "dmi_jtag receives we_flag_4"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "1194",
+            "evidence": "AES0 reglk_ctrl_i is reglk_ctrl slice OR we_flag_1"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "1731",
+            "evidence": "acct_wrapper receives we_flag_0"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "1909",
+            "evidence": "dma_wrapper receives we_flag_3"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+            "lines": "49",
+            "evidence": "acc_ctrl_o ORs acct_mem[0] with {8{we_flag}}"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Exact uses of we_flag_3 inside dma_wrapper and we_flag_4 inside dmi_jtag are not visible; no evidence was provided for we_flag_2 use beyond top-level input.",
+      "candidate_finding": "External we_flag inputs can force or alter protected control behavior without visible testmode/authorization qualification: we_flag_0 forces acc_ctrl outputs, we_flag_1 ORs AES0 reglk_ctrl_i, we_flag_3 enters DMA wrapper, and we_flag_4 enters dmi_jtag.",
+      "notes": "The acct_wrapper we_flag behavior alone is enough for candidate bypass of policy bits."
+    },
+    {
+      "obligation_id": "M2_PERM_RESET_LIFECYCLE_008",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "Software/NOC requester reaching rst_wrapper and external/global reset sources",
+        "operation": "Assert reset or clear protected state",
+        "object": "reglk_ctrl/reglk_mem, acc_ctrl/acct_mem, DMA config/status, pkt fuse_req/fuse_addr and peripheral state affected by rst_1..rst_13",
+        "expected_guard": "Software/external resets of security wrappers should require privileged lifecycle authorization and should not clear locks/policy or leave unsafe stale/observable state",
+        "observed_behavior": "Top-level rst_wrapper is NOC-accessible through rst_axilite_bridge and receives acct_ctrl_i(acc_ctrl_c[priv_lvl_i][12]), reglk_ctrl_i(reglk_ctrl[12]), and debug_mode_i. It outputs rst_1..rst_13 to wrappers. reglk_wrapper clears all reglk_mem on rst_9; acct_wrapper resets acct_mem to 32'hffffffff on rst_6; dma_wrapper clears config registers on rst_8; pkt_wrapper clears fuse_req_o/fuse_addr_o on rst_5. Because acct reset default is all ones and reglk reset default is zero, reset can re-open policy/clear locks if rst_wrapper access is not strictly authorized.",
+        "path": "rst NOC -> rst_axilite_bridge -> rst_wrapper -> rst_5/rst_6/rst_8/rst_9 -> pkt/acct/dma/reglk sequential reset branches",
+        "state_condition": "Local resets differ from global rst_ni and are independently routed. Reset effects include lock clear to zero, access-control default to all ones, DMA config clear, and fuse request/address clear. Reset wrapper access itself depends on potentially default-open acc_ctrl.",
+        "impact": "Authorized-by-default or lower-privileged reset access can clear locks/policy and return system to permissive state, undermining lifecycle protection and residue guarantees.",
+        "rtl_evidence": [
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "902-913",
+            "evidence": "declares rst_1..rst_13 local reset signals"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "918-942",
+            "evidence": "rst_wrapper receives reglk_ctrl_i, acct_ctrl_i(acc_ctrl_c[priv_lvl_i][12]), debug_mode_i and outputs rst_1..rst_13"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+            "lines": "944-983",
+            "evidence": "rst_axilite_bridge exposes reset wrapper over NOC/AXI-lite"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+            "lines": "78-85",
+            "evidence": "rst_9 clears reglk_mem to zero"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+            "lines": "81-85",
+            "evidence": "rst_6/reset sets acct_mem to 32'hffffffff"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+            "lines": "117-124",
+            "evidence": "rst_8/reset clears DMA config registers"
+          },
+          {
+            "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+            "lines": "73-79",
+            "evidence": "rst_5/reset clears fuse_req_o and fuse_addr_o"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "rst_wrapper internal write authorization and exact reset generation logic were not provided; classification is based on its visible NOC accessibility, gate inputs, and downstream reset effects.",
+      "candidate_finding": "Software/NOC-accessible reset wrapper can assert per-peripheral resets that clear security-relevant state; reset control is only gated by acc_ctrl_c[priv_lvl_i][12]/reglk_ctrl and debug_mode_i, while downstream resets clear locks, access policy, DMA config, and fuse controls.",
+      "notes": "The reset path composes with default-open acct reset and non-sticky reglk reset, increasing severity."
+    }
+  ],
+  "tool_observations": [
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 200,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"200:     output [NumHarts-1:0][1:0]          irq_o         // level sensitive IR lines, mip & sip (async)\\n201: );\\n202: \\n203:   localparam int unsigned AxiIdWidth    =  1;\\n204:   localparam int unsigned AxiAddrWidth  = 64;\\n205:   localparam int unsigned AxiDataWidth  = 64;\\n206:   localparam int unsigned AxiUserWidth  =  1;\\n207: \\n208: \\n209: \\n210:   parameter  FUSE_MEM_SIZE = 150; // change this size when ever no of entries in FUSE mem is changed\\n211:   parameter NB_SLAVE = 1;\\n212:   parameter NB_PERIPHERALS = 14;\\n213: \\n214:   logic [8*NB_PERIPHERALS-1:0] reglk_ctrl; \\n215:   logic [4*NB_PERIPHERALS-1 :0]   acc_ctrl; // Access control values\\n216:   logic [3:0][NB_PERIPHERALS-1:0] acc_ctrl_c; \\n217: \\n218:    genvar i, j;\\n219:    generate\\n220:        for (i=0; i < 4; i++) begin\\n221:         for (j=0; j < NB_PERIPHERALS; j++) begin\\n222:            assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]);\\n223:         end\\n224:        end \\n225:    endgenerate \\n226: \\n227: \\n228: \\n229:   /////////////////////////////\\n230:   // Debug module and JTAG\\n231:   /////////////////////////////\\n232: \\n233:   logic          debug_req_valid;\\n234:   logic          debug_req_ready;\\n235:   logic          debug_resp_valid;\\n236:   logic          debug_resp_ready;\\n237: \\n238:   logic [255:0]  jtag_hash, ikey_hash, okey_hash;\\n239:   logic           jtag_unlock; \\n240: \\n241:   dm::dmi_req_t  debug_req;\\n242:   dm::dmi_resp_t debug_resp;\\n243: \\n244: `ifdef RISCV_FESVR_SIM\\n245: \\n246:   initial begin\\n247:     $display(\\\"[INFO] instantiating FESVR DTM in simulation.\\\");\\n248:   end\\n249: \\n250:   // SiFive's SimDTM Module\\n251:   // Converts to DPI calls\\n252:   logic [31:0] sim_exit; // TODO: wire this up in the testbench\\n253:   logic [1:0] debug_req_bits_op;\\n254:   assign dmi_req.op = dm::dtm_op_t'(debug_req_bits_op);\\n255: \\n256:   SimDTM i_SimDTM (\\n257:     .clk                  ( clk_i                ),\\n258:     .reset                ( ~rst_ni              ),\\n259:     .debug_req_valid      ( debug_req_valid      ),\\n260:     .debug_req_ready      ( debug_req_ready      ),\\n261:     .debug_req_bits_addr  ( debug_req.addr       ),\\n262:     .debug_req_bits_op    ( debug_req_bits_op    ),\\n263:     .debug_req_bits_data  ( debug_req.data       ),\\n264:     .debug_resp_valid     ( debug_resp_valid     ),\\n265:     .debug_resp_ready     ( debug_resp_ready     ),\\n266:     .debug_resp_bits_resp ( debug_resp.resp      ),\\n267:     .debug_resp_bits_data ( debug_resp.data      ),\\n268:     .exit                 ( sim_exit             )\\n269:   );\\n270: \\n271: `else // RISCV_FESVR_SIM\\n272: \\n273:   logic        tck, tms, trst_n, tdi, tdo, tdo_oe;\\n274: \\n275:   dmi_jtag i_dmi_jtag (\\n276:     .clk_i                                ,\\n277:     .rst_ni                               ,\\n278:     .testmode_i                           ,\\n279:     .we_flag          ( we_flag_4        ),\\n280:     .jtag_hash_i      ( jtag_hash        ),\\n281:     .okey_hash_i      ( okey_hash        ),\\n282:     .ikey_hash_i      ( ikey_hash        ),\\n283:     .jtag_unlock_o    ( jtag_unlock      ),\\n284:     .dmi_req_o        ( debug_req        ),\\n285:     .dmi_req_valid_o  ( debug_req_valid  ),\\n286:     .dmi_req_ready_i  ( debug_req_ready  ),\\n287:     .dmi_resp_i       ( debug_resp       ),\\n288:     .dmi_resp_ready_o ( debug_resp_ready ),\\n289:     .dmi_resp_valid_i ( debug_resp_valid ),\\n290:     .dmi_rst_no       (                  ), // not connected\\n291:     .tck_i            ( tck              ),\\n292:     .tms_i            ( tms              ),\\n293:     .trst_ni          ( trst_n           ),\\n294:     .td_i             ( tdi              ),\\n295:     .td_o             ( tdo              ),\\n296:     .tdo_oe_o         ( tdo_oe           )\\n297:   );\\n298: \\n299: `ifdef RISCV_JTAG_SIM\\n300: \\n301:   initial begin\\n302:     $display(\\\"[INFO] instantiating JTAG DTM in simul\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 160,
+        "offset": 0,
+        "path": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv"
+      },
+      "status": "ok",
+      "path": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+      "error": null,
+      "content": "1: // Description: Access Control registers\n2: //\n3: \n4: \n5: \n6: module reglk_wrapper #(\n7:     parameter int unsigned AXI_ADDR_WIDTH = 64,\n8:     parameter int unsigned AXI_DATA_WIDTH = 64,\n9:     parameter int unsigned AXI_ID_WIDTH   = 10,\n10:     parameter NB_SLAVE = 1,\n11:     parameter NB_PERIPHERALS = 14\n12: )(\n13:            clk_i,\n14:            rst_ni,\n15:            jtag_unlock,\n16:            reglk_ctrl_i,\n17:            acct_ctrl_i,\n18:            reglk_ctrl_o,\n19:            axi_req_i, \n20:            axi_resp_o,\n21:            rst_9\n22:        );\n23: \n24: \n25:     input  logic                   clk_i;\n26:     input  logic                   rst_ni;\n27:     input  logic                   jtag_unlock;\n28:     input logic [7 :0]             reglk_ctrl_i; // register lock values\n29:     input logic                    acct_ctrl_i;\n30:     input  ariane_axi::req_t       axi_req_i;\n31:     output ariane_axi::resp_t      axi_resp_o;\n32:     output logic [8*NB_PERIPHERALS-1 :0]   reglk_ctrl_o; // register lock values\n33:     input logic rst_9;\n34: \n35: \n36: // internal signals\n37: \n38: logic [15:0] reglk_ctrl ;  \n39: reg [5:0][31:0] reglk_mem ;   // this size is sufficient for 24 slaves where each slave gets 8 bits\n40: \n41: // signals from AXI 4 Lite\n42: logic [AXI_ADDR_WIDTH-1:0] address;\n43: logic                      en, en_acct;\n44: logic                      we;\n45: logic [63:0] wdata;\n46: logic [63:0] rdata;\n47: \n48: assign reglk_ctrl_o = {reglk_mem[5], reglk_mem[4], reglk_mem[3], reglk_mem[2], reglk_mem[1], reglk_mem[0]}; \n49: \n50: assign reglk_ctrl = reglk_ctrl_i;\n51: \n52: ///////////////////////////////////////////////////////////////////////////\n53:     // -----------------------------\n54:     // AXI Interface Logic\n55:     // -----------------------------\n56:     axi_lite_interface #(\n57:         .AXI_ADDR_WIDTH ( AXI_ADDR_WIDTH ),\n58:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH ),\n59:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH    )\n60:     ) axi_lite_interface_i (\n61:         .clk_i      ( clk_i      ),\n62:         .rst_ni     ( rst_ni     ),\n63:         .axi_req_i  ( axi_req_i  ),\n64:         .axi_resp_o ( axi_resp_o ),\n65:         .address_o  ( address    ),\n66:         .en_o       ( en_acct    ),\n67:         .we_o       ( we         ),\n68:         .data_i     ( rdata      ),\n69:         .data_o     ( wdata      )\n70:     );\n71: \n72:     assign en = en_acct && acct_ctrl_i; \n73: \n74: ///////////////////////////////////////////////////////////////////////////\n75: // Implement APB I/O map to PKT interface\n76: // Write side\n77: integer j;\n78: always @(posedge clk_i)\n79:     begin\n80:         if(~(rst_ni && ~jtag_unlock && ~rst_9))\n81:             begin\n82:               for (j=0; j < 6; j=j+1) begin\n83:                 reglk_mem[j] <= 'h0;\n84:               end\n85:             end\n86:         else if(en && we)\n87:             case(address[7:3])\n88:                 0:\n89:                     reglk_mem[0]  <= reglk_ctrl[3] ? reglk_mem[0] : wdata;\n90:                 1:\n91:                     reglk_mem[1]  <= reglk_ctrl[1] ? reglk_mem[1] : wdata; \n92:                 2:\n93:                     reglk_mem[2]  <= reglk_ctrl[1] ? reglk_mem[3] : wdata;\n94:                 3:\n95:                     reglk_mem[3]  <= reglk_ctrl[1] ? reglk_mem[3] : wdata;\n96:                 4:\n97:                     reglk_mem[4]  <= reglk_ctrl[1] ? reglk_mem[4] : wdata;\n98:                 5:\n99:                     reglk_mem[5]  <= reglk_ctrl[1] ? reglk_mem[5] : wdata;\n100:                 default:\n101:                     ;\n102:             endcase\n103:     end // always @ (posedge wb_clk_i)\n104: \n105: //// Read side\n106: always @(*)\n107:     begin\n108:       rdata = 64'b0; \n109:       if (en) begin\n110:         case(address[7:3])\n111:             0:\n112:                 rdata = reglk_ctrl[0] ? 'b0 : reglk_mem[0]; \n113:             1:          \n114:                 rdata = reglk_ctrl[0] ? 'b0 : reglk_mem[1];\n115:             2:          \n116:\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 0,
+        "path": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv"
+      },
+      "status": "ok",
+      "path": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+      "error": null,
+      "content": "1: // Description: Access Control registers\n2: //\n3: \n4: \n5: module acct_wrapper #(\n6:     parameter int unsigned AXI_ADDR_WIDTH = 64,\n7:     parameter int unsigned AXI_DATA_WIDTH = 64,\n8:     parameter int unsigned AXI_ID_WIDTH   = 10,\n9:     parameter NB_SLAVE = 1,\n10:     parameter NB_PERIPHERALS = 9\n11: )(\n12:            clk_i,\n13:            rst_ni,\n14:            reglk_ctrl_i,\n15:            acct_ctrl_i,\n16:            acc_ctrl_o,\n17:            we_flag,\n18:            axi_req_i, \n19:            axi_resp_o,\n20:            rst_6\n21:        );\n22: \n23: \n24:     input  logic                   clk_i;\n25:     input  logic                   rst_ni;\n26:     input logic [7 :0]             reglk_ctrl_i; // register lock valuesA\n27:     input logic                    acct_ctrl_i;\n28:     input  ariane_axi::req_t       axi_req_i;\n29:     output ariane_axi::resp_t      axi_resp_o;\n30:     output logic [4*NB_PERIPHERALS-1 :0]   acc_ctrl_o; // Access control values\n31:     input logic  we_flag;\n32: \n33:     localparam AcCt_MEM_SIZE = NB_SLAVE*3 ;  // 32*3 bytes of access control for each slave interface\n34: \n35:     input rst_6;\n36: \n37: // internal signals\n38: \n39: reg [AcCt_MEM_SIZE-1:0][31:0] acct_mem ; \n40: logic [15:0] reglk_ctrl ;  \n41: \n42: // signals from AXI 4 Lite\n43: logic [AXI_ADDR_WIDTH-1:0] address;\n44: logic                      en, en_acct;\n45: logic                      we;\n46: logic [63:0] wdata;\n47: logic [63:0] rdata;\n48: \n49: assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}}; \n50: \n51: assign reglk_ctrl = reglk_ctrl_i;\n52: \n53: ///////////////////////////////////////////////////////////////////////////\n54:     // -----------------------------\n55:     // AXI Interface Logic\n56:     // -----------------------------\n57:     axi_lite_interface #(\n58:         .AXI_ADDR_WIDTH ( AXI_ADDR_WIDTH ),\n59:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH ),\n60:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH    )\n61:     ) axi_lite_interface_i (\n62:         .clk_i      ( clk_i      ),\n63:         .rst_ni     ( rst_ni     ),\n64:         .axi_req_i  ( axi_req_i  ),\n65:         .axi_resp_o ( axi_resp_o ),\n66:         .address_o  ( address    ),\n67:         .en_o       ( en_acct    ),\n68:         .we_o       ( we         ),\n69:         .data_i     ( rdata      ),\n70:         .data_o     ( wdata      )\n71:     );\n72: \n73:     assign en = en_acct && acct_ctrl_i; \n74: \n75: ///////////////////////////////////////////////////////////////////////////\n76: // Implement APB I/O map to PKT interface\n77: // Write side\n78: integer j;\n79: always @(posedge clk_i)\n80:     begin\n81:         if(~(rst_ni && ~rst_6))\n82:             begin\n83:               for (j=0; j < AcCt_MEM_SIZE; j=j+1) begin\n84:                 acct_mem[j] <= 32'hffffffff; \n85:               end\n86:             end\n87:         else if(en && we)\n88:             case(address[10:3])\n89:                 0:\n90:                     acct_mem[00]  <= reglk_ctrl[5] ? acct_mem[00] : wdata;\n91:                 1:                                             \n92:                     acct_mem[01]  <= reglk_ctrl[5] ? acct_mem[01] : wdata; \n93:                 2:                                             \n94:                     acct_mem[02]  <= reglk_ctrl[5] ? acct_mem[02] : wdata;\n95:                 3:                                              \n96:                     acct_mem[03]  <= reglk_ctrl[13] ? acct_mem[03] : wdata;\n97:                 4:                                               \n98:                     acct_mem[04]  <= reglk_ctrl[13] ? acct_mem[04] : wdata;\n99:                 5:                                               \n100:                     acct_mem[05]  <= reglk_ctrl[13] ? acct_mem[05] : wdata;\n101:                 6:                                              \n102:                     acct_mem[06]  <= reglk_ctrl[1] ? acct_mem[06] : wdata;\n103:                 7:                                              \n104:                     acct_mem\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 250,
+        "offset": 0,
+        "path": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv"
+      },
+      "status": "ok",
+      "path": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+      "error": null,
+      "content": "1: ///////////////////////////////////////////\n2: //\n3: // File Name : dma_wrapper.sv\n4: //\n5: // Version info : \n6: //\n7: // Assumptions : \n8: //      1) Max length == 255        \n9: ///////////////////////////////////////////\n10: \n11: \n12: \n13: module dma_wrapper #(\n14:     parameter int unsigned AXI_ADDR_WIDTH = 64,\n15:     parameter int unsigned AXI_DATA_WIDTH = 64,\n16:     parameter int unsigned AXI_ID_WIDTH   = 10,\n17:     parameter int unsigned NrPMPEntries    = 8\n18: )\n19: (\n20:     clk_i,\n21:     rst_ni,\n22:     pmpcfg_i,   \n23:     pmpaddr_i,  \n24:     reglk_ctrl_i,\n25:     acct_ctrl_i,\n26:     we_flag,\n27: \n28:     axi_req_i, \n29:     axi_resp_o,\n30:     \n31:     rst_8\n32: );\n33: \n34:     //// parameters\n35:     //localparam CONF_START = 0; \n36:     //localparam CONF_CLR_DONE = 1;\n37:     //localparam AXI_LEN_WIDTH = 8; \n38:     //localparam AXI_SIZE_WIDTH = 3; \n39:     localparam DATA_WIDTH=32;\n40: \n41: \n42:     input  logic                   clk_i;\n43:     input  logic                   rst_ni;\n44:     input [7:0][16-1:0] pmpcfg_i;   \n45:     input logic [16-1:0][53:0]     pmpaddr_i;  \n46:     input logic [7 :0]             reglk_ctrl_i; // register lock values\n47:     input logic                    acct_ctrl_i;\n48: \n49:     input  ariane_axi::req_t       axi_req_i;\n50:     output ariane_axi::resp_t      axi_resp_o;\n51:     input logic  we_flag;\n52: \n53:     // internal signals\n54:     logic [DATA_WIDTH-1:0] core_lock_reg; \n55:     logic [DATA_WIDTH-1:0] start_reg;\n56:     logic [DATA_WIDTH-1:0] length_reg;\n57:     logic [DATA_WIDTH-1:0] source_addr_lsb_reg; \n58:     logic [DATA_WIDTH-1:0] source_addr_msb_reg; \n59:     logic [DATA_WIDTH-1:0] dest_addr_lsb_reg; \n60:     logic [DATA_WIDTH-1:0] dest_addr_msb_reg; \n61:     logic [DATA_WIDTH-1:0] done_reg;\n62:     logic [DATA_WIDTH-1:0] end_reg;\n63:     logic [DATA_WIDTH-1:0] valid;\n64:     \n65:     // signals from AXI 4 Lite\n66:     logic [AXI_ADDR_WIDTH-1:0] address;\n67: logic                      en, en_acct;\n68:     logic                      we;\n69:     logic [63:0] wdata;\n70:     logic [63:0] rdata;\n71: \n72:     // signal from reset controllger\n73:     input logic rst_8;\n74: \n75: ///////////////////////////////////////////////////////////////////////////\n76:     // -----------------------------\n77:     // AXI Interface Logic\n78:     // -----------------------------\n79:     axi_lite_interface #(\n80:         .AXI_ADDR_WIDTH ( AXI_ADDR_WIDTH ),\n81:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH ),\n82:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH    )\n83:     ) axi_lite_interface_i (\n84:         .clk_i      ( clk_i      ),\n85:         .rst_ni     ( rst_ni     ),\n86:         .axi_req_i  ( axi_req_i  ),\n87:         .axi_resp_o ( axi_resp_o ),\n88:         .address_o  ( address    ),\n89:         .en_o       ( en_acct    ),\n90:         .we_o       ( we         ),\n91:         .data_i     ( rdata      ),\n92:         .data_o     ( wdata      )\n93:     );\n94: \n95:     assign en = en_acct && acct_ctrl_i; \n96: \n97: //always @(posedge clk_i)\n98: //  begin\n99: //    if(~rst_ni)\n100: //      begin\n101: //        startHash_r <= 1'b0;\n102: //        newMessage_r <= 1'b0;\n103: //      end\n104: //    else\n105: //      begin\n106: //        // Generate a registered versions of startHash and newMessage\n107: //        startHash_r         <= startHash;\n108: //        newMessage_r        <= newMessage;\n109: //      end\n110: //  end\n111: \n112:     ///////////////////////////////////////////////////////////////////////////\n113:     // Implement APB I/O map to DMA interface\n114:     // Write side\n115:     always @(posedge clk_i)\n116:         begin\n117:             if(~(rst_ni && ~rst_8))\n118:                 begin\n119:                     core_lock_reg <= 'b0; \n120:                     start_reg <= 'b0; \n121:                     length_reg <= 'b0; \n122:                     source_addr_lsb_reg<= 'b0; \n123:                     source_addr_msb_reg<= 'b0; \n124:                     dest_addr_lsb_reg  <= 'b0; \n\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 160,
+        "offset": 0,
+        "path": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv"
+      },
+      "status": "ok",
+      "path": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+      "error": null,
+      "content": "1: // Description: Wrapper for the PKT.\n2: //\n3: \n4: \n5: module pkt_wrapper #(\n6:     parameter int unsigned AXI_ADDR_WIDTH = 64,\n7:     parameter int unsigned AXI_DATA_WIDTH = 64,\n8:     parameter int unsigned AXI_ID_WIDTH   = 10,\n9:     parameter FUSE_MEM_SIZE = 34\n10: )(\n11:            clk_i,\n12:            rst_ni,\n13:            reglk_ctrl_i,\n14:            acct_ctrl_i,\n15:            fuse_req_o,\n16:            fuse_addr_o,\n17:            fuse_rdata_i,\n18:            axi_req_i, \n19:            axi_resp_o,\n20:            rst_5\n21:        );\n22: \n23: \n24:     input  logic                   clk_i;\n25:     input  logic                   rst_ni;\n26:     input logic [7 :0]             reglk_ctrl_i; // register lock values\n27:     input logic                    acct_ctrl_i;\n28:     input  ariane_axi::req_t       axi_req_i;\n29:     output ariane_axi::resp_t      axi_resp_o;\n30:     output logic                   fuse_req_o;\n31:     output logic [31:0]            fuse_addr_o;\n32:     input  logic [31:0]            fuse_rdata_i;\n33: \n34:     input logic rst_5;\n35: \n36: // internal signals\n37: \n38: wire [63:0] pkey_loc; \n39: \n40: // signals from AXI 4 Lite\n41: logic [AXI_ADDR_WIDTH-1:0] address;\n42: logic                      en, en_acct;\n43: logic                      we;\n44: logic [63:0] wdata;\n45: logic [63:0] rdata;\n46: \n47: \n48: ///////////////////////////////////////////////////////////////////////////\n49:     // -----------------------------\n50:     // AXI Interface Logic\n51:     // -----------------------------\n52:     axi_lite_interface #(\n53:         .AXI_ADDR_WIDTH ( AXI_ADDR_WIDTH ),\n54:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH ),\n55:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH    )\n56:     ) axi_lite_interface_i (\n57:         .clk_i      ( clk_i      ),\n58:         .rst_ni     ( rst_ni     ),\n59:         .axi_req_i  ( axi_req_i  ),\n60:         .axi_resp_o ( axi_resp_o ),\n61:         .address_o  ( address    ),\n62:         .en_o       ( en_acct    ),\n63:         .we_o       ( we         ),\n64:         .data_i     ( rdata      ),\n65:         .data_o     ( wdata      )\n66:     );\n67: \n68:     assign en = en_acct && acct_ctrl_i; \n69: \n70: ///////////////////////////////////////////////////////////////////////////\n71: // Implement APB I/O map to PKT interface\n72: // Write side\n73: always @(posedge clk_i)\n74:     begin\n75:         if(~(rst_ni && ~rst_5))\n76:             begin\n77:                 fuse_req_o <= 0;\n78:                 fuse_addr_o <= 0;\n79:             end\n80:         else if(en && we)\n81:             case(address[7:3])\n82:                 0:\n83:                     fuse_req_o  <= wdata[0];\n84:                 1:\n85:                     fuse_addr_o <= wdata;\n86:                 default:\n87:                     ;\n88:             endcase\n89:     end // always @ (posedge wb_clk_i)\n90: \n91: //// Read side\n92: always @(*)\n93:     begin\n94:       rdata = 64'b0; \n95:       if (en) begin\n96:         rdata = fuse_rdata_i; \n97:         case(address[7:3])\n98:             0:\n99:                 rdata = {31'b0, fuse_req_o};\n100:             1:\n101:                 rdata = fuse_addr_o;\n102:             2:\n103:                 rdata = reglk_ctrl_i[4] ? 'b0 : pkey_loc[63:32];\n104:             3:\n105:                 rdata = reglk_ctrl_i[5] ? 'b0 : pkey_loc[31:0];\n106:             4:\n107:                 rdata = reglk_ctrl_i[6] ? 'b0 : fuse_rdata_i;\n108:             default:\n109:                 if (fuse_addr_o <= 110)\n110:                     rdata = 32'b0;\n111:         endcase\n112:       end // if\n113:     end // always @ (*)\n114: \n115: pkt # (\n116:         .FUSE_MEM_SIZE(FUSE_MEM_SIZE)\n117:     ) i_pkt(\n118:             .clk_i(clk_i),\n119:             .rst_ni(rst_ni && ~rst_5),\n120:             .req_i(1'b1),\n121:             .fuse_indx_i(fuse_addr_o),\n122:             .pkey_loc_o(pkey_loc)\n123:         );\n124: \n125: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 390,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"390:   AXI_BUS #(\\n391:       .AXI_ADDR_WIDTH ( AxiAddrWidth     ),\\n392:       .AXI_DATA_WIDTH ( AxiDataWidth     ),\\n393:       .AXI_ID_WIDTH   ( AxiIdWidth       ),\\n394:       .AXI_USER_WIDTH ( AxiUserWidth     )\\n395:   ) dm_master();\\n396: \\n397:   axi2mem #(\\n398:       .AXI_ID_WIDTH   ( AxiIdWidth   ),\\n399:       .AXI_ADDR_WIDTH ( AxiAddrWidth ),\\n400:       .AXI_DATA_WIDTH ( AxiDataWidth ),\\n401:       .AXI_USER_WIDTH ( AxiUserWidth )\\n402:   ) i_dm_axi2mem (\\n403:       .clk_i      ( clk_i                     ),\\n404:       .rst_ni     ( rst_ni                    ),\\n405:       .slave      ( dm_master                 ),\\n406:       .req_o      ( dm_slave_req              ),\\n407:       .we_o       ( dm_slave_we               ),\\n408:       .addr_o     ( dm_slave_addr             ),\\n409:       .be_o       ( dm_slave_be               ),\\n410:       .data_o     ( dm_slave_wdata            ),\\n411:       .data_i     ( dm_slave_rdata            )\\n412:   );\\n413: \\n414:   noc_axilite_bridge #(\\n415:     .SLAVE_RESP_BYTEWIDTH   ( 8             ),\\n416:     .SWAP_ENDIANESS         ( SwapEndianess )\\n417:   ) i_debug_axilite_bridge (\\n418:     .clk                    ( clk_i                         ),\\n419:     .rst                    ( ~rst_ni                       ),\\n420:     // to/from NOC\\n421:     .splitter_bridge_val    ( buf_ariane_debug_noc2_valid_i ),\\n422:     .splitter_bridge_data   ( buf_ariane_debug_noc2_data_i  ),\\n423:     .bridge_splitter_rdy    ( ariane_debug_buf_noc2_ready_o ),\\n424:     .bridge_splitter_val    ( ariane_debug_buf_noc3_valid_o ),\\n425:     .bridge_splitter_data   ( ariane_debug_buf_noc3_data_o  ),\\n426:     .splitter_bridge_rdy    ( buf_ariane_debug_noc3_ready_i ),\\n427:     //axi lite signals\\n428:     //write address channel\\n429:     .m_axi_awaddr           ( dm_master.aw_addr             ),\\n430:     .m_axi_awvalid          ( dm_master.aw_valid            ),\\n431:     .m_axi_awready          ( dm_master.aw_ready            ),\\n432:     //write data channel\\n433:     .m_axi_wdata            ( dm_master.w_data              ),\\n434:     .m_axi_wstrb            ( dm_master.w_strb              ),\\n435:     .m_axi_wvalid           ( dm_master.w_valid             ),\\n436:     .m_axi_wready           ( dm_master.w_ready             ),\\n437:     //read address channel\\n438:     .m_axi_araddr           ( dm_master.ar_addr             ),\\n439:     .m_axi_arvalid          ( dm_master.ar_valid            ),\\n440:     .m_axi_arready          ( dm_master.ar_ready            ),\\n441:     //read data channel\\n442:     .m_axi_rdata            ( dm_master.r_data              ),\\n443:     .m_axi_rresp            ( dm_master.r_resp              ),\\n444:     .m_axi_rvalid           ( dm_master.r_valid             ),\\n445:     .m_axi_rready           ( dm_master.r_ready             ),\\n446:     //write response channel\\n447:     .m_axi_bresp            ( dm_master.b_resp              ),\\n448:     .m_axi_bvalid           ( dm_master.b_valid             ),\\n449:     .m_axi_bready           ( dm_master.b_ready             ),\\n450:     // non-axi-lite signals\\n451:     .w_reqbuf_size          (                               ),\\n452:     .r_reqbuf_size          (                               )\\n453:   );\\n454: \\n455:   // tie off system bus accesses (not supported yet due to\\n456:   // missing AXI-lite br_master <-> NOC converter)\\n457:   assign dm_master_gnt      = '0;\\n458:   assign dm_master_r_valid  = '0;\\n459:   assign dm_master_r_rdata  = '0;\\n460: \\n461:   // tie off signals not used by AXI-lite\\n462:   assign dm_master.aw_id     = '0;\\n463:   assign dm_master.aw_len    = '0;\\n464:   assign dm_master.aw_size   = 3'b11;// 8byte\\n465:   assign dm_master.aw_burst  = '0;\\n466:   assign dm_master.aw_lock   = '0;\\n467:   assign dm_master.aw_cache  = '0;\\n468:   assign dm_master.aw_prot   = '0;\\n469:   assign dm_master.aw_qos    = '0;\\n470:   assign dm_master.aw\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 760,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"760:   assign plic_master.ar_region = '0;\\n761: \\n762: \\n763:   reg_intf::reg_intf_resp_d32 plic_resp;\\n764:   reg_intf::reg_intf_req_a32_d32 plic_req;\\n765: \\n766:   enum logic [2:0] {Idle, WriteSecond, ReadSecond, WriteResp, ReadResp} state_d, state_q;\\n767:   logic [31:0] rword_d, rword_q;\\n768: \\n769:   // register read data\\n770:   assign rword_d = (plic_req.valid && !plic_req.write) ? plic_resp.rdata : rword_q;\\n771:   assign plic_master.r_data = {plic_resp.rdata, rword_q};\\n772: \\n773:   always_ff @(posedge clk_i or negedge rst_ni) begin : p_plic_regs\\n774:     if (!rst_ni) begin\\n775:       state_q <= Idle;\\n776:       rword_q <= '0;\\n777:     end else begin\\n778:       state_q <= state_d;\\n779:       rword_q <= rword_d;\\n780:     end\\n781:   end\\n782: \\n783:   // this is a simplified AXI statemachine, since the\\n784:   // W and AW requests always arrive at the same time here\\n785:   always_comb begin : p_plic_if\\n786:     automatic logic [31:0] waddr, raddr;\\n787:     // subtract the base offset (truncated to 32 bits)\\n788:     waddr = plic_master.aw_addr[31:0] - 32'(PlicBase) + 32'hc000000;\\n789:     raddr = plic_master.ar_addr[31:0] - 32'(PlicBase) + 32'hc000000;\\n790: \\n791:     // AXI-lite\\n792:     plic_master.aw_ready = plic_resp.ready;\\n793:     plic_master.w_ready  = plic_resp.ready;\\n794:     plic_master.ar_ready = plic_resp.ready;\\n795: \\n796:     plic_master.r_valid  = 1'b0;\\n797:     plic_master.r_resp   = '0;\\n798:     plic_master.b_valid  = 1'b0;\\n799:     plic_master.b_resp   = '0;\\n800: \\n801:     // PLIC\\n802:     plic_req.valid       = 1'b0;\\n803:     plic_req.wstrb       = '0;\\n804:     plic_req.write       = 1'b0;\\n805:     plic_req.wdata       = plic_master.w_data[31:0];\\n806:     plic_req.addr        = waddr;\\n807: \\n808:     // default\\n809:     state_d              = state_q;\\n810: \\n811:     unique case (state_q)\\n812:       Idle: begin\\n813:         if (plic_master.w_valid && plic_master.aw_valid && plic_resp.ready) begin\\n814:           plic_req.valid = 1'b1;\\n815:           plic_req.write = plic_master.w_strb[3:0];\\n816:           plic_req.wstrb = '1;\\n817:           // this is a 64bit write, need to write second 32bit chunk in second cycle\\n818:           if (plic_master.aw_size == 3'b11) begin\\n819:             state_d = WriteSecond;\\n820:           end else begin\\n821:             state_d = WriteResp;\\n822:           end\\n823:         end else if (plic_master.ar_valid && plic_resp.ready) begin\\n824:           plic_req.valid = 1'b1;\\n825:           plic_req.addr  = raddr;\\n826:           // this is a 64bit read, need to read second 32bit chunk in second cycle\\n827:           if (plic_master.ar_size == 3'b11) begin\\n828:             state_d = ReadSecond;\\n829:           end else begin\\n830:             state_d = ReadResp;\\n831:           end\\n832:         end\\n833:       end\\n834:       // write high word\\n835:       WriteSecond: begin\\n836:         plic_master.aw_ready = 1'b0;\\n837:         plic_master.w_ready  = 1'b0;\\n838:         plic_master.ar_ready = 1'b0;\\n839:         plic_req.addr        = waddr + 32'h4;\\n840:         plic_req.wdata       = plic_master.w_data[63:32];\\n841:         if (plic_resp.ready && plic_master.b_ready) begin\\n842:           plic_req.valid       = 1'b1;\\n843:           plic_req.write       = 1'b1;\\n844:           plic_req.wstrb       = '1;\\n845:           plic_master.b_valid  = 1'b1;\\n846:           state_d              = Idle;\\n847:         end\\n848:       end\\n849:       // read high word\\n850:       ReadSecond: begin\\n851:         plic_master.aw_ready = 1'b0;\\n852:         plic_master.w_ready  = 1'b0;\\n853:         plic_master.ar_ready = 1'b0;\\n854:         plic_req.addr        = raddr + 32'h4;\\n855:         if (plic_resp.ready && plic_master.r_ready) begin\\n856:           plic_req.valid      = 1'b1;\\n857:           plic_master.r_valid = 1'b1;\\n858:           state_d             = Idle;\\n859:         end\\n86\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 380,
+        "offset": 900,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"900:   \\n901:   // reset controller logic\\n902:   logic rst_1;\\n903:   logic rst_2;\\n904:   logic rst_3;\\n905:   logic rst_4;\\n906:   logic rst_5;\\n907:   logic rst_6;\\n908:   logic rst_7;\\n909:   logic rst_8;\\n910:   logic rst_9;\\n911:   logic rst_10;\\n912:   logic rst_11;\\n913:   logic rst_13;\\n914: \\n915:   ariane_axi::req_t    rst_axi_req;\\n916:   ariane_axi::resp_t   rst_axi_resp;\\n917: \\n918:   rst_wrapper #(\\n919:     .AXI_ADDR_WIDTH ( AxiAddrWidth ),\\n920:     .AXI_DATA_WIDTH ( AxiDataWidth ),\\n921:     .AXI_ID_WIDTH   ( AxiIdWidth   )\\n922:   ) i_rst_wrapper (\\n923:     .clk_i                         ,\\n924:     .rst_ni                  ,\\n925:     .reglk_ctrl_i  ( reglk_ctrl[12*8+7:12*8]),\\n926:     .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][12]),\\n927:     .debug_mode_i  ( debug_mode_i  ),\\n928:     .axi_req_i     ( rst_axi_req  ),\\n929:     .axi_resp_o    ( rst_axi_resp ),\\n930:     .rst_1,\\n931:     .rst_2,\\n932:     .rst_3,\\n933:     .rst_4,\\n934:     .rst_5,\\n935:     .rst_6,\\n936:     .rst_7,\\n937:     .rst_8,\\n938:     .rst_9,\\n939:     .rst_10,\\n940:     .rst_11,\\n941:     .rst_13\\n942:   );\\n943: \\n944:   noc_axilite_bridge #(\\n945:     .SLAVE_RESP_BYTEWIDTH   ( 8             ),\\n946:     .SWAP_ENDIANESS         ( SwapEndianess )\\n947:   ) i_rst_axilite_bridge (\\n948:     .clk                    ( clk_i                         ),\\n949:     .rst                    ( ~rst_ni                       ),\\n950:     // to/from NOC\\n951:     .splitter_bridge_val    ( buf_ariane_rst_noc2_valid_i ),\\n952:     .splitter_bridge_data   ( buf_ariane_rst_noc2_data_i  ),\\n953:     .bridge_splitter_rdy    ( ariane_rst_buf_noc2_ready_o ),\\n954:     .bridge_splitter_val    ( ariane_rst_buf_noc3_valid_o ),\\n955:     .bridge_splitter_data   ( ariane_rst_buf_noc3_data_o  ),\\n956:     .splitter_bridge_rdy    ( buf_ariane_rst_noc3_ready_i ),\\n957:     //axi lite signals\\n958:     //write address channel\\n959:     .m_axi_awaddr           ( rst_axi_req.aw.addr         ),\\n960:     .m_axi_awvalid          ( rst_axi_req.aw_valid        ),\\n961:     .m_axi_awready          ( rst_axi_resp.aw_ready       ),\\n962:     //write data channel\\n963:     .m_axi_wdata            ( rst_axi_req.w.data          ),\\n964:     .m_axi_wstrb            ( rst_axi_req.w.strb          ),\\n965:     .m_axi_wvalid           ( rst_axi_req.w_valid         ),\\n966:     .m_axi_wready           ( rst_axi_resp.w_ready        ),\\n967:     //read address channel\\n968:     .m_axi_araddr           ( rst_axi_req.ar.addr         ),\\n969:     .m_axi_arvalid          ( rst_axi_req.ar_valid        ),\\n970:     .m_axi_arready          ( rst_axi_resp.ar_ready       ),\\n971:     //read data channel\\n972:     .m_axi_rdata            ( rst_axi_resp.r.data         ),\\n973:     .m_axi_rresp            ( rst_axi_resp.r.resp         ),\\n974:     .m_axi_rvalid           ( rst_axi_resp.r_valid        ),\\n975:     .m_axi_rready           ( rst_axi_req.r_ready         ),\\n976:     //write response channel\\n977:     .m_axi_bresp            ( rst_axi_resp.b.resp         ),\\n978:     .m_axi_bvalid           ( rst_axi_resp.b_valid        ),\\n979:     .m_axi_bready           ( rst_axi_req.b_ready         ),\\n980:     // non-axi-lite signals\\n981:     .w_reqbuf_size          (                               ),\\n982:     .r_reqbuf_size          (                               )\\n983:   );\\n984: \\n985:   // tie off signals not used by AXI-lite\\n986:   assign rst_axi_req.aw.id     = '0;\\n987:   assign rst_axi_req.aw.len    = '0;\\n988:   assign rst_axi_req.aw.size   = 3'b11;// 8byte\\n989:   assign rst_axi_req.aw.burst  = '0;\\n990:   assign rst_axi_req.aw.lock   = '0;\\n991:   assign rst_axi_req.aw.cache  = '0;\\n992:   assign rst_axi_req.aw.prot   = '0;\\n993:   assign rst_axi_req.aw.qos    = '0;\\n994:   assign rst_axi_req.aw.region = '0;\\n995:   assign rst_axi_req.aw.atop   = '0;\\n996:   assign rst_axi_req.w.last    = 1'b1;\\n997:   assign rst_axi_req.ar.id\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 380,
+        "offset": 1280,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1280:     .reglk_ctrl_i  ( reglk_ctrl[2*8+7:2*8]),\\n1281:     .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][2]),\\n1282:     .debug_mode_i  ( debug_mode_i  ),\\n1283:     .axi_req_i     ( aes1_axi_req  ),\\n1284:     .axi_resp_o    ( aes1_axi_resp ),\\n1285:     .rst_2\\n1286:   );\\n1287: \\n1288:   noc_axilite_bridge #(\\n1289:     .SLAVE_RESP_BYTEWIDTH   ( 8             ),\\n1290:     .SWAP_ENDIANESS         ( SwapEndianess )\\n1291:   ) i_aes1_axilite_bridge (\\n1292:     .clk                    ( clk_i                         ),\\n1293:     .rst                    ( ~rst_ni                       ),\\n1294:     // to/from NOC\\n1295:     .splitter_bridge_val    ( buf_ariane_aes1_noc2_valid_i ),\\n1296:     .splitter_bridge_data   ( buf_ariane_aes1_noc2_data_i  ),\\n1297:     .bridge_splitter_rdy    ( ariane_aes1_buf_noc2_ready_o ),\\n1298:     .bridge_splitter_val    ( ariane_aes1_buf_noc3_valid_o ),\\n1299:     .bridge_splitter_data   ( ariane_aes1_buf_noc3_data_o  ),\\n1300:     .splitter_bridge_rdy    ( buf_ariane_aes1_noc3_ready_i ),\\n1301:     //axi lite signals\\n1302:     //write address channel\\n1303:     .m_axi_awaddr           ( aes1_axi_req.aw.addr         ),\\n1304:     .m_axi_awvalid          ( aes1_axi_req.aw_valid        ),\\n1305:     .m_axi_awready          ( aes1_axi_resp.aw_ready       ),\\n1306:     //write data channel\\n1307:     .m_axi_wdata            ( aes1_axi_req.w.data          ),\\n1308:     .m_axi_wstrb            ( aes1_axi_req.w.strb          ),\\n1309:     .m_axi_wvalid           ( aes1_axi_req.w_valid         ),\\n1310:     .m_axi_wready           ( aes1_axi_resp.w_ready        ),\\n1311:     //read address channel\\n1312:     .m_axi_araddr           ( aes1_axi_req.ar.addr         ),\\n1313:     .m_axi_arvalid          ( aes1_axi_req.ar_valid        ),\\n1314:     .m_axi_arready          ( aes1_axi_resp.ar_ready       ),\\n1315:     //read data channel\\n1316:     .m_axi_rdata            ( aes1_axi_resp.r.data         ),\\n1317:     .m_axi_rresp            ( aes1_axi_resp.r.resp         ),\\n1318:     .m_axi_rvalid           ( aes1_axi_resp.r_valid        ),\\n1319:     .m_axi_rready           ( aes1_axi_req.r_ready         ),\\n1320:     //write response channel\\n1321:     .m_axi_bresp            ( aes1_axi_resp.b.resp         ),\\n1322:     .m_axi_bvalid           ( aes1_axi_resp.b_valid        ),\\n1323:     .m_axi_bready           ( aes1_axi_req.b_ready         ),\\n1324:     // non-axi-lite signals\\n1325:     .w_reqbuf_size          (                               ),\\n1326:     .r_reqbuf_size          (                               )\\n1327:   );\\n1328: \\n1329:   // tie off signals not used by AXI-lite\\n1330:   assign aes1_axi_req.aw.id     = '0;\\n1331:   assign aes1_axi_req.aw.len    = '0;\\n1332:   assign aes1_axi_req.aw.size   = 3'b11;// 8byte\\n1333:   assign aes1_axi_req.aw.burst  = '0;\\n1334:   assign aes1_axi_req.aw.lock   = '0;\\n1335:   assign aes1_axi_req.aw.cache  = '0;\\n1336:   assign aes1_axi_req.aw.prot   = '0;\\n1337:   assign aes1_axi_req.aw.qos    = '0;\\n1338:   assign aes1_axi_req.aw.region = '0;\\n1339:   assign aes1_axi_req.aw.atop   = '0;\\n1340:   assign aes1_axi_req.w.last    = 1'b1;\\n1341:   assign aes1_axi_req.ar.id     = '0;\\n1342:   assign aes1_axi_req.ar.len    = '0;\\n1343:   assign aes1_axi_req.ar.size   = 3'b11;// 8byte\\n1344:   assign aes1_axi_req.ar.burst  = '0;\\n1345:   assign aes1_axi_req.ar.lock   = '0;\\n1346:   assign aes1_axi_req.ar.cache  = '0;\\n1347:   assign aes1_axi_req.ar.prot   = '0;\\n1348:   assign aes1_axi_req.ar.qos    = '0;\\n1349:   assign aes1_axi_req.ar.region = '0;\\n1350: \\n1351:   /////////////////////////////\\n1352:   // AES2\\n1353:   /////////////////////////////\\n1354: \\n1355:   ariane_axi::req_t    aes2_axi_req;\\n1356:   ariane_axi::resp_t   aes2_axi_resp;\\n1357: \\n1358:   aes2_wrapper #(\\n1359:     .AXI_ADDR_WIDTH ( AxiAddrWidth ),\\n1360:     .AXI_DATA_WIDTH ( AxiDataWidth ),\\n1361:     .AXI_ID_WIDTH   ( AxiIdWidth   )\\n1362:   ) i\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 1600,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1600:   assign hmac_axi_req.ar.lock   = '0;\\n1601:   assign hmac_axi_req.ar.cache  = '0;\\n1602:   assign hmac_axi_req.ar.prot   = '0;\\n1603:   assign hmac_axi_req.ar.qos    = '0;\\n1604:   assign hmac_axi_req.ar.region = '0;\\n1605: \\n1606: \\n1607:   /////////////////////////////\\n1608:   // PKT\\n1609:   /////////////////////////////\\n1610: \\n1611:   ariane_axi::req_t    pkt_axi_req;\\n1612:   ariane_axi::resp_t   pkt_axi_resp;\\n1613:   logic                fuse_req;\\n1614:   logic [31:0]         fuse_addr;\\n1615:   logic [31:0]         fuse_rdata;\\n1616: \\n1617: \\n1618:   pkt_wrapper #(\\n1619:     .AXI_ADDR_WIDTH ( AxiAddrWidth  ),\\n1620:     .AXI_DATA_WIDTH ( AxiDataWidth  ),\\n1621:     .AXI_ID_WIDTH   ( AxiIdWidth    ),\\n1622:     .FUSE_MEM_SIZE  ( FUSE_MEM_SIZE )\\n1623:   ) i_pkt_wrapper (\\n1624:     .clk_i                         ,\\n1625:     .rst_ni                        ,\\n1626:     .reglk_ctrl_i  ( reglk_ctrl[5*8+7:5*8]),\\n1627:     .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][5]),\\n1628:     .fuse_req_o    ( fuse_req     ),\\n1629:     .fuse_addr_o   ( fuse_addr    ),\\n1630:     .fuse_rdata_i  ( fuse_rdata   ),\\n1631:     .axi_req_i     ( pkt_axi_req  ),\\n1632:     .axi_resp_o    ( pkt_axi_resp ),\\n1633:     .rst_5\\n1634:   );\\n1635: \\n1636:   noc_axilite_bridge #(\\n1637:     .SLAVE_RESP_BYTEWIDTH   ( 8             ),\\n1638:     .SWAP_ENDIANESS         ( SwapEndianess )\\n1639:   ) i_pkt_axilite_bridge (\\n1640:     .clk                    ( clk_i                         ),\\n1641:     .rst                    ( ~rst_ni                       ),\\n1642:     // to/from NOC\\n1643:     .splitter_bridge_val    ( buf_ariane_pkt_noc2_valid_i ),\\n1644:     .splitter_bridge_data   ( buf_ariane_pkt_noc2_data_i  ),\\n1645:     .bridge_splitter_rdy    ( ariane_pkt_buf_noc2_ready_o ),\\n1646:     .bridge_splitter_val    ( ariane_pkt_buf_noc3_valid_o ),\\n1647:     .bridge_splitter_data   ( ariane_pkt_buf_noc3_data_o  ),\\n1648:     .splitter_bridge_rdy    ( buf_ariane_pkt_noc3_ready_i ),\\n1649:     //axi lite signals\\n1650:     //write address channel\\n1651:     .m_axi_awaddr           ( pkt_axi_req.aw.addr         ),\\n1652:     .m_axi_awvalid          ( pkt_axi_req.aw_valid        ),\\n1653:     .m_axi_awready          ( pkt_axi_resp.aw_ready       ),\\n1654:     //write data channel\\n1655:     .m_axi_wdata            ( pkt_axi_req.w.data          ),\\n1656:     .m_axi_wstrb            ( pkt_axi_req.w.strb          ),\\n1657:     .m_axi_wvalid           ( pkt_axi_req.w_valid         ),\\n1658:     .m_axi_wready           ( pkt_axi_resp.w_ready        ),\\n1659:     //read address channel\\n1660:     .m_axi_araddr           ( pkt_axi_req.ar.addr         ),\\n1661:     .m_axi_arvalid          ( pkt_axi_req.ar_valid        ),\\n1662:     .m_axi_arready          ( pkt_axi_resp.ar_ready       ),\\n1663:     //read data channel\\n1664:     .m_axi_rdata            ( pkt_axi_resp.r.data         ),\\n1665:     .m_axi_rresp            ( pkt_axi_resp.r.resp         ),\\n1666:     .m_axi_rvalid           ( pkt_axi_resp.r_valid        ),\\n1667:     .m_axi_rready           ( pkt_axi_req.r_ready         ),\\n1668:     //write response channel\\n1669:     .m_axi_bresp            ( pkt_axi_resp.b.resp         ),\\n1670:     .m_axi_bvalid           ( pkt_axi_resp.b_valid        ),\\n1671:     .m_axi_bready           ( pkt_axi_req.b_ready         ),\\n1672:     // non-axi-lite signals\\n1673:     .w_reqbuf_size          (                               ),\\n1674:     .r_reqbuf_size          (                               )\\n1675:   );\\n1676: \\n1677:   // tie off signals not used by AXI-lite\\n1678:   assign pkt_axi_req.aw.id     = '0;\\n1679:   assign pkt_axi_req.aw.len    = '0;\\n1680:   assign pkt_axi_req.aw.size   = 3'b11;// 8byte\\n1681:   assign pkt_axi_req.aw.burst  = '0;\\n1682:   assign pkt_axi_req.aw.lock   = '0;\\n1683:   assign pkt_axi_req.aw.cache  = '0;\\n1684:   assign pkt_axi_req.aw.prot   = '0;\\n1685:   assign pkt_axi_req.aw.q\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 1718,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1718: \\n1719:   acct_wrapper #(\\n1720:     .AXI_ADDR_WIDTH ( AxiAddrWidth ),\\n1721:     .AXI_DATA_WIDTH ( AxiDataWidth ),\\n1722:     .AXI_ID_WIDTH   ( AxiIdWidth   ),\\n1723:     .NB_SLAVE       ( NB_SLAVE     ),\\n1724:     .NB_PERIPHERALS ( NB_PERIPHERALS )\\n1725:   ) i_acct_wrapper (\\n1726:     .clk_i                         ,\\n1727:     .rst_ni                        ,\\n1728:     .reglk_ctrl_i  ( reglk_ctrl[6*8+7:6*8]),\\n1729:     .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][6]),\\n1730:     .acc_ctrl_o    ( acc_ctrl  ),\\n1731:     .we_flag       ( we_flag_0 ),\\n1732:     .axi_req_i     ( acct_axi_req  ),\\n1733:     .axi_resp_o    ( acct_axi_resp ),\\n1734:     .rst_6\\n1735:   );\\n1736: \\n1737:   noc_axilite_bridge #(\\n1738:     .SLAVE_RESP_BYTEWIDTH   ( 8             ),\\n1739:     .SWAP_ENDIANESS         ( SwapEndianess )\\n1740:   ) i_acct_axilite_bridge (\\n1741:     .clk                    ( clk_i                         ),\\n1742:     .rst                    ( ~rst_ni                       ),\\n1743:     // to/from NOC\\n1744:     .splitter_bridge_val    ( buf_ariane_acct_noc2_valid_i ),\\n1745:     .splitter_bridge_data   ( buf_ariane_acct_noc2_data_i  ),\\n1746:     .bridge_splitter_rdy    ( ariane_acct_buf_noc2_ready_o ),\\n1747:     .bridge_splitter_val    ( ariane_acct_buf_noc3_valid_o ),\\n1748:     .bridge_splitter_data   ( ariane_acct_buf_noc3_data_o  ),\\n1749:     .splitter_bridge_rdy    ( buf_ariane_acct_noc3_ready_i ),\\n1750:     //axi lite signals\\n1751:     //write address channel\\n1752:     .m_axi_awaddr           ( acct_axi_req.aw.addr         ),\\n1753:     .m_axi_awvalid          ( acct_axi_req.aw_valid        ),\\n1754:     .m_axi_awready          ( acct_axi_resp.aw_ready       ),\\n1755:     //write data channel\\n1756:     .m_axi_wdata            ( acct_axi_req.w.data          ),\\n1757:     .m_axi_wstrb            ( acct_axi_req.w.strb          ),\\n1758:     .m_axi_wvalid           ( acct_axi_req.w_valid         ),\\n1759:     .m_axi_wready           ( acct_axi_resp.w_ready        ),\\n1760:     //read address channel\\n1761:     .m_axi_araddr           ( acct_axi_req.ar.addr         ),\\n1762:     .m_axi_arvalid          ( acct_axi_req.ar_valid        ),\\n1763:     .m_axi_arready          ( acct_axi_resp.ar_ready       ),\\n1764:     //read data channel\\n1765:     .m_axi_rdata            ( acct_axi_resp.r.data         ),\\n1766:     .m_axi_rresp            ( acct_axi_resp.r.resp         ),\\n1767:     .m_axi_rvalid           ( acct_axi_resp.r_valid        ),\\n1768:     .m_axi_rready           ( acct_axi_req.r_ready         ),\\n1769:     //write response channel\\n1770:     .m_axi_bresp            ( acct_axi_resp.b.resp         ),\\n1771:     .m_axi_bvalid           ( acct_axi_resp.b_valid        ),\\n1772:     .m_axi_bready           ( acct_axi_req.b_ready         ),\\n1773:     // non-axi-lite signals\\n1774:     .w_reqbuf_size          (                               ),\\n1775:     .r_reqbuf_size          (                               )\\n1776:   );\\n1777: \\n1778:   // tie off signals not used by AXI-lite\\n1779:   assign acct_axi_req.aw.id     = '0;\\n1780:   assign acct_axi_req.aw.len    = '0;\\n1781:   assign acct_axi_req.aw.size   = 3'b11;// 8byte\\n1782:   assign acct_axi_req.aw.burst  = '0;\\n1783:   assign acct_axi_req.aw.lock   = '0;\\n1784:   assign acct_axi_req.aw.cache  = '0;\\n1785:   assign acct_axi_req.aw.prot   = '0;\\n1786:   assign acct_axi_req.aw.qos    = '0;\\n1787:   assign acct_axi_req.aw.region = '0;\\n1788:   assign acct_axi_req.aw.atop   = '0;\\n1789:   assign acct_axi_req.w.last    = 1'b1;\\n1790:   assign acct_axi_req.ar.id     = '0;\\n1791:   assign acct_axi_req.ar.len    = '0;\\n1792:   assign acct_axi_req.ar.size   = 3'b11;// 8byte\\n1793:   assign acct_axi_req.ar.burst  = '0;\\n1794:   assign acct_axi_req.ar.lock   = '0;\\n1795:   assign acct_axi_req.ar.cache  = '0;\\n1796:   assign acct_axi_req.ar.prot   = '0;\\n1797:   assign acct_axi_req.ar.qos    = '0;\\n1798:   ass\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "query": "acct_ctrl_i   \\( acc_ctrl_c"
+      },
+      "status": "ok",
+      "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 3,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "query": "we_flag"
+      },
+      "status": "ok",
+      "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+      "error": null,
+      "content": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:56: input                         we_flag_0,\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:57: input                         we_flag_1,\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:58: input                         we_flag_2,\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:59: input                         we_flag_3,\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:60: input                         we_flag_4,\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:279: .we_flag          ( we_flag_4        ),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1194: .reglk_ctrl_i  ( reglk_ctrl[1*8+7:1*8] | we_flag_1 ),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1731: .we_flag       ( we_flag_0 ),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1909: .we_flag       ( we_flag_3 ),",
+      "truncated": false
+    },
+    {
+      "step": 3,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "query": "i_dma_wrapper"
+      },
+      "status": "ok",
+      "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+      "error": null,
+      "content": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1902: ) i_dma_wrapper (",
+      "truncated": false
+    },
+    {
+      "step": 4,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "query": "acc_ctrl_c\\[priv_lvl_i\\]"
+      },
+      "status": "ok",
+      "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 120,
+        "offset": 1160,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      },
+      "status": "ok",
+      "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+      "error": null,
+      "content": "1160:   assign rng_axi_req.aw.burst  = '0;\n1161:   assign rng_axi_req.aw.lock   = '0;\n1162:   assign rng_axi_req.aw.cache  = '0;\n1163:   assign rng_axi_req.aw.prot   = '0;\n1164:   assign rng_axi_req.aw.qos    = '0;\n1165:   assign rng_axi_req.aw.region = '0;\n1166:   assign rng_axi_req.aw.atop   = '0;\n1167:   assign rng_axi_req.w.last    = 1'b1;\n1168:   assign rng_axi_req.ar.id     = '0;\n1169:   assign rng_axi_req.ar.len    = '0;\n1170:   assign rng_axi_req.ar.size   = 3'b11;// 8byte\n1171:   assign rng_axi_req.ar.burst  = '0;\n1172:   assign rng_axi_req.ar.lock   = '0;\n1173:   assign rng_axi_req.ar.cache  = '0;\n1174:   assign rng_axi_req.ar.prot   = '0;\n1175:   assign rng_axi_req.ar.qos    = '0;\n1176:   assign rng_axi_req.ar.region = '0;\n1177: \n1178: \n1179: \n1180:   /////////////////////////////\n1181:   // AES0\n1182:   /////////////////////////////\n1183: \n1184:   ariane_axi::req_t    aes0_axi_req;\n1185:   ariane_axi::resp_t   aes0_axi_resp;\n1186: \n1187:   aes0_wrapper #(\n1188:     .AXI_ADDR_WIDTH ( AxiAddrWidth ),\n1189:     .AXI_DATA_WIDTH ( AxiDataWidth ),\n1190:     .AXI_ID_WIDTH   ( AxiIdWidth   )\n1191:   ) i_aes0_wrapper (\n1192:     .clk_i                         ,\n1193:     .rst_ni                        ,\n1194:     .reglk_ctrl_i  ( reglk_ctrl[1*8+7:1*8] | we_flag_1 ),\n1195:     .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][1]),\n1196:     .debug_mode_i  ( debug_mode_i  ),\n1197:     .axi_req_i     ( aes0_axi_req  ),\n1198:     .axi_resp_o    ( aes0_axi_resp ),\n1199:     .rst_1\n1200:   );\n1201: \n1202:   noc_axilite_bridge #(\n1203:     .SLAVE_RESP_BYTEWIDTH   ( 8             ),\n1204:     .SWAP_ENDIANESS         ( SwapEndianess )\n1205:   ) i_aes0_axilite_bridge (\n1206:     .clk                    ( clk_i                         ),\n1207:     .rst                    ( ~rst_ni                       ),\n1208:     // to/from NOC\n1209:     .splitter_bridge_val    ( buf_ariane_aes0_noc2_valid_i ),\n1210:     .splitter_bridge_data   ( buf_ariane_aes0_noc2_data_i  ),\n1211:     .bridge_splitter_rdy    ( ariane_aes0_buf_noc2_ready_o ),\n1212:     .bridge_splitter_val    ( ariane_aes0_buf_noc3_valid_o ),\n1213:     .bridge_splitter_data   ( ariane_aes0_buf_noc3_data_o  ),\n1214:     .splitter_bridge_rdy    ( buf_ariane_aes0_noc3_ready_i ),\n1215:     //axi lite signals\n1216:     //write address channel\n1217:     .m_axi_awaddr           ( aes0_axi_req.aw.addr         ),\n1218:     .m_axi_awvalid          ( aes0_axi_req.aw_valid        ),\n1219:     .m_axi_awready          ( aes0_axi_resp.aw_ready       ),\n1220:     //write data channel\n1221:     .m_axi_wdata            ( aes0_axi_req.w.data          ),\n1222:     .m_axi_wstrb            ( aes0_axi_req.w.strb          ),\n1223:     .m_axi_wvalid           ( aes0_axi_req.w_valid         ),\n1224:     .m_axi_wready           ( aes0_axi_resp.w_ready        ),\n1225:     //read address channel\n1226:     .m_axi_araddr           ( aes0_axi_req.ar.addr         ),\n1227:     .m_axi_arvalid          ( aes0_axi_req.ar_valid        ),\n1228:     .m_axi_arready          ( aes0_axi_resp.ar_ready       ),\n1229:     //read data channel\n1230:     .m_axi_rdata            ( aes0_axi_resp.r.data         ),\n1231:     .m_axi_rresp            ( aes0_axi_resp.r.resp         ),\n1232:     .m_axi_rvalid           ( aes0_axi_resp.r_valid        ),\n1233:     .m_axi_rready           ( aes0_axi_req.r_ready         ),\n1234:     //write response channel\n1235:     .m_axi_bresp            ( aes0_axi_resp.b.resp         ),\n1236:     .m_axi_bvalid           ( aes0_axi_resp.b_valid        ),\n1237:     .m_axi_bready           ( aes0_axi_req.b_ready         ),\n1238:     // non-axi-lite signals\n1239:     .w_reqbuf_size          (                               ),\n1240:     .r_reqbuf_size          (                               )\n1241:   );\n1242: \n1243:   // tie off signals not used by AXI-lite\n1244:   assign aes0_axi_req.aw.id     = '0;\n1245:   assign aes0_axi_req.aw.len    = '0;\n1246:   assign aes0_axi_req.aw.size   = 3'b11;// 8byte\n1247:   assign aes0_\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 100,
+        "offset": 1888,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      },
+      "status": "ok",
+      "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+      "error": null,
+      "content": "1888: \n1889: \n1890: \n1891:   /////////////////////////////\n1892:   // DMA\n1893:   /////////////////////////////\n1894: \n1895:   ariane_axi::req_t    dma_axi_req;\n1896:   ariane_axi::resp_t   dma_axi_resp;\n1897: \n1898:   dma_wrapper #(\n1899:     .AXI_ADDR_WIDTH ( AxiAddrWidth ),\n1900:     .AXI_DATA_WIDTH ( AxiDataWidth ),\n1901:     .AXI_ID_WIDTH   ( AxiIdWidth   )\n1902:   ) i_dma_wrapper (\n1903:     .clk_i                         ,\n1904:     .rst_ni                        ,\n1905:     .reglk_ctrl_i  ( reglk_ctrl[8*8+7:8*8]),\n1906:     .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][8]),\n1907:     .pmpcfg_i      ( pmpcfg_i  ),\n1908:     .pmpaddr_i     ( pmpaddr_i  ),\n1909:     .we_flag       ( we_flag_3 ),\n1910:     .axi_req_i     ( dma_axi_req  ),\n1911:     .axi_resp_o    ( dma_axi_resp ),\n1912:     .rst_8\n1913:   );\n1914: \n1915:   noc_axilite_bridge #(\n1916:     .SLAVE_RESP_BYTEWIDTH   ( 8             ),\n1917:     .SWAP_ENDIANESS         ( SwapEndianess )\n1918:   ) i_dma_axilite_bridge (\n1919:     .clk                    ( clk_i                         ),\n1920:     .rst                    ( ~rst_ni                       ),\n1921:     // to/from NOC\n1922:     .splitter_bridge_val    ( buf_ariane_dma_noc2_valid_i ),\n1923:     .splitter_bridge_data   ( buf_ariane_dma_noc2_data_i  ),\n1924:     .bridge_splitter_rdy    ( ariane_dma_buf_noc2_ready_o ),\n1925:     .bridge_splitter_val    ( ariane_dma_buf_noc3_valid_o ),\n1926:     .bridge_splitter_data   ( ariane_dma_buf_noc3_data_o  ),\n1927:     .splitter_bridge_rdy    ( buf_ariane_dma_noc3_ready_i ),\n1928:     //axi lite signals\n1929:     //write address channel\n1930:     .m_axi_awaddr           ( dma_axi_req.aw.addr         ),\n1931:     .m_axi_awvalid          ( dma_axi_req.aw_valid        ),\n1932:     .m_axi_awready          ( dma_axi_resp.aw_ready       ),\n1933:     //write data channel\n1934:     .m_axi_wdata            ( dma_axi_req.w.data          ),\n1935:     .m_axi_wstrb            ( dma_axi_req.w.strb          ),\n1936:     .m_axi_wvalid           ( dma_axi_req.w_valid         ),\n1937:     .m_axi_wready           ( dma_axi_resp.w_ready        ),\n1938:     //read address channel\n1939:     .m_axi_araddr           ( dma_axi_req.ar.addr         ),\n1940:     .m_axi_arvalid          ( dma_axi_req.ar_valid        ),\n1941:     .m_axi_arready          ( dma_axi_resp.ar_ready       ),\n1942:     //read data channel\n1943:     .m_axi_rdata            ( dma_axi_resp.r.data         ),\n1944:     .m_axi_rresp            ( dma_axi_resp.r.resp         ),\n1945:     .m_axi_rvalid           ( dma_axi_resp.r_valid        ),\n1946:     .m_axi_rready           ( dma_axi_req.r_ready         ),\n1947:     //write response channel\n1948:     .m_axi_bresp            ( dma_axi_resp.b.resp         ),\n1949:     .m_axi_bvalid           ( dma_axi_resp.b_valid        ),\n1950:     .m_axi_bready           ( dma_axi_req.b_ready         ),\n1951:     // non-axi-lite signals\n1952:     .w_reqbuf_size          (                               ),\n1953:     .r_reqbuf_size          (                               )\n1954:   );\n1955: \n1956:   // tie off signals not used by AXI-lite\n1957:   assign dma_axi_req.aw.id     = '0;\n1958:   assign dma_axi_req.aw.len    = '0;\n1959:   assign dma_axi_req.aw.size   = 3'b11;// 8byte\n1960:   assign dma_axi_req.aw.burst  = '0;\n1961:   assign dma_axi_req.aw.lock   = '0;\n1962:   assign dma_axi_req.aw.cache  = '0;\n1963:   assign dma_axi_req.aw.prot   = '0;\n1964:   assign dma_axi_req.aw.qos    = '0;\n1965:   assign dma_axi_req.aw.region = '0;\n1966:   assign dma_axi_req.aw.atop   = '0;\n1967:   assign dma_axi_req.w.last    = 1'b1;\n1968:   assign dma_axi_req.ar.id     = '0;\n1969:   assign dma_axi_req.ar.len    = '0;\n1970:   assign dma_axi_req.ar.size   = 3'b11;// 8byte\n1971:   assign dma_axi_req.ar.burst  = '0;\n1972:   assign dma_axi_req.ar.lock   = '0;\n1973:   assign dma_axi_req.ar.cache  = '0;\n1974:   assign dma_axi_req.ar.prot   = '0;\n1975:   assign dma_axi_req.ar.qos    = '0;\n1976:   assign dma_axi_req.ar.reg\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 5,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "query": "acc_ctrl_c"
+      },
+      "status": "ok",
+      "path": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+      "error": null,
+      "content": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:216: logic [3:0][NB_PERIPHERALS-1:0] acc_ctrl_c;\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:222: assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]);\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:516: //assign rom_req = rom_req_acct ; //&& acc_ctrl_c[priv_lvl_i][0];\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:517: assign rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0];\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:926: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][12]),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1022: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][13]),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1108: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][10]),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1195: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][1]),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1281: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][2]),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1366: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][11]),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1451: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][3]),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1536: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][4]),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1627: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][5]),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1729: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][6]),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1819: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][9]),\npiton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv:1906: .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][8]),",
+      "truncated": false
+    },
+    {
+      "step": 6,
+      "tool": "model_message",
+      "args": {},
+      "status": "ok",
+      "content": "[\n  {\n    \"obligation_id\": \"M2_PERM_DEBUG_JTAG_AUTH_001\",\n    \"status\": \"candidate_violation\",\n    \"subject\": \"External JTAG/DTM inputs tck_i/tms_i/trst_ni/td_i, RISCV_JTAG_SIM SimJTAG, or RISCV_FESVR_SIM SimDTM requester; also debug NOC requester via buf_ariane_debug_noc2_*.\",\n    \"operation\": \"Issue DMI debug requests/responses, trigger hart debug_req_o through dm_top, and access debug-module slave bus via dm_slave_*.\",\n    \"object\": \"dm_top debug_req_o, DMI request path debug_req/debug_req_valid, dm_slave_req/we/addr/wdata/rdata, debug NOC AXI-lite bridge to dm_master.\",\n    \"expected_guard\": \"A visible debug authorization condition such as jtag_unlock/authenticated hash state should mediate DMI requests before dm_top can assert debug_req_o or accept debug bus transactions.\",\n    \"observed_behavior\": \"dmi_jtag receives jtag_hash/okey_hash/ikey_hash and outputs jtag_unlock, but debug_req_valid/debug_req are wired directly from dmi_jtag to dm_top without a visible jtag_unlock guard. In RISCV_FESVR_SIM, SimDTM directly drives debug_req_valid/debug_req fields with no visible auth. dm_top drives debug_req_o and accepts the DMI request path directly. A debug NOC bridge drives dm_master AXI, which axi2mem converts to dm_slave_* into dm_top. dm_master system-bus request response inputs are tied off, but the debug-module slave path remains reachable.\",\n    \"path\": \"JTAG/SimDTM/SimJTAG or debug NOC -> dmi_jtag/SimDTM or noc_axilite_bridge -> debug_req/debug_req_valid or dm_master -> axi2mem -> dm_slave_* -> dm_top -> debug_req_o\",\n    \"state_condition\": \"jtag_unlock is generated by dmi_jtag but only visibly connected later to reglk_wrapper, not as a guard on dm_top DMI inputs. testmode_i is passed to dmi_jtag and dm_top, but no top-level guard is visible. Reset rst_ni feeds dmi_jtag/dm_top. dm_master external system-bus responses are tied off at lines 457-459, but debug slave access to dm_top is not tied off.\",\n    \"impact\": \"An external/simulation debug requester may control hart debug entry or debug-module state without visible top-level authentication enforcement.\",\n    \"rtl_evidence\": [\n      \"riscv_peripherals.sv:238-239 declares jtag_hash/ikey_hash/okey_hash and jtag_unlock.\",\n      \"riscv_peripherals.sv:275-289: dmi_jtag connects .jtag_hash_i/.okey_hash_i/.ikey_hash_i and .jtag_unlock_o(jtag_unlock), while .dmi_req_o(debug_req) and .dmi_req_valid_o(debug_req_valid) drive the DMI path.\",\n      \"riscv_peripherals.sv:256-268: SimDTM directly drives debug_req_valid and debug_req bits under RISCV_FESVR_SIM.\",\n      \"riscv_peripherals.sv:353-388: dm_top receives debug_req_valid/debug_req and outputs debug_req_o at line 364.\",\n      \"riscv_peripherals.sv:397-412 and 414-453: debug NOC bridge drives dm_master AXI, converted by axi2mem to dm_slave_req/we/addr/wdata into dm_top.\",\n      \"riscv_peripherals.sv:457-459: dm_master_gnt/r_valid/r_rdata tied off, limiting master system bus, but not DMI/slave debug access.\"\n    ]\n  },\n  {\n    \"obligation_id\": \"M2_PERM_REGLK_STICKY_002\",\n    \"status\": \"candidate_violation\",\n    \"subject\": \"Software-visible AXI requester reaching reglk_wrapper through reglk NOC AXI-lite bridge, with jtag_unlock as an override/reset input.\",\n    \"operation\": \"Write, clear, or update lock-control registers.\",\n    \"object\": \"reglk_mem registers and exported reglk_ctrl_o/reglk_ctrl vector consumed by peripheral wrappers.\",\n    \"expected_guard\": \"Once a lock bit is set, later clears/overwrites should be blocked unless an authorized unlock/debug lifecycle condition is active; reset/unlock behavior should not silently clear locks during normal operation.\",\n    \"observed_behavior\": \"reglk_wrapper updates reglk_mem with raw wdata on en && we, guarded only by current reglk_ctrl_i bits and acct_ctrl_i. There is no sticky OR/set-only behavior. Writing zero is accepted whenever the corresponding reglk_ctrl_i write-lock bit is not set. jtag_unlock is part of the reset condition and clears all reglk_mem when asserted.\",\n    \"path\": \"reglk NOC -> noc_axilite_bridge -> reglk_axi_req -> reglk_wrapper AXI-lite interface -> reglk_mem -> reglk_ctrl_o -> top-level reglk_ctrl consumers\",\n    \"state_condition\": \"On !(rst_ni && ~jtag_unlock && ~rst_9), all reglk_mem entries reset to zero. During normal en && we, addresses 0-5 overwrite lock words with wdata if selected reglk_ctrl_i lock bit is clear. rst_9 also clears locks.\",\n    \"impact\": \"A requester with access to the reglk register path can clear or overwrite lock bits before those specific write-lock controls are engaged; jtag_unlock/rst_9 clear the entire lock vector, weakening lock stickiness/lifecycle assumptions.\",\n    \"rtl_evidence\": [\n      \"reglk_wrapper.sv:48: reglk_ctrl_o is concatenation of reglk_mem[5:0].\",\n      \"reglk_wrapper.sv:72: en = en_acct && acct_ctrl_i.\",\n      \"reglk_wrapper.sv:78-85: reset branch clears all reglk_mem when ~(rst_ni && ~jtag_unlock && ~rst_9).\",\n      \"reglk_wrapper.sv:86-99: en && we writes assign reglk_mem[n] <= wdata unless selected reglk_ctrl bit is set; no set-only/sticky OR behavior.\",\n      \"riscv_peripherals.sv:1808-1823: reglk_wrapper produces top-level reglk_ctrl and receives jtag_unlock, acc_ctrl_c[priv_lvl_i][9], and rst_9.\"\n    ]\n  },\n  {\n    \"obligation_id\": \"M2_PERM_ACCT_POLICY_UPDATE_USE_003\",\n    \"status\": \"candidate_violation\",\n    \"subject\": \"Software-visible AXI/NOC requester writing acct_wrapper, and runtime requester represented by priv_lvl_i.\",\n    \"operation\": \"Configure access-control policy and use acc_ctrl_c[priv_lvl_i][peripheral] to gate requests.\",\n    \"object\": \"acct_mem/acc_ctrl_o policy bits and gated peripheral request enables/wrapper acct_ctrl_i signals.\",\n    \"expected_guard\": \"Policy updates should be protected by privilege/lock authorization, and every protected peripheral request path should consistently require acc_ctrl_c indexed by current privilege.\",\n    \"observed_behavior\": \"acct_wrapper initializes acct_mem to all ones, meaning default policy allows all bits. acc_ctrl_o also ORs acct_mem[0] with {8{we_flag}}, allowing we_flag_0 to force access-control outputs. Writes are allowed whenever en_acct && acct_ctrl_i && we and selected reglk_ctrl bit is not set; there is no independent privilege check beyond the same acc_ctrl matrix being programmed. Top-level uses acc_ctrl_c for many wrappers and bootrom, but PLIC request generation is direct and not visibly gated by acc_ctrl_c.\",\n    \"path\": \"acct NOC -> acct_axilite_bridge -> acct_wrapper -> acc_ctrl -> acc_ctrl_c[priv_lvl_i][j] -> bootrom/wrapper acct_ctrl_i; PLIC direct AXI-lite state machine lacks acc_ctrl_c check\",\n    \"state_condition\": \"Reset/rst_6 sets all acct_mem entries to 32'hffffffff. acc_ctrl_c aliases j==5 with acc_ctrl[4*4+i]. acct policy writes are self-referentially gated by acc_ctrl_c[priv_lvl_i][6].\",\n    \"impact\": \"Default-open policy and forced we_flag access may let lower-privilege/software paths grant or retain broad access. Inconsistent use leaves some peripheral paths outside the central access-control matrix.\",\n    \"rtl_evidence\": [\n      \"acct_wrapper.sv:49: acc_ctrl_o = {acct_mem[2], acct_mem[1], acct_mem[0] | {8{we_flag}}}.\",\n      \"acct_wrapper.sv:73: en = en_acct && acct_ctrl_i.\",\n      \"acct_wrapper.sv:81-85: reset sets each acct_mem entry to 32'hffffffff.\",\n      \"acct_wrapper.sv:87-109: writes update acct_mem entries with wdata unless selected reglk_ctrl bit is set.\",\n      \"riscv_peripherals.sv:222: acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]).\",\n      \"riscv_peripherals.sv:517: rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0].\",\n      \"riscv_peripherals.sv:1725-1734: acct_wrapper receives acct_ctrl_i(acc_ctrl_c[priv_lvl_i][6]) and we_flag_0.\",\n      \"riscv_peripherals.sv:811-825: PLIC state machine asserts plic_req.valid based on plic_master AXI valid/ready only, with no visible acc_ctrl_c term.\"\n    ]\n  },\n  {\n    \"obligation_id\": \"M2_PERM_PKT_FUSE_READ_004\",\n    \"status\": \"candidate_violation\",\n    \"subject\": \"Softwar\n[TRUNCATED]",
+      "truncated": true
+    }
+  ]
+}

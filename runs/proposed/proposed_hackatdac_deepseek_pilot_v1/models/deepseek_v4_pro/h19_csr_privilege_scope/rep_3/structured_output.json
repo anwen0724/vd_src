@@ -1,0 +1,339 @@
+{
+  "analysis_summary": "The proposed method produced 4 finding(s) from 7 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "Debug mode unconditionally elevates privilege to M, bypassing all CSR access-control guards. This violates the expectation that security-critical CSRs remain protected even during debug.",
+      "vulnerability_category": "Read/write security-critical CSRs (mstatus, satp, etc.) / All CSRs accessible via csr_addr_i when debug_mode_q=1 / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "priv_lvl_o forced to M in debug mode",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Privilege check that passes for priv_lvl=M",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "MSTATUS write without TVM/lock guard",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "SATP write without TVM check",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "debug entry triggered by debug_req_i only",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "debug_req = debug_req_i & ~amo_valid_commit",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug agent (debug_req_i → debug_mode_q) Operation: Read/write security-critical CSRs (mstatus, satp, etc.) Object: All CSRs accessible via csr_addr_i when debug_mode_q=1 Expected guard: CSR access during debug must still honor TVM, PMP lock, read-only bits, or require authenticated debug session. Observed behavior: debug_mode_q=1 forces priv_lvl_o=M (line 938), causing the privilege-level check (line 854) to pass for any CSR.  MSTATUS write (lines 437-448) and SATP write (lines 428-435) lack additional TVM or lock checks.  No debug authentication state exists.  The only gate is debug_req_i & ~amo_valid_commit (ariane.sv:233). Path: debug_req_i → ariane.sv:233 (debug_req = debug_req_i & ~amo_valid_commit) → csr_regfile_i.debug_req_i → csr_regfile.sv:642-651 (sets debug_mode_d) → debug_mode_q=1 → line 938 (priv_lvl_o=M) → line 854 (privilege check bypassed) → line 333 (csr_we gates writes, no further guard) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debugger can read/modify any implemented CSR (including mstatus, satp) without restriction, potentially disabling virtual memory, modifying privilege modes, or altering exception delegation. No authentication is required.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "The csr_regfile module itself does not enforce TVM on SATP writes.  If the ID-stage check is missing or bypassed, the TVM guard can be violated.",
+      "vulnerability_category": "Write to SATP via csr_we when tvm_o is high / SATP register (satp_q, satp_ppn_o, asid_o) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "SATP write lacks TVM check",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "tvm_o assignment",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Privilege check without TVM evaluation",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Supervisor or user-mode CSR instruction targeting SATP (0x180) when MSTATUS.TVM=1 Operation: Write to SATP via csr_we when tvm_o is high Object: SATP register (satp_q, satp_ppn_o, asid_o) Expected guard: The tvm_o signal must block the write and raise an illegal-instruction exception when effective privilege ≤ S and TVM=1. Observed behavior: Inside csr_regfile, the TVM flag is not evaluated during SATP writes.  The write path (lines 428-435) checks only SATP mode validity (MODE_OFF or MODE_SV39).  tvm_o (line 952) is forwarded to the ID stage, but the csr_regfile itself does not enforce the TVM restriction.  The privilege check (line 854) only validates minimum privilege level, not TVM. Path: csr_addr_i=0x180, csr_we=1 → line 333 (csr_update) → lines 428-435 (SATP write, no TVM check) → line 952 (tvm_o output to ID stage, not used internally) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Without TVM enforcement in the CSR register file, a less-privileged mode could write SATP and remap virtual memory even when TVM is set, unless the ID stage fully blocks the instruction before it reaches the CSR file.  This represents a potential bypass of the TVM guard.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The ID stage may enforce TVM before the instruction reaches the CSR register file.  This evidence was not inspected.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "Performance counters are readable by user-mode code regardless of mcounteren/scounteren settings, violating the expected gating mechanism.",
+      "vulnerability_category": "Read CSR_CYCLE (0xC00), CSR_TIME (0xC01), CSR_INSTRET (0xC02), or other performance counter CSRs / cycle_q, instret_q, and any performance counter register / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "CSR_SCOUNTEREN returns 64'b0",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "CSR_MCOUNTEREN returns 64'b0",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Direct read/write of performance counters without enable check",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Privilege check allows U-mode access to U-encoded CSRs",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: User-mode code (umode_i=1, priv_lvl_q=U) Operation: Read CSR_CYCLE (0xC00), CSR_TIME (0xC01), CSR_INSTRET (0xC02), or other performance counter CSRs Object: cycle_q, instret_q, and any performance counter register Expected guard: Access must be gated by the corresponding bit in mcounteren/scounteren; if not granted, return zero or raise an exception. Observed behavior: The counter enable registers mcounteren_q and scounteren_q are implemented but both return 64'b0 (lines 204, 218: 'not implemented').  The read path for the performance counters (not fully extracted, but indicated by the CSR_MCYCLE/CSR_MINSTRET write path at lines 492-493) does not contain any gating based on mcounteren/scounteren.  The privilege-level check (line 854) allows read because performance counter CSRs encode priv_lvl=U.  Therefore, user-mode code can read cycle, time, instret without any counter enable restriction. Path: umode_i=1, priv_lvl_q=U → csr_addr_i matches 0xC00-0xC02 → csr_read=1 → privilege check passes (U matches) → csr_rdata = counter value (cycle_q, etc.) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "User-mode software can read cycle, time, and instret counters even if the machine would normally forbid it through mcounteren/scounteren.  This leaks microarchitectural state to unprivileged code.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact read multiplexer entries for CSR_CYCLE, CSR_TIME, CSR_INSTRET were not shown in the extracted snippets, but the write path and the lack of any counter enable gating strongly suggest the vulnerability.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "No debug authentication exists; debug entry is always permitted after reset, violating the expected guard of a locked authorization state.",
+      "vulnerability_category": "Enter debug mode (debug_mode_q = 1) / debug_mode_q (debug mode state) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "debug_mode_q reset value = 0",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Debug entry condition: debug_req_i && commit_instr valid",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "debug_req = debug_req_i & ~amo_valid_commit",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: External debugger asserting debug_req_i at reset release Operation: Enter debug mode (debug_mode_q = 1) Object: debug_mode_q (debug mode state) Expected guard: Debug mode entry must require a completed authentication sequence; authorization must reset to a locked state. Observed behavior: debug_mode_q resets to 0 (line 970).  No authorization state or authentication state machine exists.  debug mode is entered purely based on debug_req_i and commit_instr_i[0].valid (lines 642-651).  debug_req is gated only by amo_valid_commit (ariane.sv:233).  Therefore, an external debugger can assert debug_req_i at any time after reset and immediately gain debug control. Path: rst_ni deasserted, debug_req_i high → ariane.sv:233 debug_req = debug_req_i & ~amo_valid_commit → csr_regfile.sv:642-651 sets debug_mode_d = 1 → line 1011 debug_mode_q = 1 Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker with physical access could halt the core and gain full debug control before any secure boot code executes, exposing all register and memory state.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

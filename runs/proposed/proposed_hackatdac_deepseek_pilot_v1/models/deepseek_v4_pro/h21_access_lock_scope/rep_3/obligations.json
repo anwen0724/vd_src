@@ -1,0 +1,279 @@
+{
+  "scope_id": "riscv_peripherals_scope",
+  "obligations": [
+    {
+      "obligation_id": "OBL-01",
+      "reason": "The hmac_wrapper module contains a debug_mode_i input and secret state (key, hash, intermediate values). The knowledge base warns that debug/test paths may bypass normal access control and expose protected state. Without checking, debug_mode_i could grant read access to security-critical registers without authentication.",
+      "subject": "debug_mode_i (debug interface)",
+      "operation": "read",
+      "object": "HMAC key, hash, and intermediate crypto state in hmac_wrapper",
+      "expected_guard": "Access to crypto state must be blocked or require authentication (e.g., jtag_unlock) when debug_mode_i is active.",
+      "candidate_path": "hmac_wrapper.sv: debug_mode_i input -> read mux or enable logic for key/hash registers.",
+      "state_conditions_to_check": [
+        "debug_mode_i is asserted",
+        "jtag_unlock is deasserted",
+        "read transaction targets address range of HMAC secret registers"
+      ],
+      "required_evidence_slots": [
+        "Subject: debug_mode_i signal origin",
+        "Operation: read enable logic for protected registers",
+        "Object: specific register or signal (key0, hash, ikey_hash_bytes, etc.)",
+        "Expected guard: missing authentication check in read path",
+        "Path: RTL snippet showing debug_mode_i used to grant read without jtag_unlock"
+      ],
+      "files_or_modules_to_inspect": [
+        "hmac_wrapper.sv",
+        "riscv_peripherals.sv (debug_mode_i source)"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm whether debug_mode_i directly enables read of internal state or bypasses lock checks."
+    },
+    {
+      "obligation_id": "OBL-02",
+      "reason": "The reglk_wrapper module has a jtag_unlock input that likely overrides register locks. If jtag_unlock is not properly authenticated, an attacker could unlock and modify any peripheral protected by the lock framework.",
+      "subject": "JTAG interface (via jtag_unlock signal)",
+      "operation": "unlock / write",
+      "object": "Register locks in reglk_wrapper and all peripherals using reglk_ctrl",
+      "expected_guard": "jtag_unlock must be asserted only after a secure hash challenge/response (jtag_hash) is completed successfully.",
+      "candidate_path": "reglk_wrapper.sv: jtag_unlock input -> override of lock checks. Check generation of jtag_unlock in riscv_peripherals.sv.",
+      "state_conditions_to_check": [
+        "jtag_unlock is asserted",
+        "jtag_hash value matches expected challenge",
+        "lock bits in reglk_ctrl are set"
+      ],
+      "required_evidence_slots": [
+        "Subject: jtag_unlock source logic in riscv_peripherals.sv",
+        "Operation: unlock mechanism in reglk_wrapper.sv",
+        "Object: reglk_ctrl registers",
+        "Expected guard: hash comparison before asserting jtag_unlock",
+        "Path: RTL showing jtag_unlock generated without checking hash"
+      ],
+      "files_or_modules_to_inspect": [
+        "reglk_wrapper.sv",
+        "riscv_peripherals.sv (jtag_unlock generation)"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to verify that jtag_unlock is not tied directly to a trivial condition or a constant."
+    },
+    {
+      "obligation_id": "OBL-03",
+      "reason": "The access control computation for acc_ctrl_c includes a special case `(j==5 && acc_ctrl[4*4+i])` that could grant privilege level 4 access to peripheral 5 regardless of the actual privilege-specific acc_ctrl settings. This may constitute an access-control bypass if peripheral 5 is security-sensitive.",
+      "subject": "CPU bus master at privilege level i",
+      "operation": "access (read/write) peripheral j=5",
+      "object": "Peripheral 5 (possibly HMAC or other crypto module)",
+      "expected_guard": "Access should be granted only if the corresponding acc_ctrl bit for privilege i and peripheral 5 is set; the extra condition `acc_ctrl[4*4+i]` should have a documented justification.",
+      "candidate_path": "riscv_peripherals.sv: assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]);",
+      "state_conditions_to_check": [
+        "i (privilege level) equals 4",
+        "j equals 5",
+        "acc_ctrl[4*4+i] is set while acc_ctrl[5*4+i] is not set"
+      ],
+      "required_evidence_slots": [
+        "Subject: privilege level signal priv_lvl_i",
+        "Operation: read/write to peripheral 5",
+        "Object: peripheral 5 definition in address map",
+        "Expected guard: only acc_ctrl[j*4+i] should control access",
+        "Path: RTL assignment with the | (j==5 && ...)"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need to understand the intended access-control matrix and confirm that peripheral 5 is not a special shared resource."
+    },
+    {
+      "obligation_id": "OBL-04",
+      "reason": "Boot ROM access is conditionally granted by `rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]`, but debug_mode_i and testmode_i are separate inputs that could alter the effective privilege or bypass the check. Debug and test modes may enable elevation to higher privilege or direct access without respecting the access-control matrix.",
+      "subject": "debug_mode_i or testmode_i",
+      "operation": "read boot ROM",
+      "object": "bootrom (bootrom_linux or bootrom_bm)",
+      "expected_guard": "Boot ROM access must be denied in debug/test modes unless explicitly authorized, and privilege level must not be overrideable.",
+      "candidate_path": "riscv_peripherals.sv: rom_req assignment, priv_lvl_i input, debug_mode_i/testmode_i not used in access decision.",
+      "state_conditions_to_check": [
+        "debug_mode_i = 1 or testmode_i = 1",
+        "priv_lvl_i can be forced to a higher privilege during debug",
+        "rom_req_acct is active"
+      ],
+      "required_evidence_slots": [
+        "Subject: source of debug_mode_i and testmode_i",
+        "Operation: rom_req generation",
+        "Object: bootrom instantiation",
+        "Expected guard: debug/test should not influence priv_lvl_i or should be factored into access decision",
+        "Path: RTL where priv_lvl_i is used without consideration of debug/test"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm that debug_mode_i and testmode_i cannot alter priv_lvl_i upstream and that no separate debug path exists to the boot ROM."
+    },
+    {
+      "obligation_id": "OBL-05",
+      "reason": "The pkt_wrapper module contains a fuse interface (fuse_req_o, fuse_addr_o, fuse_rdata_i, pkey_loc) that likely exposes private key material. If fuse read operations are initiated by a write to a control register, an insufficient access control on that register could allow unauthenticated extraction of the key.",
+      "subject": "any bus master accessing pkt_wrapper",
+      "operation": "read fuse data (pkey_loc) via control register trigger",
+      "object": "fuse-derived private key (pkey_loc wire in pkt_wrapper)",
+      "expected_guard": "The register that initiates the fuse read must be protected by reglk_ctrl lock bits and/or privilege check (acct_ctrl_i).",
+      "candidate_path": "pkt_wrapper.sv: logic that asserts fuse_req_o and returns pkey_loc to the bus; examine how reglk_ctrl_i and acct_ctrl_i gate this operation.",
+      "state_conditions_to_check": [
+        "reglk_ctrl bit for pkt peripheral is unlocked",
+        "acct_ctrl_i permits the requesting master",
+        "fuse_req_o is asserted"
+      ],
+      "required_evidence_slots": [
+        "Subject: bus master type/privilege",
+        "Operation: write to pkt registers that trigger fuse read",
+        "Object: pkey_loc wire and fuse interface",
+        "Expected guard: lock and access-control enforcement",
+        "Path: RTL showing missing guard on fuse read trigger"
+      ],
+      "files_or_modules_to_inspect": [
+        "pkt_wrapper.sv",
+        "riscv_peripherals.sv (pkt integration)"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm that the fuse data path is not directly readable without proper write to a control register and that the control register is locked appropriately."
+    },
+    {
+      "obligation_id": "OBL-06",
+      "reason": "acct_wrapper controls peripheral access using acct_ctrl_i, reglk_ctrl, and we_flag inputs. If we_flag is not properly gated by the lock state, a locked peripheral could still receive a write transaction, bypassing the lock mechanism.",
+      "subject": "peripheral (any) issuing a write through acct_wrapper",
+      "operation": "write to peripheral registers",
+      "object": "peripheral internal registers",
+      "expected_guard": "Write enable (we_flag) must be qualified by lock status (reglk_ctrl) and access control (acct_ctrl_i).",
+      "candidate_path": "acct_wrapper.sv: logic that computes acc_ctrl_o and enables writes; inspect how we_flag interacts with reglk_ctrl.",
+      "state_conditions_to_check": [
+        "peripheral lock bit is set",
+        "we_flag is high",
+        "acct_ctrl_i allows the operation"
+      ],
+      "required_evidence_slots": [
+        "Subject: we_flag signal origin for a particular peripheral",
+        "Operation: write enable generation in acct_wrapper",
+        "Object: target peripheral register",
+        "Expected guard: we_flag ANDed with not-locked and access-permitted",
+        "Path: RTL showing we_flag used without lock check"
+      ],
+      "files_or_modules_to_inspect": [
+        "acct_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need to examine actual combinational/sequential logic using reglk_ctrl and we_flag."
+    },
+    {
+      "obligation_id": "OBL-07",
+      "reason": "The design includes several individual reset signals (rst_1 through rst_13) likely for different power/clock domains. If any security-critical register (lock bits, access-control registers, key storage) is not consistently reset to a safe default, it could leave the system in an unlocked or vulnerable state after power-up or reset deassertion.",
+      "subject": "system reset (rst_ni) and derived reset signals",
+      "operation": "reset",
+      "object": "security state: reglk_ctrl registers, acc_ctrl registers, HMAC key registers, etc.",
+      "expected_guard": "On reset, all lock bits must be set (locked), access control should default to deny, and crypto keys must be cleared.",
+      "candidate_path": "riscv_peripherals.sv (reset generation around lines 902-913), and each wrapper's reset logic.",
+      "state_conditions_to_check": [
+        "each rst_* signal active state and sequence",
+        "initial values of reglk_ctrl, acc_ctrl, key0, hash in simulation"
+      ],
+      "required_evidence_slots": [
+        "Subject: reset generator logic",
+        "Operation: reset assertion",
+        "Object: targeted security registers",
+        "Expected guard: register reset values explicitly defined to safe values",
+        "Path: RTL showing reset condition and register initialization"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv",
+        "reglk_wrapper.sv",
+        "hmac_wrapper.sv",
+        "acct_wrapper.sv",
+        "pkt_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm that reset signals are not missing domains and that synchronous resets correctly initialize all security state."
+    },
+    {
+      "obligation_id": "OBL-08",
+      "reason": "The dm_slave (debug module slave) interface provides a path for the debugger to read/write addresses within the system. If writes through dm_slave are not subject to the same lock and access-control checks as normal CPU accesses, a debugger could modify protected state even when locks are engaged.",
+      "subject": "debugger via dm_slave interface",
+      "operation": "write to peripheral registers or lock registers",
+      "object": "peripheral registers, reglk_ctrl, acc_ctrl",
+      "expected_guard": "dm_slave write transactions must be blocked or filtered when the target peripheral is locked (reglk_ctrl) or when the access-control matrix disallows the debug source.",
+      "candidate_path": "riscv_peripherals.sv: dm_slave signals (req, we, addr, wdata) and their connection to the fabric; how they reach per- peripheral access-control wrappers.",
+      "state_conditions_to_check": [
+        "lock bits set",
+        "dm_slave_we asserted",
+        "address targets a locked peripheral"
+      ],
+      "required_evidence_slots": [
+        "Subject: dm_slave interface definition",
+        "Operation: write via dm_slave",
+        "Object: locked registers or acc_ctrl",
+        "Expected guard: lock/access check in the slave path",
+        "Path: RTL showing dm_slave transactions bypassing wrappers or access-control"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv",
+        "acct_wrapper.sv",
+        "reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to understand whether dm_slave transactions go through the same access-control wrappers as normal AXI transactions or have a separate, unchecked path."
+    },
+    {
+      "obligation_id": "OBL-09",
+      "reason": "The debug request signals (debug_req_valid, dmi_req) and the JTAG chain (i_SimDTM, i_dmi_jtag) can force the CPU into debug mode. If debug mode is entered without proper authentication (jtag_unlock not asserted), the debugger might gain elevated capabilities. The RTL must check that debug_req_valid or its equivalent is gated by the authentication outcome.",
+      "subject": "JTAG debugger (via dmi_jtag/SimDTM)",
+      "operation": "enter debug mode (assert debug_req)",
+      "object": "CPU debug mode (debug_req_o, dmactive_o)",
+      "expected_guard": "debug_req_valid must only be propagated when jtag_unlock is asserted (i.e., after successful challenge-response authentication).",
+      "candidate_path": "riscv_peripherals.sv: logic driving debug_req_valid from dmi_req_valid, and usage of jtag_unlock signal.",
+      "state_conditions_to_check": [
+        "jtag_unlock is deasserted",
+        "dmi_req_valid is toggled",
+        "debug_req_valid condition"
+      ],
+      "required_evidence_slots": [
+        "Subject: JTAG interface signals",
+        "Operation: debug_req_valid generation",
+        "Object: output debug_req_o",
+        "Expected guard: jtag_unlock qualified debug request",
+        "Path: RTL where debug_req_valid is assigned without jtag_unlock check"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm that jtag_unlock is indeed involved in enabling debug request, or that the SimDTM/dmi_jtag instantiations include authentication logic."
+    }
+  ]
+}

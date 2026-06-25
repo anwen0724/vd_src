@@ -1,71 +1,61 @@
 {
-  "analysis_summary": "The input scope contains an OpenPiton Ariane subsystem (chipset peripherals from hack@dac21) with an access-control/permission system built around four modules: `acct_wrapper` (access control), `reglk_wrapper` (register locking), `dma_wrapper` (DMA), and `pkt_wrapper` (packet/key). The security model relies on `acct_ctrl_i` (per-privilege-level enable gating) and `reglk_ctrl_i` (per-register lock bits that prevent reads and/or writes to sensitive registers). Analysis of all five source files reveals multiple permission-related vulnerabilities stemming from copy-paste errors, out-of-bounds register-lock indices, disconnected lock inputs, and a write-enable flag that circumvents access-control memory entirely. These flaws allow privilege escalation, unauthorized write/read of security-critical registers (access-control, register-lock, DMA, cryptographic keys), and bypass of the intended hardware-enforced permission scheme.",
+  "analysis_summary": "Analyzed the RTL source files under the hackatdac21/h21_dma_pkt_scope project. The design implements a RISC-V peripheral system with access control (ACCT), register locking (REGLK), DMA, and cryptographic wrappers. The analysis identified several permission-related security vulnerabilities: (1) The DMA wrapper does not use its reglk_ctrl_i input to protect writable registers, allowing unrestricted DMA configuration. (2) The reglk_wrapper has a copy-paste error at write address 2 where it reads back reglk_mem[3] instead of reglk_mem[2] when locked, defeating the lock for that register. (3) The AES0 wrapper's reglk_ctrl input is OR'd with we_flag_1, allowing an external flag to override all register lock bits. (4) The acct_wrapper output forces access control bits to 1 via we_flag OR, bypassing programmed access restrictions.",
   "findings": [
     {
-      "finding_id": "F-01",
+      "finding_id": "FINDING-001",
       "status": "confirmed_finding",
-      "summary": "acct_wrapper uses out-of-bounds reglk_ctrl[13] for write protection on acct_mem[3], [4], [5] making them permanently writable.",
-      "vulnerability_category": "Permission bypass / Incorrect access-control index",
+      "summary": "DMA wrapper ignores reglk_ctrl_i — all configuration registers writable without lock protection",
+      "vulnerability_category": "Missing Register Lock / Insufficient Access Control",
       "affected_locations": [
         {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 96,
-          "line_end": 100,
-          "module": "acct_wrapper",
-          "signal_or_register": "reglk_ctrl[13]"
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": 122,
+          "line_end": 149,
+          "module": "dma_wrapper",
+          "signal_or_register": "start_reg, length_reg, source_addr_lsb_reg, source_addr_msb_reg, dest_addr_lsb_reg, dest_addr_msb_reg, done_reg, core_lock_reg, end_reg"
         }
       ],
       "evidence": [
         {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 28,
-          "line_end": 28,
-          "module": "acct_wrapper",
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": 30,
+          "line_end": 31,
+          "module": "dma_wrapper",
           "object": "reglk_ctrl_i port declaration",
           "evidence_type": "source_code",
-          "description": "reglk_ctrl_i is declared as input logic [7:0], only 8 bits wide.",
-          "supports_claim": "The lock-index 13 exceeds the valid range [0:7]."
+          "description": "reglk_ctrl_i is declared as an 8-bit input port but is never referenced in any write-protection logic in the always block.",
+          "supports_claim": "Shows the port exists but is unused internally."
         },
         {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 40,
-          "line_end": 40,
-          "module": "acct_wrapper",
-          "object": "reglk_ctrl internal signal",
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": 120,
+          "line_end": 149,
+          "module": "dma_wrapper",
+          "object": "Write-side always block",
           "evidence_type": "source_code",
-          "description": "Internal reglk_ctrl is declared as logic [15:0] but assigned from the 8-bit reglk_ctrl_i on line 51.",
-          "supports_claim": "Upper bits [15:8] are tied to 0 and never driven."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 96,
-          "line_end": 100,
-          "module": "acct_wrapper",
-          "object": "Write-side case items for addresses 3,4,5",
-          "evidence_type": "source_code",
-          "description": "Lines 96,98,100 all use reglk_ctrl[13] as the write-lock condition. Since reglk_ctrl[13] is always 0, the write never locks and wdata is always accepted.",
-          "supports_claim": "Directly proves the permission bypass."
+          "description": "The write-side always block gates writes only on en && we with no reglk_ctrl bit checks, unlike acct_wrapper and reglk_wrapper which check reglk_ctrl[n] before allowing writes.",
+          "supports_claim": "Proves DMA configuration registers have no lock protection."
         }
       ],
-      "reasoning_summary": "The developer likely intended to use a valid lock bit (perhaps reglk_ctrl[3]) but typed 13 by mistake. reglk_ctrl_i is only 8 bits wide, so index 13 is out of bounds and reads as constant 0. The ternary condition `reglk_ctrl[13] ? acct_mem[i] : wdata` therefore always takes the false branch, unconditionally writing wdata to the access-control registers. This allows any bus master with write access to the ACCT peripheral to modify the access-control memory slots 3,4,5 irrespective of lock settings.",
-      "security_impact": "Critical access-control registers can be overwritten without restriction, allowing an attacker to grant any privilege level access to peripherals that should be protected, effectively escalating privileges and bypassing the hardware access-control scheme.",
+      "reasoning_summary": "In acct_wrapper and reglk_wrapper, register writes are protected by reglk_ctrl bit checks (e.g., `reglk_ctrl[5] ? acct_mem[00] : wdata`). The DMA wrapper receives `reglk_ctrl_i` but never uses it in its write-side case statement. An attacker who can issue AXI writes to the DMA's address range can reprogram the DMA source/destination addresses, length, and start/stop controls without any lock restrictions, enabling arbitrary memory read/write DMA transactions that bypass PMP and access control mechanisms.",
+      "security_impact": "An attacker with write access to the DMA peripheral can configure arbitrary DMA transfers to read from or write to any physical memory address, bypassing all access control and PMP protections. This is a complete memory protection bypass.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "None. The range violation and its consequences are fully visible in the provided source.",
+      "uncertainty_or_missing_evidence": "The downstream dma module (dma.sv) was not included in the source view, so it is unclear if it implements PMP checks internally. However, the wrapper-level lack of register locking on the configuration registers is independently a vulnerability regardless of downstream PMP enforcement, as it allows any bus master to reconfigure the DMA.",
       "recommended_follow_up": [
-        "Correct the index from 13 to a valid bit (likely 3 or another defined lock bit) consistent with the intended locking scheme.",
-        "Add compile-time assertions or lint rules to catch out-of-bounds bit selects on parameterized widths."
+        "Add reglk_ctrl bit checks to all writable DMA registers in dma_wrapper.sv write-side always block, similar to acct_wrapper pattern.",
+        "Review whether the downstream dma module properly enforces PMP on generated transactions."
       ]
     },
     {
-      "finding_id": "F-02",
+      "finding_id": "FINDING-002",
       "status": "confirmed_finding",
-      "summary": "reglk_wrapper write to reglk_mem[2] locks against incorrect source reglk_mem[3] instead of reglk_mem[2].",
-      "vulnerability_category": "Permission bypass / Incorrect lock register reference",
+      "summary": "reglk_wrapper write-side copy-paste bug at address 2 — lock reads wrong register (reglk_mem[3] instead of reglk_mem[2])",
+      "vulnerability_category": "Incorrect Register Lock Implementation",
       "affected_locations": [
         {
           "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 93,
-          "line_end": 93,
+          "line_start": 83,
+          "line_end": 85,
           "module": "reglk_wrapper",
           "signal_or_register": "reglk_mem[2]"
         }
@@ -73,211 +63,95 @@
       "evidence": [
         {
           "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 89,
-          "line_end": 99,
+          "line_start": 80,
+          "line_end": 91,
           "module": "reglk_wrapper",
-          "object": "Write-side case block",
+          "object": "Write-side case statement for addresses 0-5",
           "evidence_type": "source_code",
-          "description": "Address 0: reglk_mem[0] <= reglk_ctrl[3] ? reglk_mem[0] : wdata (locks against own value). Address 1: reglk_mem[1] <= reglk_ctrl[1] ? reglk_mem[1] : wdata (locks against own value). Address 2: reglk_mem[2] <= reglk_ctrl[1] ? reglk_mem[3] : wdata (locks against reglk_mem[3] instead of reglk_mem[2]). Addresses 3,4,5 similarly lock against reglk_ctrl[1] but reference reglk_mem[3], [4], [5] correctly.",
-          "supports_claim": "Demonstrates the copy-paste error where the write-destination does not match the lock-source."
+          "description": "Address 0: reglk_mem[0] <= reglk_ctrl[3] ? reglk_mem[0] : wdata; Address 1: reglk_mem[1] <= reglk_ctrl[1] ? reglk_mem[1] : wdata; Address 2: reglk_mem[2] <= reglk_ctrl[1] ? reglk_mem[3] : wdata; <-- USES reglk_mem[3] instead of reglk_mem[2]",
+          "supports_claim": "Shows the bug where address 2 reads back reglk_mem[3] when locked instead of preserving reglk_mem[2]."
         }
       ],
-      "reasoning_summary": "In the write-side always block, the case item for address 2 should be `reglk_mem[2] <= reglk_ctrl[1] ? reglk_mem[2] : wdata;` to lock reglk_mem[2] against its own current value. Instead it reads `reglk_mem[3]`, which means the lock condition depends on the unrelated register slot 3. If slot 3 is unlocked, reglk_mem[2] can be overwritten regardless of its own intended lock protection.",
-      "security_impact": "The register-lock memory slot 2 can be modified without its designated lock protection, potentially allowing an attacker to unlock downstream peripheral register groups that should be permanently locked after boot or controlled by a higher privilege entity.",
+      "reasoning_summary": "The register locking mechanism works by checking a lock bit and, if set, re-writing the current register value instead of accepting new data. At address 2, the code reads `reglk_mem[3]` (a different register) to preserve the locked state, but assigns the result to `reglk_mem[2]`. This means when reglk_ctrl[1] is set (locked), writing to address 2 corrupts reglk_mem[2] with the value of reglk_mem[3], rather than preserving it. The lock for register 2 is effectively non-functional, and the value is destroyed.",
+      "security_impact": "The register lock for peripheral index 2's lock control register is broken. An attacker can overwrite the lock configuration for peripherals that depend on this register slot, potentially unlocking critical security peripherals. Given that reglk_ctrl bits control locks for other peripherals (AES, SHA256, DMA, etc.), this could allow unlocking those peripherals' configuration registers.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "None. The typo is clearly visible in the source.",
+      "uncertainty_or_missing_evidence": "It is unclear which specific peripheral's lock bits are stored in reglk_mem[2] without knowing the exact memory map, but the bug is clearly visible in the source code.",
       "recommended_follow_up": [
-        "Change reglk_mem[3] to reglk_mem[2] on line 93 of reglk_wrapper.sv.",
-        "Audit all other register-lock assignments for similar copy-paste errors."
+        "Change line 84 from: reglk_mem[2] <= reglk_ctrl[1] ? reglk_mem[3] : wdata; to: reglk_mem[2] <= reglk_ctrl[1] ? reglk_mem[2] : wdata;",
+        "Audit all register lock writes for similar copy-paste errors."
       ]
     },
     {
-      "finding_id": "F-03",
+      "finding_id": "FINDING-003",
       "status": "confirmed_finding",
-      "summary": "dma_wrapper receives reglk_ctrl_i but never uses it; DMA registers are unprotected by register locks.",
-      "vulnerability_category": "Missing permission check / Disconnected security signal",
+      "summary": "AES0 reglk_ctrl bypassed by OR with we_flag_1 — external flag can force all lock bits high",
+      "vulnerability_category": "Access Control Bypass via External Flag Override",
       "affected_locations": [
-        {
-          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 24,
-          "line_end": 24,
-          "module": "dma_wrapper",
-          "signal_or_register": "reglk_ctrl_i"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 95,
-          "line_end": 95,
-          "module": "dma_wrapper",
-          "signal_or_register": "en"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 46,
-          "line_end": 46,
-          "module": "dma_wrapper",
-          "object": "reglk_ctrl_i port",
-          "evidence_type": "source_code",
-          "description": "Input port reglk_ctrl_i is declared.",
-          "supports_claim": "The signal enters the module."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 95,
-          "line_end": 95,
-          "module": "dma_wrapper",
-          "object": "en assignment",
-          "evidence_type": "source_code",
-          "description": "assign en = en_acct && acct_ctrl_i;  -- only acct_ctrl_i gates the enable, reglk_ctrl_i is never referenced.",
-          "supports_claim": "Register lock bits are not used anywhere in the combinational or sequential logic."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
-          "line_start": 107,
-          "line_end": 128,
-          "module": "dma_wrapper",
-          "object": "Write-side always block for DMA registers",
-          "evidence_type": "source_code",
-          "description": "Registers (start_reg, length_reg, source/dest addresses, done, lock, end) are written based only on en && we without any per-register lock check.",
-          "supports_claim": "DMA registers lack the register-lock protections that other peripherals (PKT, REGLK, ACCT) implement."
-        }
-      ],
-      "reasoning_summary": "The top-level `riscv_peripherals` assigns a per-peripheral lock byte to each wrapper. The DMA wrapper accepts `reglk_ctrl_i` but never uses it in its write or read paths. Consequently, none of the DMA control registers (start, length, source/destination addresses, done, core_lock, end) can be locked. Other wrappers (e.g., pkt_wrapper, reglk_wrapper, acct_wrapper) all check bits of reglk_ctrl_i to gate writes/reads. The omission in the DMA wrapper means that even after boot-time configuration locks are applied system-wide, the DMA engine remains fully reprogrammable, which could be exploited to perform arbitrary memory reads/writes.",
-      "security_impact": "An attacker with bus access can reprogram the DMA engine to copy arbitrary memory regions, bypassing PMP or other memory-protection mechanisms, leading to information disclosure or memory corruption.",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "None. The unused signal is confirmed through full source review.",
-      "recommended_follow_up": [
-        "Add per-register write-lock checks using bits of reglk_ctrl_i to the DMA register write path (similar to acct_wrapper or pkt_wrapper).",
-        "Ensure that DMA start, source/destination address registers are locked after trusted boot configuration."
-      ]
-    },
-    {
-      "finding_id": "F-04",
-      "status": "confirmed_finding",
-      "summary": "we_flag is OR'd into the access-control output of acct_wrapper, forcing peripheral access bits high when asserted.",
-      "vulnerability_category": "Permission bypass / Hardware backdoor",
-      "affected_locations": [
-        {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 49,
-          "line_end": 49,
-          "module": "acct_wrapper",
-          "signal_or_register": "acc_ctrl_o / we_flag"
-        },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1729,
-          "line_end": 1729,
+          "line_start": 1194,
+          "line_end": 1194,
           "module": "riscv_peripherals",
-          "signal_or_register": "we_flag_0 -> we_flag"
+          "signal_or_register": "reglk_ctrl[1*8+7:1*8] | we_flag_1"
         }
       ],
       "evidence": [
         {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 49,
-          "line_end": 49,
-          "module": "acct_wrapper",
-          "object": "assign acc_ctrl_o = ...",
-          "evidence_type": "source_code",
-          "description": "assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};",
-          "supports_claim": "When we_flag is 1, all bits of the lowest 8-bit access-control word become 1, granting full access regardless of acct_mem contents."
-        },
-        {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1725,
-          "line_end": 1729,
+          "line_start": 1192,
+          "line_end": 1200,
           "module": "riscv_peripherals",
-          "object": "acct_wrapper instantiation",
+          "object": "i_aes0_wrapper instantiation",
           "evidence_type": "source_code",
-          "description": ".we_flag (we_flag_0) connects the top-level we_flag_0 input.",
-          "supports_claim": "The we_flag signal comes from the chip top level, potentially controllable by debug or test logic."
+          "description": ".reglk_ctrl_i  ( reglk_ctrl[1*8+7:1*8] | we_flag_1 ), — The reglk_ctrl input to AES0 is bitwise OR'd with an external we_flag_1 signal before being passed to the wrapper.",
+          "supports_claim": "Shows we_flag_1 can force any or all reglk_ctrl bits to 1, bypassing the lock mechanism."
         }
       ],
-      "reasoning_summary": "The access-control output `acc_ctrl_o` is a concatenation of three 32-bit words from `acct_mem`. However, the lowest word `acct_mem[0]` is bitwise OR'd with `{8{we_flag}}`, meaning when `we_flag` is high, the lowest 8 bits of the access-control word are forced to 1. These access-control bits are used in `riscv_peripherals` to gate peripheral access (e.g., `rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]` on line 517). Forcing them high effectively disables access control for the corresponding peripheral(s). The `we_flag` may be intended as a debug/test override, but it creates a permanent bypass path if that input can be controlled by an attacker.",
-      "security_impact": "Depending on how we_flag_0 is driven (potentially from debug logic or external pin), this could serve as a hardware backdoor that bypasses all access-control protections for the associated peripheral(s). Even if intended only for test, it creates a single point of failure for the access-control scheme.",
+      "reasoning_summary": "The register lock mechanism uses reglk_ctrl bits to prevent writes to locked registers. If a bit is 1, the register value is preserved (write ignored). By OR-ing we_flag_1 with the reglk_ctrl byte for AES0, when we_flag_1 is asserted all 8 lock bits become 1, preventing any further writes to AES0 configuration registers — or conversely, if the intent was to allow writes (lock bits low), we_flag_1 could be used to force them high and lock the registers unexpectedly. In either case, an external flag bypasses the programmed lock configuration. This is inconsistent with all other peripheral instantiations (AES1 at line 1280, AES2 at line 1365, etc.) which pass reglk_ctrl directly without OR-ing any flag.",
+      "security_impact": "The AES0 peripheral's register locking can be overridden by the external we_flag_1 signal. If an attacker controls or influences we_flag_1, they can lock or unlock AES0's configuration registers regardless of the programmed security policy. This undermines the entire register lock mechanism for the AES0 cryptographic accelerator.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "The provenance and controllability of we_flag_0 at the full-chip level is not visible in this scope. However, the vulnerability exists in the wrapper regardless of how the signal is driven.",
+      "uncertainty_or_missing_evidence": "The origin and controllability of we_flag_1 is not visible in the provided source view. It appears to be an external input to the top module.",
       "recommended_follow_up": [
-        "Review the purpose and control of we_flag_0; if it is a debug-only signal, gate it with a debug-mode qualification or a test-mode fuse.",
-        "Consider removing the OR gate entirely or replacing it with a lockable debug override register inside acct_wrapper."
+        "Remove the OR with we_flag_1 from the AES0 reglk_ctrl connection, or document and justify the need for this override.",
+        "Trace the source of we_flag_1 to determine if it is attacker-controllable."
       ]
     },
     {
-      "finding_id": "F-05",
+      "finding_id": "FINDING-004",
       "status": "confirmed_finding",
-      "summary": "Read-side and write-side register-lock bit assignments are completely mismatched in both reglk_wrapper and acct_wrapper.",
-      "vulnerability_category": "Permission inconsistency / Confused deputy",
+      "summary": "acct_wrapper access control output forced high by we_flag OR — access permissions can be overridden",
+      "vulnerability_category": "Access Control Bypass via Hardware Flag",
       "affected_locations": [
         {
-          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 89,
-          "line_end": 122,
-          "module": "reglk_wrapper",
-          "signal_or_register": "reglk_mem write/read lock bits"
-        },
-        {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 90,
-          "line_end": 139,
+          "line_start": 41,
+          "line_end": 41,
           "module": "acct_wrapper",
-          "signal_or_register": "acct_mem write/read lock bits"
+          "signal_or_register": "acc_ctrl_o"
         }
       ],
       "evidence": [
         {
-          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 89,
-          "line_end": 99,
-          "module": "reglk_wrapper",
-          "object": "Write-side lock bits",
-          "evidence_type": "source_code",
-          "description": "Write locks use reglk_ctrl[3] (addr 0), reglk_ctrl[1] (addr 1-5).",
-          "supports_claim": ""
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 112,
-          "line_end": 122,
-          "module": "reglk_wrapper",
-          "object": "Read-side lock bits",
-          "evidence_type": "source_code",
-          "description": "All reads are gated by reglk_ctrl[0] only.",
-          "supports_claim": ""
-        },
-        {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 90,
-          "line_end": 108,
+          "line_start": 41,
+          "line_end": 41,
           "module": "acct_wrapper",
-          "object": "Write-side lock bits",
+          "object": "acc_ctrl_o assignment",
           "evidence_type": "source_code",
-          "description": "Writes use reglk_ctrl[5] (addr 0-2), reglk_ctrl[13] (addr 3-5), reglk_ctrl[1] (addr 6-8), reglk_ctrl[7] (addr 9).",
-          "supports_claim": ""
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 121,
-          "line_end": 139,
-          "module": "acct_wrapper",
-          "object": "Read-side lock bits",
-          "evidence_type": "source_code",
-          "description": "Reads use reglk_ctrl[4] (addr 0-2), reglk_ctrl[2] (addr 3-5), reglk_ctrl[0] (addr 6-8), reglk_ctrl[6] (addr 9) -- completely different bits from writes.",
-          "supports_claim": ""
+          "description": "assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}}; — The lowest 8 bits of the access control output are OR'd with we_flag, forcing all bits to 1 when we_flag is high.",
+          "supports_claim": "Shows the we_flag can override access control to grant full access."
         }
       ],
-      "reasoning_summary": "A well-designed register-lock scheme should use the same lock bit for both read and write protection of a given register, so that locking a register consistently prevents both read and write access. In reglk_wrapper, writes are protected by bits 3 and 1, but reads are protected only by bit 0. In acct_wrapper, write and read lock bits are entirely disjoint (e.g., write uses bit 5 for addresses 0-2 but read uses bit 4). This means an administrator could intend to lock a register (setting its write-lock bit) while leaving it readable, or vice versa -- but the inconsistent mapping means the actual protection differs from intent, and in some cases locking a read path could leave the write path open or vice versa.",
-      "security_impact": "The register lock mechanism is unreliable; sensitive configuration or key material could be readable even when 'locked', or writable when thought to be read-only. This undermines the entire register-lock security model.",
+      "reasoning_summary": "The access control output (acc_ctrl_o) is a vector that determines which privilege levels can access each peripheral. The lowest 8 bits are OR'd with {8{we_flag}}, meaning when we_flag is high, those 8 bits are all forced to 1. In many access control schemes, 1 means 'access granted'. This would give all privilege levels access to the peripherals controlled by those bits, bypassing any programmed access restrictions.",
+      "security_impact": "When we_flag is asserted, the access control bits for the first set of peripherals are forced to all-ones, potentially granting unrestricted access regardless of the processor's current privilege level. This could allow user-mode code to access privileged peripherals.",
       "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The intended lock-bit mapping is not documented. It is possible (though unlikely) that the independent read/write lock bits are an intentional design choice. However, given the other copy-paste errors, these mismatches strongly suggest bugs.",
+      "uncertainty_or_missing_evidence": "The exact meaning of the acc_ctrl bits and the mapping to specific peripherals is not fully specified. The vulnerability depends on we_flag controllability and whether '1' truly means 'grant'. The riscv_peripherals.sv file shows we_flag_0 is connected here, and there appear to be multiple we_flag signals (we_flag_0 through we_flag_4) coming from external inputs.",
       "recommended_follow_up": [
-        "Define a clear specification for which lock bit controls which register and whether read/write share the same bit.",
-        "Harmonize read and write lock-bit usage so that each register (or group) consistently uses the same bit for both directions."
+        "Review the purpose of the we_flag OR in the acc_ctrl_o assignment and whether it is a debug/test feature that should be disabled in production.",
+        "Document the access control bit encoding and verify that forcing bits high cannot grant unauthorized access."
       ]
     }
   ],
-  "no_finding_reason": "",
-  "global_uncertainty": "Only the five files under the input scope were analyzed. The full design may include additional wrappers or top-level logic that mitigates some issues (e.g., we_flag may be hard-tied to 0 in the full chip). The internal modules (dma, pkt, axi_lite_interface) were not provided and could not be reviewed. The analysis relies solely on static source review without simulation or formal verification."
+  "no_finding_reason": "N/A — Findings were identified.",
+  "global_uncertainty": "The source view is limited to wrapper modules and the top-level riscv_peripherals integration file. The actual DMA controller (dma.sv), crypto accelerator cores, fuse memory, bootrom, and other sub-modules were not included. The analysis is based purely on static RTL inspection without simulation, formal verification, or runtime testing. Some signals (we_flag_0 through we_flag_4, jtag_unlock, debug_mode_i) originate from external sources not visible in the provided files, making complete attack-path analysis impossible. The privilege level signal (priv_lvl_i) is used for access control lookup but its generation and trustworthiness could not be verified."
 }

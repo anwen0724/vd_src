@@ -1,0 +1,380 @@
+{
+  "scope_id": "rtl_permission_scope_ariane_debug_csr_peripherals",
+  "obligations": [
+    {
+      "obligation_id": "M2_PERM_DEBUG_HALT_AUTH",
+      "reason": "The fact layer exposes external JTAG ports and DMI/debug modules with outputs debug_req_o, haltreq_o, resumereq_o, dmactive_o, and a jtag_key input. Analyze whether external debug operations are actually gated by authentication/authorization rather than only decoded by the TAP/DMI path.",
+      "subject": "external JTAG/DMI interface",
+      "operation": "trigger halt/resume/debug request",
+      "object": "hart debug control state and CPU execution control",
+      "expected_guard": "JTAG/DMI requests that can halt/resume harts or enter debug mode should be mediated by debug authorization/authentication such as jtag_key match, debug enable/lifecycle state, or equivalent access control before asserting hart debug controls.",
+      "candidate_path": "JTAG pins/tap -> dmi_jtag -> dmi_cdc -> dm_top/dm_csrs -> debug_req_o/haltreq_o/resumereq_o",
+      "state_conditions_to_check": [
+        "reset/trst behavior of DMI path",
+        "testmode_i effects on TAP clocking/access",
+        "dmactive state required before debug control assertions",
+        "jtag_key comparison or equivalent authorization state"
+      ],
+      "required_evidence_slots": [
+        "subject: external JTAG/DMI requester",
+        "operation: halt/resume/debug entry request",
+        "object: hart debug controls",
+        "expected guard: jtag_key or debug authorization/lifecycle enable",
+        "observed RTL guard/use site",
+        "path from pins to control outputs",
+        "state condition for reset/testmode/dmactive",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dmi_cdc.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dm_csrs.sv",
+        "fpga/src/ariane_xilinx.sv",
+        "openpiton/serpent_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer lists jtag_key and debug outputs but does not show assignments; inspect RTL to determine whether the key is enforced and where."
+    },
+    {
+      "obligation_id": "M2_PERM_DEBUG_SBA_RANGE_AUTH",
+      "reason": "dm_csrs exposes sbaddress, sbdata, sbreadonaddr, sbreadondata, sbdata_write_valid, and dm_top instantiates dm_sba and AXI slave/master connectivity. Check whether the debug path can access protected address ranges without explicit authorization or range mediation.",
+      "subject": "debug module system bus access master",
+      "operation": "read/write system bus via debug module",
+      "object": "system memory and memory-mapped peripherals reachable through debug SBA/AXI",
+      "expected_guard": "Debug-originated system bus reads/writes should be constrained by debug authorization and any system address/PMP/range policy applicable to protected memory/peripherals; DMI CSR writes that launch SBA transfers should not bypass normal fabric permissions.",
+      "candidate_path": "JTAG/DMI -> dm_csrs system bus access controls -> dm_top i_dm_sba -> AXI master/fabric",
+      "state_conditions_to_check": [
+        "dmactive and authenticated/debug-enabled state",
+        "sbbusy/sberror handling before new transfers",
+        "sbautoincrement and sbreadonaddr/readondata side effects",
+        "reset state of sbaddress/sbaccess/sbdata"
+      ],
+      "required_evidence_slots": [
+        "subject: DMI/JTAG requester",
+        "operation: SBA read/write",
+        "object: AXI/memory/peripheral address target",
+        "expected guard: debug auth plus address/range policy",
+        "observed address decode/range checks",
+        "launch conditions for reads/writes",
+        "fabric connection/reachability",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dm_pkg.sv",
+        "fpga/src/ariane_xilinx.sv",
+        "openpiton/serpent_peripherals.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "The included facts identify SBA signals and instance but not the internals of dm_sba; inspect visible connections and any available module body to establish reachability and guards."
+    },
+    {
+      "obligation_id": "M2_PERM_DEBUG_RESET_CONTROL_AUTH",
+      "reason": "The debug CSR module exposes ndmreset_o and dmactive_o to top-level integration. Because reset is a privileged control effect, inspect whether DMI writes to these controls are properly authorized and reset-safe.",
+      "subject": "external debug requester",
+      "operation": "write/trigger ndmreset or dmactive state",
+      "object": "global/non-debug reset and debug module active state",
+      "expected_guard": "Writes that assert non-debug-module reset (ndmreset) or activate/deactivate the debug module should require authorized DMI access and should have safe reset defaults; reset control should not be reachable from unauthenticated/test paths.",
+      "candidate_path": "DMI request decode/write cases in dm_csrs -> dmactive_o/ndmreset_o outputs",
+      "state_conditions_to_check": [
+        "power-on rst_ni and dmi_rst_ni defaults",
+        "dmactive clear/deactivation behavior",
+        "ndmreset persistence/clear condition",
+        "testmode_i influence"
+      ],
+      "required_evidence_slots": [
+        "subject: DMI/JTAG requester",
+        "operation: assert/deassert reset or dmactive",
+        "object: ndmreset_o/dmactive_o and downstream reset tree",
+        "expected guard: debug authorization plus valid DMI CSR write",
+        "observed decode/write conditions",
+        "reset defaults and clear conditions",
+        "top-level propagation impact",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dmi_jtag.sv",
+        "openpiton/serpent_peripherals.sv",
+        "fpga/src/ariane_xilinx.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Assignments to ndmreset_o/dmactive_o are not visible in the fact summary; analyze dm_csrs write cases and integration."
+    },
+    {
+      "obligation_id": "M2_PERM_DMI_READ_EXPOSURE_GUARD",
+      "reason": "The design has DMI response paths to JTAG and dm_csrs inputs for sbdata_i and data_valid_i. Verify that read muxes and response registers do not leak protected data without authorization or after reset/deactivation/error states.",
+      "subject": "external JTAG reader",
+      "operation": "read/expose data over JTAG TDO",
+      "object": "DMI-readable debug CSR contents, system bus read data, abstract command data",
+      "expected_guard": "Data returned over DMI/JTAG should be limited to authorized debug sessions and should not expose protected internal state, bus read data, or stale response data after reset/deactivation/error.",
+      "candidate_path": "DMI request/response CSR read mux in dm_csrs -> sbdata_i/data_i/hart status/abstract data -> dmi_jtag td_o",
+      "state_conditions_to_check": [
+        "dmi_rst_ni/trst_ni reset of response registers",
+        "dmactive deasserted behavior",
+        "sberror/cmderror behavior",
+        "dmi_resp_valid/ready handshake residue",
+        "test_logic_reset_o behavior"
+      ],
+      "required_evidence_slots": [
+        "subject: JTAG/DMI reader",
+        "operation: DMI read/shift out",
+        "object: DMI response data source",
+        "expected guard: authorized debug access and valid read response",
+        "observed read mux/valid gating",
+        "path to td_o",
+        "state conditions for stale/residue data",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_cdc.sv",
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dm_top.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Crypto / Secret State Exposure",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Protected nature of specific DMI data depends on decoded addresses and bus targets; use RTL to identify data sources and valid gating."
+    },
+    {
+      "obligation_id": "M2_PERM_CSR_PRIVILEGE_GATING",
+      "reason": "csr_regfile has csr_addr_i, csr_wdata_i, csr_rdata_o, fu_op, umode_i, debug_req_i, and many security-relevant outputs. Inspect decode/write paths to ensure privileged CSRs are not writable/readable from user mode or inappropriate debug state.",
+      "subject": "software CSR interface / CPU privilege mode",
+      "operation": "read/write privileged CSR state",
+      "object": "privileged CSRs and outputs including satp_ppn_o, asid_o, en_translation_o, sum_o, mxr_o, tvm_o, tw_o, tsr_o, debug_mode_o, single_step_o, cache enables, perf interface",
+      "expected_guard": "Writes and reads of privileged CSRs that control address translation, privilege status, trap vectors, debug mode, cache enables, or performance interfaces should be gated by current privilege/debug state; user-mode access should be denied or faulted.",
+      "candidate_path": "csr_regfile CSR write/read decode -> status/satp/translation/debug/performance outputs",
+      "state_conditions_to_check": [
+        "umode_i condition",
+        "debug_mode_o/debug_req_i interactions",
+        "exception handling for illegal CSR access",
+        "reset defaults of control CSRs",
+        "write-enable conditions per CSR case"
+      ],
+      "required_evidence_slots": [
+        "subject: CSR instruction/requester privilege mode",
+        "operation: CSR read/write",
+        "object: specific privileged CSR(s)",
+        "expected guard: privilege check and/or debug-mode check",
+        "observed decode/write/read gating",
+        "exception/fault behavior on illegal access",
+        "impact on translation/debug/control outputs",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer does not include internal privilege-check expressions; inspect all CSR case statements around listed lines."
+    },
+    {
+      "obligation_id": "M2_PERM_CORE_DEBUG_MODE_TRANSITION",
+      "reason": "csr_regfile accepts debug_req_i and emits debug_mode_o, set_debug_pc_o, single_step_o, and halt_csr_o. Check that debug-mode transitions and debug-only controls are mediated by valid external debug authorization and not writable from normal/unprivileged CSR paths.",
+      "subject": "debug module and software CSR interface",
+      "operation": "enter/exit/configure debug mode",
+      "object": "core debug mode state, debug PC redirection, single-step control, halt CSR behavior",
+      "expected_guard": "Entry to and control of debug mode should require a valid debug request source and should not be triggerable by ordinary CSR writes or unprivileged state transitions; debug-only CSRs should be accessible only while in debug mode.",
+      "candidate_path": "csr_regfile debug_req_i -> debug_mode_o/set_debug_pc_o/single_step_o/halt_csr_o -> CSR/debug state updates",
+      "state_conditions_to_check": [
+        "debug_req_i assertion source",
+        "eret/dret or resume conditions",
+        "debug_mode reset default",
+        "single_step persistence",
+        "halt_csr_o conditions"
+      ],
+      "required_evidence_slots": [
+        "subject: debug request source and CSR writer",
+        "operation: debug mode transition/configuration",
+        "object: debug state/control outputs",
+        "expected guard: authorized debug_req/debug-mode-only access",
+        "observed transition conditions",
+        "CSR decode restrictions",
+        "reset/exit conditions",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dm_csrs.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Need cross-module trace from dm_csrs haltreq/debug_req to csr_regfile debug_req_i plus internal CSR checks."
+    },
+    {
+      "obligation_id": "M2_PERM_TESTMODE_DMI_BYPASS",
+      "reason": "dmi_jtag_tap has testmode_i and DFT clock mux instance, and outputs dmi_access_o, dmi_reset_o, tdo_oe_o. Inspect whether testmode can bypass normal TAP/debug authorization or expose TDO/DMI paths.",
+      "subject": "test/DFT and JTAG interface",
+      "operation": "enable/route DMI or reset through test/TAP logic",
+      "object": "DMI access selection, DMI reset, TDO output enable",
+      "expected_guard": "Testmode or DFT clock muxing should not enable DMI access, reset override, or TDO drive unless the same debug authorization and TAP state rules are satisfied; test-only controls should be isolated from protected debug operations in normal operation.",
+      "candidate_path": "dmi_jtag_tap testmode_i/clock mux and TAP state -> dmi_access_o/dtmcs_select_o/dmi_reset_o",
+      "state_conditions_to_check": [
+        "testmode_i asserted vs normal",
+        "trst_ni/test_logic_reset_o",
+        "TAP instruction register selection",
+        "tdo_oe_o gating"
+      ],
+      "required_evidence_slots": [
+        "subject: testmode/DFT or JTAG requester",
+        "operation: enable DMI access/reset/TDO",
+        "object: DMI TAP controls",
+        "expected guard: normal-mode isolation plus debug authorization",
+        "observed mux/select conditions",
+        "path to DMI request/response",
+        "reset/TAP state conditions",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dmi_jtag.sv",
+        "fpga/src/ariane_xilinx.sv",
+        "openpiton/serpent_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Fact layer identifies ports and clock mux but not the selected behavior; inspect TAP state machine and mux use."
+    },
+    {
+      "obligation_id": "M2_PERM_ROM_WRITE_PROTECTION",
+      "reason": "rom2 exposes req_i, we_i, addr_i, wdata_i, rdata_o despite being named ROM and is instantiated in peripheral address space. Check whether we_i is ignored, permanently disabled, or protected by an initialization/test guard.",
+      "subject": "bus/MMIO requester",
+      "operation": "write/configure ROM contents",
+      "object": "rom2/boot ROM contents and read data",
+      "expected_guard": "ROM/boot code regions should reject writes or require a secure provisioning/lifecycle guard; if a write port exists, writes must be disabled or constrained to authorized initialization/test conditions.",
+      "candidate_path": "rom2/APB/register interface -> req_i,we_i,addr_i,wdata_i -> rom2 storage/read data",
+      "state_conditions_to_check": [
+        "we_i behavior",
+        "rst_ni initialization",
+        "address range decode to rom2",
+        "testbench vs synthesis integration"
+      ],
+      "required_evidence_slots": [
+        "subject: bus/APB requester",
+        "operation: write to ROM address",
+        "object: ROM storage/content",
+        "expected guard: no writes or secure init/test guard",
+        "observed write path and address decode",
+        "readback/external visibility",
+        "reset/init behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_peripherals.sv",
+        "openpiton/serpent_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "rom2 body is small but facts do not show its assignments; inspect write handling and instantiation wiring."
+    },
+    {
+      "obligation_id": "M2_PERM_PCIE_XDMA_FABRIC_RANGE",
+      "reason": "ariane_xilinx instantiates xdma_0 and AXI clock/data width converters. Since PCIe is an external bus master, analyze whether its AXI path is range-limited or can access protected CPU memory/peripherals without mediation.",
+      "subject": "PCIe XDMA external master",
+      "operation": "DMA read/write over AXI",
+      "object": "DDR/system memory and memory-mapped peripherals reachable from PCIe XDMA",
+      "expected_guard": "External DMA/PCIe masters should be restricted by an address map/IOMMU/PMP-like range check or fabric firewall before reaching protected memory or MMIO; width/clock converters must preserve address/control attributes.",
+      "candidate_path": "external PCIe XDMA/AXI master -> width/clock converters -> AXI fabric/memory/peripherals",
+      "state_conditions_to_check": [
+        "reset/init of XDMA path",
+        "AXI aw/ar address decode",
+        "converter connectivity and control signal preservation",
+        "overlap with CPU/debug/DDR address regions"
+      ],
+      "required_evidence_slots": [
+        "subject: external PCIe/XDMA master",
+        "operation: AXI read/write",
+        "object: memory/peripheral address ranges",
+        "expected guard: address range/firewall/security policy",
+        "observed fabric connections and decodes",
+        "attribute preservation across converters",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "fpga/src/ariane_xilinx.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Only top-level instances are listed; inspect connections in ariane_xilinx to identify reachable ranges and any guards."
+    },
+    {
+      "obligation_id": "M2_PERM_NOC_PERIPHERAL_ACCESS_MEDIATION",
+      "reason": "serpent_peripherals exposes distinct NoC channels for ariane_debug, bootrom, clint, and plic plus debug control outputs. Check that routing and address decoding preserve intended permissions and do not let general NoC traffic drive privileged debug/reset/interrupt controls.",
+      "subject": "OpenPiton NoC requester",
+      "operation": "route/read/write peripheral requests from NoC",
+      "object": "debug module, bootrom, CLINT timer/IPI controls, PLIC interrupt controls",
+      "expected_guard": "NoC request channels targeting debug, bootrom, CLINT, and PLIC should enforce requester/address permissions and should not allow debug or control peripherals to be reached by unauthorized NoC traffic.",
+      "candidate_path": "openpiton serpent_peripherals NoC debug/bootrom/clint/plic ports -> local peripheral wrappers and DMI/JTAG",
+      "state_conditions_to_check": [
+        "valid/ready handshake behavior",
+        "reset defaults of routed controls",
+        "testmode_i effects",
+        "address/channel overlap among peripherals"
+      ],
+      "required_evidence_slots": [
+        "subject: NoC requester/channel",
+        "operation: peripheral read/write/route",
+        "object: debug/bootrom/CLINT/PLIC registers or control outputs",
+        "expected guard: channel/address/requester mediation",
+        "observed decode/routing conditions",
+        "response path",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "openpiton/serpent_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Fact layer lists ports but not internal routing; inspect serpent_peripherals assignments and wrapper instances."
+    }
+  ]
+}

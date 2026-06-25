@@ -1,0 +1,298 @@
+{
+  "scope_id": "ariane_peripherals",
+  "obligations": [
+    {
+      "obligation_id": "O-01",
+      "reason": "Debug interfaces (JTAG/DMI) may bypass lock and access control to read/write key material in cryptographic wrappers. The fact layer shows debug_mode_i inputs to aes0, aes1, aes2, hmac wrappers and a debug path via dmi_jtag/SimDTM that can generate bus transactions.",
+      "subject": "Debug interface (JTAG/DMI via SimDTM/dmi_jtag)",
+      "operation": "Read or write key registers and secret state",
+      "object": "Key registers (key0, key1, key2), plaintext/ciphertext state in aes0/aes1/aes2 wrappers, hmac key/secret",
+      "expected_guard": "Access should be denied when debug_mode_i is active unless authenticated (e.g., through JTAG unlock and matching privilege). All read/write paths to these registers must gate on reglk_ctrl_i and acct_ctrl_i even in debug mode.",
+      "candidate_path": "From debug host through JTAG, through dmi_jtag, through dm_slave_req/dm_master_req, into bus fabric, to peripheral wrappers. Inside wrapper, debug_mode_i may directly enable reads/writes of secret registers without checking lock.",
+      "state_conditions_to_check": [
+        "debug_mode_i active",
+        "jtag_unlock status",
+        "reglk_ctrl_i lock bits for the target peripheral",
+        "acct_ctrl_i access bits"
+      ],
+      "required_evidence_slots": [
+        "RTL snippet showing debug path to a key register write/read mux",
+        "Implementation of lock-check logic for debug accesses",
+        "Signal assignment showing debug_mode_i bypasses lock"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv",
+        "aes0_wrapper.sv",
+        "aes1_wrapper.sv",
+        "aes2_wrapper.sv",
+        "hmac_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "high",
+      "uncertainty": "Whether debug_mode_i directly gates read/write enables without lock check is unknown; RTL details inside wrappers needed."
+    },
+    {
+      "obligation_id": "O-02",
+      "reason": "The reglk_wrapper has a jtag_unlock input that presumably sets lock registers to unlocked state. If the unlock condition is not properly authenticated (e.g., requires only a trivial sequence or is always asserted in certain modes), an attacker could disable all lock protections.",
+      "subject": "JTAG/debug interface",
+      "operation": "Assert jtag_unlock (clear lock bits)",
+      "object": "Lock state (reglk_ctrl_o) for all peripherals",
+      "expected_guard": "jtag_unlock must be asserted only after a cryptographically authenticated challenge-response or after providing a valid JTAG hash. It should not be forced high by default test modes or reset.",
+      "candidate_path": "jtag_unlock signal driven by logic in riscv_peripherals (jtag_hash related). If hash check is weak or bypassed, unlock can be forced. Alternatively, testmode_i might override unlock.",
+      "state_conditions_to_check": [
+        "jtag_hash value and comparison logic",
+        "testmode_i effect on jtag_unlock",
+        "Reset value of lock registers (reglk_ctrl)"
+      ],
+      "required_evidence_slots": [
+        "RTL that generates jtag_unlock",
+        "jtag_hash comparison visibility",
+        "Lock register reset values"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv",
+        "reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "The exact unlock condition is opaque; need to see hash check implementation."
+    },
+    {
+      "obligation_id": "O-03",
+      "reason": "The testmode_i input to riscv_peripherals is a potential global bypass. If testmode disables lock checks or forces unlock, all peripherals become unprotected. The fact layer shows testmode_i as a top-level input but its usage inside is unknown.",
+      "subject": "Test mode (testmode_i signal)",
+      "operation": "Override normal access control or force unlock",
+      "object": "All peripheral lock/access control mechanisms",
+      "expected_guard": "testmode_i should only be active during manufacturing test, must not be controllable in deployed system, and should never bypass lock bits or enable read of secrets.",
+      "candidate_path": "testmode_i propagated to reglk_wrapper or directly to peripheral select logic, potentially forcing we or read enbales regardless of lock.",
+      "state_conditions_to_check": [
+        "testmode_i active",
+        "Effect on reglk_ctrl_o",
+        "Effect on peripheral read/write enables"
+      ],
+      "required_evidence_slots": [
+        "RTL showing testmode_i logic",
+        "Any AND/OR with lock signals",
+        "Test mode controllability from external pins/debug"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "testmode_i usage is not visible in the provided snippets; depth of bypass unknown."
+    },
+    {
+      "obligation_id": "O-04",
+      "reason": "Each cryptographic wrapper contains registers for key material (key0, key1, key2). Their write enable (we) must be conditioned on the lock state and access control. If any write path does not check lock, a locked peripheral can still be modified.",
+      "subject": "Bus master (CPU, debug DMA, or test interface)",
+      "operation": "Write to key registers when peripheral is locked",
+      "object": "Key register words in aes0/aes1/aes2/hmac wrappers",
+      "expected_guard": "we signal to key registers must be ANDed with the appropriate reglk_ctrl_i bit and acct_ctrl_i. For example, in aes0_wrapper, key_sel and we should be disabled when lock bit is set.",
+      "candidate_path": "From bus interface (ariane_axi) address decode, to internal register file. If decode does not consider lock, or if there is a debug write path that ignores lock, we could fire.",
+      "state_conditions_to_check": [
+        "Peripheral lock bit (from reglk_ctrl_i) value",
+        "acct_ctrl_i value",
+        "Write operation targeting key registers"
+      ],
+      "required_evidence_slots": [
+        "RTL of register write generation inside each wrapper",
+        "Lock bit usage in write enable logic",
+        "Comparison of lock usage across all peripheral types"
+      ],
+      "files_or_modules_to_inspect": [
+        "aes0_wrapper.sv",
+        "aes1_wrapper.sv",
+        "aes2_wrapper.sv",
+        "hmac_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "The provided fact layer lacks internal write enabling RTL; must be verified in full source."
+    },
+    {
+      "obligation_id": "O-05",
+      "reason": "Reading cryptographic key registers or internal state through MMIO or debug paths could leak secrets. The wrappers have rdata output paths. Without proper read protection, keys become observable even when locked.",
+      "subject": "Bus master or debug interface",
+      "operation": "Read from key/state registers",
+      "object": "Key registers, state, plaintext/ciphertext, hmac internal state via rdata",
+      "expected_guard": "Read enable for secret registers must be blocked when lock is set or when not in a secure privilege level, unless explicitly read-back for verification is allowed. At minimum, debug reads must be prevented.",
+      "candidate_path": "From wrapper register file through rdata mux to bus. The lock signal must gate the read mux; if absent, any transaction can read secrets.",
+      "state_conditions_to_check": [
+        "Lock bit",
+        "debug_mode_i",
+        "Read address hitting secret registers"
+      ],
+      "required_evidence_slots": [
+        "RTL showing rdata mux selection",
+        "Lock signal in read path",
+        "Debug read bypass"
+      ],
+      "files_or_modules_to_inspect": [
+        "aes0_wrapper.sv",
+        "aes1_wrapper.sv",
+        "aes2_wrapper.sv",
+        "hmac_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Some designs allow reading keys for trusted software; expected guard depends on security policy, but lock should universally deny."
+    },
+    {
+      "obligation_id": "O-06",
+      "reason": "After reset, lock registers (reglk_ctrl) might default to unlocked, allowing a window where software has not yet set the lock, and secret registers are accessible. Additionally, separate reset signals (rst_1, rst_2, etc.) for each peripheral might reset lock bits independently or leave them in undefined state.",
+      "subject": "Reset sequence (rst_ni, rst_1..rst_11)",
+      "operation": "Set lock bits to permissive default or leave lock state undefined",
+      "object": "reglk_ctrl_o (lock state) for all peripherals",
+      "expected_guard": "Lock registers must reset to locked state (write protected, read possibly denied) to ensure no unprotected access before software configuration. All reset sources must converge to locked.",
+      "candidate_path": "",
+      "state_conditions_to_check": [
+        "Reset value of lock bits in reglk_wrapper",
+        "Which resets affect lock registers",
+        "Potential reset glitches or asynchronous resets"
+      ],
+      "required_evidence_slots": [
+        "reglk_wrapper lock register reset assignments",
+        "Reset tree connectivity",
+        "Lock default value RTL"
+      ],
+      "files_or_modules_to_inspect": [
+        "reglk_wrapper.sv",
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "Reset default may intentionally be unlocked for manufacturing debug; assess deployment configuration."
+    },
+    {
+      "obligation_id": "O-07",
+      "reason": "The acct_wrapper provides access control (acc_ctrl) but several wrappers take both reglk_ctrl_i and acct_ctrl_i. If any peripheral uses only one of them, or uses neither in certain operations (like starting encryption), then an untrusted request can operate the crypto core without full permission. For instance, aes0_wrapper has a start signal that might not be gated by lock.",
+      "subject": "Bus master or debug",
+      "operation": "Trigger cryptographic operation (e.g., start encryption) when locked",
+      "object": "Crypto core control (start, init, next signals)",
+      "expected_guard": "Control signals that cause key usage or state changes must be conditioned on both reglk_ctrl_i and acct_ctrl_i if intended.",
+      "candidate_path": "Write to control register in wrapper drives start/init/next directly without checking lock. In aes0_wrapper, start is a signal; check its combinatorial path.",
+      "state_conditions_to_check": [
+        "Lock bit",
+        "Access control bit",
+        "Write to control register address"
+      ],
+      "required_evidence_slots": [
+        "Control signal generation RTL in aes0_wrapper, aes1_wrapper, etc.",
+        "Lock usage in that generation"
+      ],
+      "files_or_modules_to_inspect": [
+        "aes0_wrapper.sv",
+        "aes1_wrapper.sv",
+        "aes2_wrapper.sv",
+        "hmac_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "Control signals might be self-clearing and safe, but need to verify."
+    },
+    {
+      "obligation_id": "O-08",
+      "reason": "There are DMA bus ports (buf_ariane_dma_noc2/3). If the DMA engine can be programmed to target peripheral register space without going through the same access control as the CPU, it could read secrets or overwrite key material. The fact layer shows DMA ports but no access mediation.",
+      "subject": "DMA engine (via ariane_dma ports)",
+      "operation": "Read/write to peripheral memory-mapped registers",
+      "object": "Any peripheral register, including key registers",
+      "expected_guard": "DMA transactions to peripheral regions must be checked against an access control matrix or locked down based on secure configuration. At minimum, lock bits should block DMA writes to locked registers.",
+      "candidate_path": "DMA request -> noc2 -> peripheral address decode. The address decode may not distinguish between CPU and DMA or enforce lock.",
+      "state_conditions_to_check": [
+        "DMA channel active",
+        "Lock/bus protection settings",
+        "Address range overlapping peripheral MMIO"
+      ],
+      "required_evidence_slots": [
+        "Address decode logic for peripherals (likely in riscv_peripherals.sv)",
+        "DMA source ID utilization in access decisions"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "DMA access control may be implemented in a separate interconnnect; scope limited."
+    },
+    {
+      "obligation_id": "O-09",
+      "reason": "HMAC wrapper has signals key0, ikey_hash_bytes, okey_hash_bytes, data, etc. It also has key_hash_bypass. If bypass can be set without proper privilege or lock, secret keys could be exposed or MAC forged. The fact layer shows key_hash_bypass as a logic signal.",
+      "subject": "Attacker via MMIO write",
+      "operation": "Set key_hash_bypass and read HMAC data",
+      "object": "HMAC key material and crypto bypass functionality",
+      "expected_guard": "key_hash_bypass must be only writable when lock is clear and privilege sufficient (e.g., Machine mode). Its state should be cleared on lock set or reset.",
+      "candidate_path": "Write to control register bit that maps to key_hash_bypass. If not gated by lock, can be set even after lock.",
+      "state_conditions_to_check": [
+        "Lock bit for HMAC",
+        "Privilege level (priv_lvl_i) used?",
+        "Reset state of key_hash_bypass"
+      ],
+      "required_evidence_slots": [
+        "Register write logic in hmac_wrapper.sv for control signals",
+        "lock gate on key_hash_bypass"
+      ],
+      "files_or_modules_to_inspect": [
+        "hmac_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "The internal RTL may already lock it, need confirmation."
+    },
+    {
+      "obligation_id": "O-10",
+      "reason": "The chip has boot ROM (bootrom, bootrom_linux) and fuses (fuse_req/fuse_addr/fuse_rdata). Fuse values may contain secret keys or security configuration. Their read path via MMIO or debug must be protected. The fact layer shows fuse interface within riscv_peripherals.",
+      "subject": "Bus master or debug",
+      "operation": "Read fuse values",
+      "object": "Fuse data (fuse_rdata)",
+      "expected_guard": "Fuse reads should be locked after boot, accessible only by secure firmware or disabled entirely. There must be no debug test path exposing them.",
+      "candidate_path": "fuse_req asserted from address decode; fuse_rdata returned to bus. No lock signal visible in the snippet, potentially always readable.",
+      "state_conditions_to_check": [
+        "Lock bit for fuse read",
+        "Debug mode effect",
+        "Lifecycle state (e.g., post-boot)"
+      ],
+      "required_evidence_slots": [
+        "Fuse access logic in riscv_peripherals.sv",
+        "Lock integration for fuse reads"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Fuses may be intended to be readable by all, but typical secure designs lock them; not enough facts to determine."
+    }
+  ]
+}

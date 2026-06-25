@@ -1,0 +1,367 @@
+{
+  "analysis_summary": "The proposed method produced 7 finding(s) from 9 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "potential_warning",
+      "summary": "jtag_unlock=1 unconditionally resets all reglk_mem to 0; authentication logic resides in dmi_jtag module, which is not available for inspection.",
+      "vulnerability_category": "reset reglk_mem registers (unlock all peripheral locks) / reglk_mem in reglk_wrapper / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "reglk_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "reglk_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: jtag_unlock signal Operation: reset reglk_mem registers (unlock all peripheral locks) Object: reglk_mem in reglk_wrapper Expected guard: jtag_unlock asserted only after successful hash challenge/response Observed behavior: jtag_unlock=1 unconditionally resets all reglk_mem to 0; authentication logic resides in dmi_jtag module, which is not available for inspection. Path: dmi_jtag -> jtag_unlock -> reglk_wrapper line 80 Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If jtag_unlock can be asserted without authentication, all locked peripherals become writable.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "dmi_jtag module source not available; cannot verify that jtag_unlock is only asserted after successful hash authentication.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Cross-peripheral privilege escalation: acc_ctrl bit for peripheral 4 (HMAC) grants access to peripheral 5 (PKT) via hardcoded OR logic.",
+      "vulnerability_category": "access peripheral j=5 (PKT) / PKT peripheral registers, including fuse-derived private key pkey_loc / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: CPU bus master at privilege level i Operation: access peripheral j=5 (PKT) Object: PKT peripheral registers, including fuse-derived private key pkey_loc Expected guard: access to PKT should be controlled solely by acc_ctrl[5*4+i] (its own access bit) Observed behavior: acc_ctrl_c[i][5] is set if either acc_ctrl[5*4+i] OR acc_ctrl[4*4+i] (HMAC's bit) is set, granting access to PKT via HMAC permissions. Path: riscv_peripherals.sv line 222 Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Privilege level with HMAC access can access PKT private key material even if explicit PKT permission is not granted.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "potential_warning",
+      "summary": "rom_req uses priv_lvl_i directly; dm_master is disabled; no direct debug path to boot ROM visible; influence of debug/test on priv_lvl_i cannot be verified.",
+      "vulnerability_category": "read boot ROM / boot ROM (i_bootrom_bm, i_bootrom_linux) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: debug_mode_i and testmode_i Operation: read boot ROM Object: boot ROM (i_bootrom_bm, i_bootrom_linux) Expected guard: debug/test must not alter priv_lvl_i or bypass access control Observed behavior: rom_req uses priv_lvl_i directly; dm_master is disabled; no direct debug path to boot ROM visible; influence of debug/test on priv_lvl_i cannot be verified. Path: riscv_peripherals.sv line 517 Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Potential unauthorized boot ROM read if priv_lvl_i is raised by debug/test in upstream logic.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Source of priv_lvl_i is external; cannot confirm that debug_mode_i or testmode_i cannot force it to a higher privilege level.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "Missing lock-based write protection on fuse control registers; while key read is protected, other security-critical fuse commands may be issued without authorization.",
+      "vulnerability_category": "write to control registers (fuse_req_o, fuse_addr_o) / fuse_req_o and fuse_addr_o registers / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any bus master accessing pkt_wrapper Operation: write to control registers (fuse_req_o, fuse_addr_o) Object: fuse_req_o and fuse_addr_o registers Expected guard: write to fuse control registers must be blocked when lock bit is set Observed behavior: Writes to address 0 (fuse_req_o) and 1 (fuse_addr_o) are gated only by acct_ctrl_i, not by reglk_ctrl lock bits; read of private key pkey_loc is gated by lock bits, mitigating key extraction but allowing unauthorized modification of fuse operations. Path: pkt_wrapper.sv lines 80-88 Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthorized changes to fuse request/address possible when lock is set; private key read remains blocked.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "we_flag provides a side channel to enable access to locked peripherals without modifying the lock-protected acct_mem registers.",
+      "vulnerability_category": "override access control output / acc_ctrl_o least significant bits for all peripherals / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "acct_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "acct_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "acct_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "acct_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: we_flag signal Operation: override access control output Object: acc_ctrl_o least significant bits for all peripherals Expected guard: we_flag must be qualified by lock status (reglk_ctrl) Observed behavior: we_flag is ORed directly into acc_ctrl_o[0] irrespective of lock state, bypassing the lock protection that prevents writes to acct_mem registers. Path: acct_wrapper.sv line 49 Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Locked peripherals may become accessible if we_flag is asserted.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "Unsafe reset defaults: security-critical lock and access-control registers initialize to permissive states.",
+      "vulnerability_category": "reset security state / reglk_mem registers in reglk_wrapper; acct_mem registers in acct_wrapper / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "reglk_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "acct_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "reglk_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "acct_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: system reset (rst_ni) and derived reset signals (rst_9, rst_6) Operation: reset security state Object: reglk_mem registers in reglk_wrapper; acct_mem registers in acct_wrapper Expected guard: on reset, lock bits must be set (locked), access control should default to deny Observed behavior: reglk_mem reset to 'h0 (all unlocked); acct_mem reset to 32'hffffffff (all access enabled). Path: reglk_wrapper.sv lines 80-84; acct_wrapper.sv lines 81-84 Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "After reset, all peripherals are unlocked and full access is granted, allowing untrusted masters to modify security settings before software configures them.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F7",
+      "status": "potential_warning",
+      "summary": "In JTAG mode, dmi_jtag module generates both jtag_unlock and debug_req_valid; internal logic is not inspectable; in simulation mode, SimDTM drives debug_req_valid without any authentication.",
+      "vulnerability_category": "enter debug mode (assert debug_req_valid) / debug_req_o output to CPU / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG debugger via dmi_jtag/SimDTM Operation: enter debug mode (assert debug_req_valid) Object: debug_req_o output to CPU Expected guard: debug_req_valid must be gated by jtag_unlock (authentication) Observed behavior: In JTAG mode, dmi_jtag module generates both jtag_unlock and debug_req_valid; internal logic is not inspectable; in simulation mode, SimDTM drives debug_req_valid without any authentication. Path: riscv_peripherals.sv lines 256-269 (SimDTM) and 275-297 (dmi_jtag) Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If dmi_jtag does not properly gate debug_req_valid on jtag_unlock, debugger may enter debug mode without authentication.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "dmi_jtag module source not available; cannot verify that debug_req_valid is conditioned on jtag_unlock. Simulation mode (SimDTM) lacks any authentication gate.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

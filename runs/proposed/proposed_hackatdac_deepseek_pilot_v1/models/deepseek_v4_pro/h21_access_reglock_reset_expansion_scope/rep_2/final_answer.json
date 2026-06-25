@@ -1,0 +1,433 @@
+{
+  "analysis_summary": "The proposed method produced 8 finding(s) from 12 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "JTAG/DMI path is not protected by jtag_unlock; debugger can interact with the CPU without authentication. Impact limited to debug module operations (halt, resume, register access) since DM bus master is disabled.",
+      "vulnerability_category": "DMI access to debug module (halt, resume, register access) / debug module registers and CPU control / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "dmi_jtag instance: jtag_unlock_o driven separately from DMI signals (dmi_req_o, dmi_req_valid_o, etc.); no gating of DMI by jtag_unlock.",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "DMI signals flow directly into dm_top without any jtag_unlock condition.",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "jtag_unlock only used in reglk_wrapper reset condition (clears locks when low).",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "if(~(rst_ni && ~jtag_unlock && ~rst_9)) -> clears reglk_mem when jtag_unlock=0.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG/debug user (through i_dmi_jtag) Operation: DMI access to debug module (halt, resume, register access) Object: debug module registers and CPU control Expected guard: jtag_unlock==1 gates DMI access Observed behavior: DMI path (dmi_req_o, dmi_req_valid_o, dmi_resp) is completely un-gated by jtag_unlock; jtag_unlock output is generated but only used to clear reglk memory on reset, not to gate debug traffic Path: JTAG TAP (tck,tms,tdi,tdo) → dmi_jtag → debug_req_valid/debug_req → dm_top DMI slave Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Attacker with JTAG connectivity can halt the CPU and read/write debug registers without any authentication; however, DM bus master is disabled (OBL-DBG-001), so memory/peripheral access via debug bus is prevented",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Unclear if dmi_jtag internally contains additional unlock logic (e.g., password check) that could block DMI; from visible RTL, DMI is always available.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Boot ROM read can be performed by any NoC initiator if the CPU is in machine mode or if we_flag_0 is high, because the guard uses CPU privilege level, not initiator identity.",
+      "vulnerability_category": "read boot ROM / boot ROM content / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "assign rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]; privilege check uses CPU priv_lvl_i",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "rom_req_acct sourced from axi2mem connected to br_master AXI bus driven by noc_axilite_bridge",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "acc_ctrl_o = {acct_mem[...], acct_mem[...] | {8{we_flag}}}; we_flag can force acc_ctrl[0] to 1",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "we_flag_0 input not gated by privilege or lock",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any NoC initiator that can reach the boot ROM NoC port Operation: read boot ROM Object: boot ROM content Expected guard: privilege check (acc_ctrl_c[priv_lvl_i][0]) blocks reads from non-machine-mode CPU; no alternative path should ignore this check Observed behavior: rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]; rom_req_acct is driven by any NoC master, but priv_lvl_i is the CPU's current privilege, not the initiator's. If CPU is in machine mode while a non-CPU master asserts rom_req_acct, ROM read succeeds. Additionally, we_flag_0 can force acc_ctrl[0] to 1, bypassing privilege check entirely. Path: NoC initiator → noc_axilite_bridge → br_master AXI → i_axi2rom → rom_req_acct → AND gate with acc_ctrl_c[priv_lvl_i][0] → rom_req to bootrom Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthorized read of boot ROM firmware, potentially exposing sensitive code or cryptographic material",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Source of we_flag_0 not visible; if it can be asserted by non-secure logic, the privilege bypass is complete.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "Fuse read path does not show any privilege or lock enforcement in the visible connections; likely a vulnerability.",
+      "vulnerability_category": "read fuse contents / fuse data (device keys, configuration) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "pkt_wrapper instantiation: outputs fuse_req, fuse_addr; input fuse_rdata; no privilege or lock signals passed",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "fuse_req connected to fuse memory read request",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any AXI master that can access the PKT wrapper (pkt_wrapper) Operation: read fuse contents Object: fuse data (device keys, configuration) Expected guard: machine-mode privilege or lock-based read protection, or one-time read enforcement Observed behavior: fuse_req, fuse_addr, fuse_rdata signals are generated inside pkt_wrapper from AXI requests; no privilege or lock gating is visible in the instantiation or in the top-level riscv_peripherals module; fuse_req is passed directly to fuse memory instance Path: AXI request → pkt_wrapper → fuse_req → fuse memory (e.g., line 1706) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Secrets stored in fuses (device keys) could be read by unprivileged masters or a remote attacker via the NoC",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "pkt_wrapper internals not inspected; it could contain privilege checking or lock gating that is not visible at the top level.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "potential_warning",
+      "summary": "Unclear; requires inspection of each crypto wrapper to determine read access policies.",
+      "vulnerability_category": "read internal crypto state registers / crypto internal state (AES round keys, SHA hash values, etc.) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "ariane_aes0_buf_noc3_data_o connected to NoC read channel",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: debug or AXI read path Operation: read internal crypto state registers Object: crypto internal state (AES round keys, SHA hash values, etc.) Expected guard: reads blocked when lock set or engine busy; registers write-only Observed behavior: Crypto accelerators have AXI read channels (ariane_aes0_buf_noc3_data_o etc.) returning data. No information on whether internal state is exposed or what gating exists. DM bus master disabled, but CPU/DMA can still read if registers are accessible. Path: AXI read request → crypto wrapper → internal registers → read data to NoC Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Potential leakage of key material or intermediate cryptographic values",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Crypto accelerator wrapper internals not available; cannot determine if internal state is readable, whether lock gates reads, or if security-sensitive registers are implemented as write-only.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "DMA appears to have unfettered physical memory access, potentially bypassing any CPU-centric protection mechanisms.",
+      "vulnerability_category": "read/write to memory or peripherals / any memory or MMIO region / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "DMA NoC port signals",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "DMA wrapper and noc_axilite_bridge instantiation; no access-control wrapper in the path",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: DMA engine (i_dma_wrapper) Operation: read/write to memory or peripherals Object: any memory or MMIO region Expected guard: address-based access control (PMP, DMA protection unit) Observed behavior: DMA has an AXI port connected directly to the NoC (buf_ariane_dma_noc2_data_i / ariane_dma_buf_noc2_ready_o etc.). There is no visible PMP, access-control wrapper, or address-range limiter for DMA transactions in riscv_peripherals.sv. Path: DMA AXI master → noc_axilite_bridge → NoC → target peripheral/memory Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "DMA can read/write protected memory regions (e.g., secure boot ROM, crypto keys, lock registers) without privilege checks",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "DMA configuration register map and internal access-control logic not available; the DMA may have internal protection or restricted address ranges.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "potential_warning",
+      "summary": "Cannot determine; requires clint module analysis.",
+      "vulnerability_category": "write to CLINT registers / CLINT timer and IPI registers / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "clint instantiation; testmode_i passed, but no priv_lvl_i",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "AXI-lite interface provides address, en, we; no privilege enforcement",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any AXI master accessing CLINT Operation: write to CLINT registers Object: CLINT timer and IPI registers Expected guard: privilege check (machine-mode only) Observed behavior: CLINT is memory-mapped via AXI-lite interface (axi_lite_interface.sv) which performs no privilege checks. No explicit privilege signal (priv_lvl_i) is passed to the clint module. It is unknown whether the clint module internally decodes privilege from the address or other signals. Path: AXI request → noc_axilite_bridge → clint_axi_req → clint module Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Possible unauthorized reprogramming of timers and IPIs, leading to denial of service or privilege escalation",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "clint module source not provided; it may internally enforce privilege based on memory map (machine-mode only) or use other sideband signals.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F7",
+      "status": "potential_warning",
+      "summary": "Inconclusive without PLIC internals.",
+      "vulnerability_category": "write to PLIC priority/enable registers / PLIC configuration registers / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "plic_master AXI bus and PLIC instantiation; no privilege gating",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any bus master accessing PLIC Operation: write to PLIC priority/enable registers Object: PLIC configuration registers Expected guard: machine-mode only Observed behavior: PLIC accessed via AXI-lite; no privilege signal passed to plic_top. PLIC module internals not visible. Path: AXI → noc_axilite_bridge → plic_master → PLIC Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Could allow unauthorized reconfiguration of interrupt priorities/enables",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "PLIC module code not available; may contain privilege check.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F8",
+      "status": "confirmed_finding",
+      "summary": "we_flag signals can bypass the access-control matrix, creating a side-channel write enable path. The safety depends entirely on the trustworthiness of the we_flag source.",
+      "vulnerability_category": "assert we_flag to a peripheral / peripheral write enable (acc_ctrl bits) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "acc_ctrl_o = {acct_mem[2], acct_mem[1], acct_mem[0] | {8{we_flag}}}; we_flag forces bit 0 high",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "we_flag_0..4 ports defined; no gating logic around them",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any entity driving we_flag_0..4 Operation: assert we_flag to a peripheral Object: peripheral write enable (acc_ctrl bits) Expected guard: we_flag only set after privilege/lock check Observed behavior: we_flag_0..4 are module inputs. In acct_wrapper, acc_ctrl_o[0] is ORed with {8{we_flag}}, forcing the corresponding access-control bit to 1. This can override the privilege-based acc_ctrl_c matrix. The source of we_flag signals is not gated by any security check visible in riscv_peripherals.sv. Path: we_flag_0..4 inputs → acct_wrapper (line 49) → acc_ctrl[0] forced to 1 → acc_ctrl_c[i][0] forced high → write enable to protected peripheral (or ROM read enable) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Complete bypass of access-control layer for peripherals controlled by those acc_ctrl bits (e.g., ROM read, AES write)",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The driver of we_flag_0..4 is outside the inspected modules; if it originates from a secure, locked source or is permanently low, the vulnerability may not be exploitable.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

@@ -1,16 +1,16 @@
 {
-  "analysis_summary": "Analyzed the visible RTL under the provided scope for permission/access-control issues. The strongest issue is that the FC debug APB slave is directly converted into the core debug interface, and the Zero-Riscy debug unit permits halt/resume, PC redirection, CSR access, and register file read/write operations without any visible authentication, lock, privilege, lifecycle, or secure-mode check. A second permission-related warning is present in the APB interrupt controller: APB writes can directly alter interrupt mask, pending, and acknowledge state, while the secure interrupt signals/secure-mode input appear unused or tied off at integration, so no visible permission separation protects interrupt-control state.",
+  "analysis_summary": "Inspected the RTL/source files under the provided input scope for permission-related security issues. The main security-relevant path is the FC subsystem APB debug integration into the Zero-Riscy debug unit. The source shows an APB debug slave converted directly into core debug request/address/write/data signals. The debug unit has no visible authentication, lock, lifecycle, test-mode, privilege, or bus-master permission input, and it allows always-accessible debug control writes that can halt/resume the core. Once halted, debug can modify architectural state including GPRs, CSRs, and DNPC/next PC. A secondary observation is that the Zero-Riscy CSR implementation appears machine-mode-only / always M-mode, which may be intentional but means CPU privilege isolation is not implemented in this core.",
   "findings": [
     {
-      "finding_id": "PERM-DEBUG-APB-UNPROTECTED",
-      "status": "confirmed_finding",
-      "summary": "FC debug APB slave provides unauthenticated access to core debug control and state-manipulation functions.",
-      "vulnerability_category": "Missing authorization / unprotected debug interface",
+      "finding_id": "PERM-DEBUG-APB-001",
+      "status": "potential_warning",
+      "summary": "APB-accessible debug interface lacks visible permission gating and can control CPU state.",
+      "vulnerability_category": "Missing authorization / insecure debug interface / permission bypass",
       "affected_locations": [
         {
           "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
-          "line_start": 31,
-          "line_end": 33,
+          "line_start": 32,
+          "line_end": 32,
           "module": "fc_subsystem",
           "signal_or_register": "apb_slave_debug"
         },
@@ -19,242 +19,234 @@
           "line_start": 297,
           "line_end": 319,
           "module": "fc_subsystem",
-          "signal_or_register": "apb2per_debug_i / debug_req / debug_addr / debug_we / debug_wdata"
-        },
-        {
-          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
-          "line_start": 141,
-          "line_end": 215,
-          "module": "zeroriscy_debug_unit",
-          "signal_or_register": "debug_req_i / debug_we_i / debug_addr_i / debug_gnt_o"
-        },
-        {
-          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
-          "line_start": 234,
-          "line_end": 250,
-          "module": "zeroriscy_debug_unit",
-          "signal_or_register": "GPR/debug-register read path"
-        },
-        {
-          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
-          "line_start": 459,
-          "line_end": 467,
-          "module": "zeroriscy_debug_unit",
-          "signal_or_register": "regfile_wreq_o / jump_req_o"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
-          "line_start": 31,
-          "line_end": 33,
-          "module": "fc_subsystem",
-          "object": "APB_BUS.Slave apb_slave_debug",
-          "evidence_type": "source_port_declaration",
-          "description": "The FC subsystem exposes a dedicated APB slave named apb_slave_debug.",
-          "supports_claim": "Shows that debug functionality is reachable through an APB slave interface."
+          "signal_or_register": "apb2per_debug_i / debug_req / debug_addr / debug_we / debug_wdata / debug_rdata"
         },
         {
           "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
-          "line_start": 297,
-          "line_end": 319,
+          "line_start": 204,
+          "line_end": 213,
           "module": "fc_subsystem",
-          "object": "apb2per_debug_i",
-          "evidence_type": "source_connection",
-          "description": "The APB debug slave is converted into internal debug bus signals, including debug_req, debug_addr, debug_we, debug_wdata, and debug_rdata.",
-          "supports_claim": "APB transactions are directly translated into core debug requests/data without any visible permission check in this integration block."
+          "signal_or_register": "debug_req/debug_gnt/debug_rvalid/debug_addr/debug_we/debug_wdata/debug_rdata core connection"
         },
         {
           "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
           "line_start": 257,
-          "line_end": 263,
+          "line_end": 266,
           "module": "fc_subsystem",
-          "object": "zeroriscy_core debug ports",
-          "evidence_type": "source_connection",
-          "description": "The generated debug_req/debug_addr/debug_we/debug_wdata signals are connected to the core debug interface.",
-          "supports_claim": "Shows that APB-originated debug accesses reach the processor debug unit."
+          "signal_or_register": "debug_req/debug_gnt/debug_rvalid/debug_addr/debug_we/debug_wdata/debug_rdata Zero-Riscy core connection"
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": 38,
+          "line_end": 43,
+          "module": "zeroriscy_debug_unit",
+          "signal_or_register": "debug_req_i/debug_addr_i/debug_we_i/debug_wdata_i/debug_rdata_o"
         },
         {
           "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
           "line_start": 163,
-          "line_end": 177,
+          "line_end": 176,
           "module": "zeroriscy_debug_unit",
-          "object": "DBG_CTRL write decode",
-          "evidence_type": "source_logic",
-          "description": "The debug unit marks debug registers as 'always accessible' and grants accesses to them. DBG_CTRL writes can assert dbg_halt or dbg_resume.",
-          "supports_claim": "An APB-originated debug write can halt or resume the core without visible authorization."
+          "signal_or_register": "DBG_CTRL / dbg_halt / dbg_resume"
         },
         {
           "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
           "line_start": 196,
           "line_end": 201,
           "module": "zeroriscy_debug_unit",
-          "object": "DNPC debug register write",
-          "evidence_type": "source_logic",
-          "description": "Debug-only DNPC write path grants the access and, when halted, asserts jump_req_n for DNPC.",
-          "supports_claim": "After halting, a debug requester can redirect the core PC through the debug unit."
+          "signal_or_register": "DNPC / jump_req_n"
         },
         {
           "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
-          "line_start": 207,
+          "line_start": 208,
           "line_end": 211,
           "module": "zeroriscy_debug_unit",
-          "object": "GPR write debug path",
-          "evidence_type": "source_logic",
-          "description": "General-purpose register debug writes are granted and, when halted, assert regfile_wreq.",
-          "supports_claim": "After halting, a debug requester can modify architectural registers."
+          "signal_or_register": "regfile_wreq"
         },
         {
           "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
-          "line_start": 246,
-          "line_end": 250,
+          "line_start": 145,
+          "line_end": 158,
           "module": "zeroriscy_debug_unit",
-          "object": "GPR read debug path",
-          "evidence_type": "source_logic",
-          "description": "General-purpose register debug reads are granted and, when halted, assert regfile_rreq_n.",
-          "supports_claim": "After halting, a debug requester can read architectural registers."
-        },
-        {
-          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
-          "line_start": 459,
-          "line_end": 467,
-          "module": "zeroriscy_debug_unit",
-          "object": "regfile_wreq_o / jump_req_o",
-          "evidence_type": "source_assignment",
-          "description": "The debug unit directly drives regfile_wreq_o and jump_req_o from decoded debug accesses.",
-          "supports_claim": "Confirms that decoded debug accesses cause register writes and PC jumps at the core interface."
-        }
-      ],
-      "reasoning_summary": "The FC subsystem provides an APB debug slave and directly maps APB accesses into the core debug request/address/write/data signals. In the Zero-Riscy debug unit, the debug control register is explicitly always accessible and can halt or resume the core. Once halted, the same interface can read/write GPRs, access CSRs, and redirect execution through DNPC/jump controls. No visible signal or condition checks requester privilege, secure mode, authentication, lifecycle debug enable, or a lock bit before granting these accesses. Therefore any bus master able to reach apb_slave_debug appears able to gain debug-level control of the core.",
-      "security_impact": "An unauthorized APB master could halt the processor, read or overwrite architectural registers/CSRs, redirect the next PC, resume execution, and potentially gain arbitrary code execution or extract secrets from the core context.",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "The wider SoC interconnect/firewall outside the visible scope was not available. If an external access-control block prevents untrusted masters from reaching apb_slave_debug, system-level exploitability would be reduced; however, no such permission check is visible in the scoped RTL.",
-      "recommended_follow_up": [
-        "Add an explicit debug authorization gate before apb2per_debug_i or inside the debug unit, controlled by lifecycle/debug-enable/authentication state.",
-        "Deny or error APB debug accesses unless the requester is authorized; do not merely grant invalid accesses.",
-        "Ensure production builds can permanently disable or lock debug access.",
-        "If the wider SoC has an external bus firewall, verify formally that untrusted masters cannot reach apb_slave_debug."
-      ]
-    },
-    {
-      "finding_id": "PERM-IRQ-APB-UNPROTECTED",
-      "status": "potential_warning",
-      "summary": "APB interrupt controller exposes writable interrupt-control registers without visible permission checks; secure interrupt signals are unused/tied off in the visible integration.",
-      "vulnerability_category": "Missing authorization / unprotected control registers",
-      "affected_locations": [
-        {
-          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
-          "line_start": 44,
-          "line_end": 52,
-          "module": "apb_interrupt_cntrl",
-          "signal_or_register": "core_irq_sec_o / core_secure_mode_i / apb_slave"
-        },
-        {
-          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
-          "line_start": 131,
-          "line_end": 184,
-          "module": "apb_interrupt_cntrl",
-          "signal_or_register": "r_mask / r_int / r_ack update logic"
-        },
-        {
-          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
-          "line_start": 228,
-          "line_end": 229,
-          "module": "apb_interrupt_cntrl",
-          "signal_or_register": "apb_slave.pready / apb_slave.pslverr"
-        },
-        {
-          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
-          "line_start": 275,
-          "line_end": 291,
-          "module": "fc_subsystem",
-          "signal_or_register": "fc_eu_i secure-mode/secure-IRQ connections"
+          "signal_or_register": "csr_req_n / csr_we_o"
         }
       ],
       "evidence": [
         {
-          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
-          "line_start": 44,
-          "line_end": 52,
-          "module": "apb_interrupt_cntrl",
-          "object": "core_irq_sec_o / core_secure_mode_i / apb_slave",
-          "evidence_type": "source_port_declaration",
-          "description": "The interrupt controller has a secure IRQ output and a core_secure_mode_i input, alongside an APB slave interface.",
-          "supports_claim": "Shows the design has signals that could support secure/permission-aware interrupt behavior, but these signals need to be used to enforce separation."
-        },
-        {
-          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
-          "line_start": 131,
-          "line_end": 138,
-          "module": "apb_interrupt_cntrl",
-          "object": "s_mask_next",
-          "evidence_type": "source_logic",
-          "description": "APB writes directly update the interrupt mask register from apb_slave.pwdata.",
-          "supports_claim": "Any accepted APB write to mask registers can enable/disable interrupt delivery state in this module."
-        },
-        {
-          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
-          "line_start": 159,
-          "line_end": 166,
-          "module": "apb_interrupt_cntrl",
-          "object": "s_int_next",
-          "evidence_type": "source_logic",
-          "description": "APB writes directly update interrupt pending state from apb_slave.pwdata.",
-          "supports_claim": "Any accepted APB write to interrupt registers can set or clear pending interrupts, enabling interrupt injection or suppression."
-        },
-        {
-          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
-          "line_start": 177,
-          "line_end": 184,
-          "module": "apb_interrupt_cntrl",
-          "object": "s_ack_next",
-          "evidence_type": "source_logic",
-          "description": "APB writes directly update interrupt acknowledge state from apb_slave.pwdata.",
-          "supports_claim": "Any accepted APB write to acknowledge registers can alter interrupt acknowledgment state."
-        },
-        {
-          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
-          "line_start": 108,
-          "line_end": 108,
-          "module": "apb_interrupt_cntrl",
-          "object": "core_irq_req_o",
-          "evidence_type": "source_assignment",
-          "description": "The interrupt request is generated from the writable pending and mask registers.",
-          "supports_claim": "Manipulating r_int and r_mask affects core interrupt delivery."
-        },
-        {
-          "file": "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
-          "line_start": 228,
-          "line_end": 229,
-          "module": "apb_interrupt_cntrl",
-          "object": "apb_slave.pready / apb_slave.pslverr",
-          "evidence_type": "source_assignment",
-          "description": "The APB slave always reports ready and never reports an error.",
-          "supports_claim": "There is no visible APB-level denial/error response for unauthorized or invalid accesses."
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": 32,
+          "line_end": 32,
+          "module": "fc_subsystem",
+          "object": "apb_slave_debug",
+          "evidence_type": "source",
+          "description": "The FC subsystem exposes a dedicated APB slave port for debug.",
+          "supports_claim": "Debug functionality is exposed as an APB slave at the FC subsystem boundary."
         },
         {
           "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
-          "line_start": 283,
-          "line_end": 288,
+          "line_start": 301,
+          "line_end": 319,
           "module": "fc_subsystem",
-          "object": "fc_eu_i secure connections",
-          "evidence_type": "source_connection",
-          "description": "At integration, core_secure_mode_i is tied to 1'b0 and core_irq_sec_o is left unconnected.",
-          "supports_claim": "The visible integration does not use the secure-mode input or secure interrupt output for permission separation."
+          "object": "apb2per_debug_i",
+          "evidence_type": "source",
+          "description": "The APB debug slave is connected to an APB-to-peripheral bridge that drives internal debug request, address, write-enable, write-data, grant, read-valid, and read-data signals.",
+          "supports_claim": "APB transactions on apb_slave_debug are converted directly into the core debug interface signals."
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": 204,
+          "line_end": 213,
+          "module": "fc_subsystem",
+          "object": "debug interface core connection",
+          "evidence_type": "source",
+          "description": "The subsystem wires the APB-derived debug signals directly into a core debug interface in one core instantiation branch.",
+          "supports_claim": "The debug path reaches the CPU core without a visible permission check in this module."
+        },
+        {
+          "file": "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+          "line_start": 257,
+          "line_end": 266,
+          "module": "fc_subsystem",
+          "object": "zeroriscy_core debug interface connection",
+          "evidence_type": "source",
+          "description": "The subsystem wires the APB-derived debug signals directly into the Zero-Riscy debug interface in the Zero-Riscy core branch.",
+          "supports_claim": "The debug path reaches Zero-Riscy without visible gating in fc_subsystem."
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": 38,
+          "line_end": 43,
+          "module": "zeroriscy_debug_unit",
+          "object": "debug_req_i/debug_addr_i/debug_we_i/debug_wdata_i/debug_rdata_o",
+          "evidence_type": "source",
+          "description": "The Zero-Riscy debug unit debug interface includes request/address/write/data but no visible permission, authentication, lock, lifecycle, privilege, or bus-master-ID input.",
+          "supports_claim": "The local debug unit interface has no visible authorization signal."
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": 163,
+          "line_end": 176,
+          "module": "zeroriscy_debug_unit",
+          "object": "DBG_CTRL",
+          "evidence_type": "source",
+          "description": "Debug registers are explicitly marked always accessible; DBG_CTRL writes can assert halt or resume behavior depending on debug_wdata_i and debug_halted_o.",
+          "supports_claim": "Any requester that reaches debug_req_i can access debug control registers and request halt/resume."
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": 196,
+          "line_end": 201,
+          "module": "zeroriscy_debug_unit",
+          "object": "jump_req_n / DNPC",
+          "evidence_type": "source",
+          "description": "The debug unit allows DNPC/next-PC update while halted via jump_req_n.",
+          "supports_claim": "After entering debug halt, the debug interface can redirect execution."
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": 208,
+          "line_end": 211,
+          "module": "zeroriscy_debug_unit",
+          "object": "regfile_wreq",
+          "evidence_type": "source",
+          "description": "The debug unit allows general-purpose register writes while halted.",
+          "supports_claim": "After entering debug halt, the debug interface can modify architectural registers."
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_debug_unit.sv",
+          "line_start": 145,
+          "line_end": 158,
+          "module": "zeroriscy_debug_unit",
+          "object": "csr_req_n / csr_we_o",
+          "evidence_type": "source",
+          "description": "The debug unit CSR path can raise CSR request while halted and later asserts CSR write enable in the second cycle.",
+          "supports_claim": "After entering debug halt, the debug interface can modify CSRs."
         }
       ],
-      "reasoning_summary": "The APB interrupt controller allows APB writes to set, clear, or overwrite interrupt mask, pending, and acknowledge registers. These registers directly affect core_irq_req_o and interrupt delivery. Although the module exposes secure-related signals, the visible module logic does not show permission gating on APB writes, and the FC integration ties core_secure_mode_i low while leaving core_irq_sec_o unconnected. This indicates that interrupt-control state is not protected by visible privilege or secure-mode checks within the scoped RTL.",
-      "security_impact": "An unauthorized APB master that can reach this peripheral could mask critical interrupts, forge interrupts, clear pending interrupts, or manipulate acknowledge state, potentially causing denial of service, interrupt spoofing, or bypass of security-monitor interrupt handling.",
+      "reasoning_summary": "The code exposes a debug APB slave and converts APB accesses directly into the core debug interface. The debug unit treats debug control registers as always accessible and provides halt/resume capability. Once halted, it permits writes to DNPC/next PC, general-purpose registers, and CSRs. No local RTL evidence shows authentication, lifecycle/debug-lock gating, test-mode gating, privilege checks, or bus-master authorization on this path. Therefore, if apb_slave_debug is reachable by untrusted software or a non-secure bus master, the requester can bypass normal execution permissions and take control of CPU architectural state.",
+      "security_impact": "Potential complete compromise of the FC core if the APB debug slave is reachable by an attacker. The attacker could halt or resume execution, alter general-purpose registers, modify CSRs, redirect PC through DNPC, read architectural state, bypass software privilege checks, or cause denial of service by keeping the core halted. Exploitability depends on SoC-level access controls not visible in the inspected scope.",
       "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The scoped files do not include the full SoC APB interconnect or any external firewall that might restrict access to apb_slave_eu. Therefore this is reported as a potential warning at the scoped RTL level rather than a fully proven system-level exploit path.",
+      "uncertainty_or_missing_evidence": "The full SoC top-level, APB address map, interconnect/firewall policy, lifecycle/debug-lock logic, and the source for apb2per are not present in the inspected scope. These external elements could mitigate exploitability by preventing untrusted access to apb_slave_debug. Thus the local block-level issue is clear, while full-system exploitability is not proven from available files alone.",
       "recommended_follow_up": [
-        "Restrict interrupt-controller register writes to authorized/privileged APB requesters, either with a bus firewall or local permission checks.",
-        "Use APB protection attributes or add explicit requester/security metadata if available in the SoC.",
-        "Implement secure interrupt behavior using core_secure_mode_i/core_irq_sec_o or remove misleading unused secure signals.",
-        "Return an APB error for unauthorized writes rather than always asserting pslverr=0."
+        "Verify the full SoC APB interconnect/address map to determine which bus masters can access apb_slave_debug.",
+        "Add or confirm a debug authorization mechanism, such as lifecycle/debug-lock fuse gating, authenticated debug unlock, or secure-only firewall rule.",
+        "Gate debug_req_i and/or apb_slave_debug with explicit permission checks before it reaches zeroriscy_debug_unit.",
+        "Ensure production builds disable or restrict APB debug access unless an authenticated debug session is active.",
+        "Review whether CSR write enable in the second cycle remains safe if debug_halted_o changes between CSR request and write phases."
+      ]
+    },
+    {
+      "finding_id": "PERM-PRIV-MODE-002",
+      "status": "potential_warning",
+      "summary": "Zero-Riscy appears machine-mode-only, with no visible CPU privilege isolation.",
+      "vulnerability_category": "Missing privilege separation / machine-mode-only execution",
+      "affected_locations": [
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": 163,
+          "line_end": 163,
+          "module": "zeroriscy_cs_registers",
+          "signal_or_register": "mstatus"
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": 201,
+          "line_end": 201,
+          "module": "zeroriscy_cs_registers",
+          "signal_or_register": "mstatus_q.mpp"
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_decoder.sv",
+          "line_start": 528,
+          "line_end": 536,
+          "module": "zeroriscy_decoder",
+          "signal_or_register": "csr_illegal / csr_access_o / illegal_insn_o"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": 163,
+          "line_end": 163,
+          "module": "zeroriscy_cs_registers",
+          "object": "mstatus",
+          "evidence_type": "source",
+          "description": "The CSR read logic comment states mstatus is always M-mode.",
+          "supports_claim": "The core appears designed to operate always in machine mode rather than enforcing multiple privilege levels."
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_cs_registers.sv",
+          "line_start": 201,
+          "line_end": 201,
+          "module": "zeroriscy_cs_registers",
+          "object": "mstatus_n.mpp",
+          "evidence_type": "source",
+          "description": "On mstatus write, MPP is forced to PRIV_LVL_M.",
+          "supports_claim": "Privilege state is forced to machine mode, indicating no lower privilege isolation in this CSR implementation."
+        },
+        {
+          "file": "ips/zero-riscy/zeroriscy_decoder.sv",
+          "line_start": 528,
+          "line_end": 536,
+          "module": "zeroriscy_decoder",
+          "object": "csr_illegal",
+          "evidence_type": "source",
+          "description": "CSR legality in the decoder appears based on recognized CSR addresses; searched lines show default illegal CSR handling and illegal_insn_o assignment without visible current-privilege checks in the decoder evidence.",
+          "supports_claim": "Visible CSR decode evidence does not show privilege-level authorization checks for CSR access."
+        }
+      ],
+      "reasoning_summary": "The CSR implementation comments and assignments indicate the core is always machine mode, with mstatus.MPP forced to machine mode. The visible decoder evidence indicates CSR legality is based on CSR address recognition rather than a current privilege level. This likely reflects an intentional embedded-core simplification, but it means software privilege separation is not enforced by this core.",
+      "security_impact": "If untrusted code can execute on this core, it may be able to access machine-level CSRs and privileged resources because no lower-privilege execution mode enforcement is visible. This could bypass software privilege boundaries. If the core is intended to run only trusted firmware, this may be an acceptable design choice rather than a vulnerability.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "This may be intentional for the target embedded system. The full system threat model, software execution model, PMP/PMA configuration, and SoC-level access controls are not visible. Therefore this is reported as a warning rather than a confirmed vulnerability.",
+      "recommended_follow_up": [
+        "Confirm whether the product threat model allows only trusted firmware to execute on this core.",
+        "If untrusted code can execute, add hardware privilege separation, PMP/PMA, or SoC-level memory/bus protection around sensitive assets.",
+        "Document explicitly that this core is machine-mode-only and should not be relied on for user/supervisor isolation.",
+        "Review all memory-mapped peripherals reachable by this core, since CPU privilege checks will not restrict untrusted software running on it."
       ]
     }
   ],
   "no_finding_reason": "",
-  "global_uncertainty": "Analysis was limited to files visible under the provided input scope and to source inspection only. Some instantiated modules or top-level interconnect/firewall logic may be outside scope, including the definition of apb2per and any system-level APB access-control policy. Findings therefore focus on permission checks absent in the visible RTL paths."
+  "global_uncertainty": "The assessment is based only on files visible under the input scope. Critical full-system evidence is missing, including the complete top-level integration, APB address map, interconnect/firewall rules, lifecycle/debug-lock implementation, authenticated-debug policy, and apb2per source. These could mitigate or alter exploitability, especially for the APB debug finding."
 }

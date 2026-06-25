@@ -1,0 +1,244 @@
+{
+  "scope_id": "adv_dbg_if_permission_analysis",
+  "obligations": [
+    {
+      "obligation_id": "OBL-001",
+      "reason": "Debug bus master paths (AXI/LINT) may bypass normal access controls to protected memory/peripherals if not properly gated by debug authorization.",
+      "subject": "JTAG/debug interface (adbg_axi_module, adbg_lint_module)",
+      "operation": "read/write to bus",
+      "object": "protected SoC memory/peripherals (e.g., APB peripherals, TCDM, ROM)",
+      "expected_guard": "Debug authorization signal (e.g., dbg_auth, lock bit) or lifecycle state preventing debug transactions until explicitly enabled",
+      "candidate_path": "Debug module (AXI or LINT BIU) -> SoC bus (AXI master / LINT bus) -> target memory/peripheral",
+      "state_conditions_to_check": [
+        "Debug mode enable status",
+        "Lock bit value",
+        "Lifecycle state (debug allowed/restricted)",
+        "Authorization signal from a trusted source"
+      ],
+      "required_evidence_slots": [
+        "Signal showing debug request path from module to bus",
+        "Authorization check logic (e.g., gating of bus valid)",
+        "Address range check for protected regions"
+      ],
+      "files_or_modules_to_inspect": [
+        "adbg_axi_module.sv",
+        "adbg_axi_biu.sv",
+        "adbg_lint_module.sv",
+        "adbg_lint_biu.sv",
+        "pulp_soc.sv",
+        "soc_domain.sv",
+        "safe_domain.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Exact authorization signal name and location to be identified in RTL."
+    },
+    {
+      "obligation_id": "OBL-002",
+      "reason": "Lock bits in debug modules must prevent any further configuration changes after being set; failure may allow reconfiguration and privilege escalation.",
+      "subject": "software/debug command",
+      "operation": "write to lock bit configuration register",
+      "object": "debug module configuration registers (control registers, access enables)",
+      "expected_guard": "Once lock bit is set, it must gate all write enables to protected registers and cannot be cleared without a reset or higher authority.",
+      "candidate_path": "Debug register access via JTAG TAP's DR chain (update_dr) -> register write logic",
+      "state_conditions_to_check": [
+        "Lock bit current value",
+        "Lock bit set/clear conditions (reset, write, other events)",
+        "Write enable gating logic for configuration registers"
+      ],
+      "required_evidence_slots": [
+        "Lock bit flop and its set/clear logic",
+        "Write enable equations for protected registers",
+        "Reset default of lock bit"
+      ],
+      "files_or_modules_to_inspect": [
+        "adbg_axi_module.sv",
+        "adbg_lint_module.sv",
+        "adbg_tap_top.v",
+        "adbg_top.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to locate specific lock register within debug modules."
+    },
+    {
+      "obligation_id": "OBL-003",
+      "reason": "Internal secret state (e.g., CRC computation, debug data) must not be exposed via TDO without proper authorization.",
+      "subject": "external JTAG user via TDO",
+      "operation": "capture and shift of debug data registers",
+      "object": "internal CRC state, debug module data registers, or other sensitive state",
+      "expected_guard": "Sensitive data output from TDO is gated by debug authorization; unauthorized reads return zero or constant value, or sensitive state is cleared before shift.",
+      "candidate_path": "Internal registers (e.g., adbg_crc32 output) -> data_register_i -> TDO shift logic",
+      "state_conditions_to_check": [
+        "Module select asserted for sensitive module",
+        "capture_dr_i / shift_dr_i state in TAP FSM",
+        "Debug authorization flag",
+        "Sensitive data clearing on capture"
+      ],
+      "required_evidence_slots": [
+        "Multiplexer selecting data_register_i source",
+        "Authorization check on data path",
+        "CRC or other sensitive register output connectivity"
+      ],
+      "files_or_modules_to_inspect": [
+        "adbg_crc32.v",
+        "adbg_tap_top.v",
+        "adbg_top.sv",
+        "adbg_axi_module.sv",
+        "adbg_lint_module.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "high",
+      "uncertainty": "Must determine if CRC32 is used for security or merely debug; still a potential leak."
+    },
+    {
+      "obligation_id": "OBL-004",
+      "reason": "Reset default of debug control/lock flops may leave debug interface enabled and accessible without explicit enablement, violating secure boot assumptions.",
+      "subject": "system reset",
+      "operation": "reset",
+      "object": "debug module configuration registers (lock, enable, access control bits)",
+      "expected_guard": "After reset, debug bus access is disabled (e.g., lock bit set, enable bit cleared) until a trusted software sequence enables it.",
+      "candidate_path": "Reset value of flops -> subsequent unconditional enable of bus access",
+      "state_conditions_to_check": [
+        "Reset values of lock bits",
+        "Enable bits for debug bus requests",
+        "Any post-reset activation sequences"
+      ],
+      "required_evidence_slots": [
+        "Flop reset connections (async/sync)",
+        "Default values in RTL or define files"
+      ],
+      "files_or_modules_to_inspect": [
+        "adbg_axi_module.sv",
+        "adbg_lint_module.sv",
+        "adbg_top.sv",
+        "adv_dbg_if.sv",
+        "pulp_soc.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to verify if debug is expected to be locked at reset."
+    },
+    {
+      "obligation_id": "OBL-005",
+      "reason": "OR1K debug module may bypass processor privilege checks when accessing internal CPU status registers, exposing sensitive execution state.",
+      "subject": "debug interface via OR1K module",
+      "operation": "read/write to processor status registers",
+      "object": "OR1K processor internal state (status register, control registers)",
+      "expected_guard": "Debug access to processor state is only allowed in debug mode and/or when debug authorization is asserted; not accessible in normal operation.",
+      "candidate_path": "adbg_or1k_module -> adbg_or1k_status_reg -> processor status bus",
+      "state_conditions_to_check": [
+        "Debug mode status of CPU",
+        "Module select/command decode",
+        "Authorization signal for OR1K debug"
+      ],
+      "required_evidence_slots": [
+        "adbg_or1k_status_reg access logic",
+        "Any privilege check before granting access"
+      ],
+      "files_or_modules_to_inspect": [
+        "adbg_or1k_module.sv",
+        "adbg_or1k_status_reg.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Assumes OR1K debug can change processor state; need to verify actual security impact."
+    },
+    {
+      "obligation_id": "OBL-006",
+      "reason": "TAP controller module_select signals must be gated with debug authorization; otherwise an external JTAG user can activate debug modules without authentication.",
+      "subject": "JTAG TAP controller (adbg_tap_top)",
+      "operation": "select debug module via IR/DR state",
+      "object": "debug module functions (AXI, LINT, OR1K)",
+      "expected_guard": "module_select outputs are only asserted when a corresponding debug authorization flag is set (e.g., from lock register or external auth controller).",
+      "candidate_path": "TAP FSM -> module_select generation -> adbg_axi_module / adbg_lint_module / adbg_or1k_module",
+      "state_conditions_to_check": [
+        "TAP state machine current state",
+        "module_select decode conditions",
+        "Authorization/enable signal for each module"
+      ],
+      "required_evidence_slots": [
+        "Logic generating module_select_i for debug modules",
+        "Auth signal presence in that logic"
+      ],
+      "files_or_modules_to_inspect": [
+        "adbg_tap_top.v",
+        "adbg_top.sv",
+        "adv_dbg_if.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "May use module_select directly; need to check if any gating exists."
+    },
+    {
+      "obligation_id": "OBL-007",
+      "reason": "Bus fabric may not enforce security attributes (e.g., AxPROT, secure bit) between debug-initiated transactions and protected regions, allowing debug masters to access secure memory.",
+      "subject": "debug bus master (AXI or LINT)",
+      "operation": "bus transactions",
+      "object": "secure memory regions (e.g., ROM, L2 memory, safe domain)",
+      "expected_guard": "Address decoder checks security attribute or a separate secure access control list to block debug master from secure regions, or debug master's AxPROT is forced to non-secure and rejected by slave.",
+      "candidate_path": "adbg_axi_biu -> AXI bus -> SoC address decoder -> secure memory controller",
+      "state_conditions_to_check": [
+        "AxPROT or equivalent security signal driven by debug module",
+        "Address decode rule for secure regions"
+      ],
+      "required_evidence_slots": [
+        "AXI transaction attribute signals (prot, etc.)",
+        "Address decode logic in pulp_soc/soc_domain"
+      ],
+      "files_or_modules_to_inspect": [
+        "pulp_soc.sv",
+        "soc_domain.sv",
+        "adbg_axi_biu.sv",
+        "safe_domain.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "low",
+      "uncertainty": "Might not be a requirement if debug is trusted; still worth checking."
+    },
+    {
+      "obligation_id": "OBL-008",
+      "reason": "Data buffers (bytefifo) used in debug BIU may retain data from previous transactions, leaking sensitive information to a subsequent debug session.",
+      "subject": "internal debug buffer (bytefifo)",
+      "operation": "read after write",
+      "object": "buffered data from previous debug transaction",
+      "expected_guard": "Buffer is cleared on reset, on debug session termination, or when lock/unlock events occur; no stale data accessible.",
+      "candidate_path": "bytefifo read port -> debug output (lint_rdata or similar)",
+      "state_conditions_to_check": [
+        "Buffer clear signal connected to reset or lock events",
+        "Read pointer after incomplete clear"
+      ],
+      "required_evidence_slots": [
+        "bytefifo clear logic",
+        "Connection of clear signal to debug control"
+      ],
+      "files_or_modules_to_inspect": [
+        "bytefifo.v",
+        "adbg_lint_biu.sv",
+        "adbg_axi_biu.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "low",
+      "uncertainty": "Accuracy depends on actual use of bytefifo in debug data path."
+    }
+  ]
+}

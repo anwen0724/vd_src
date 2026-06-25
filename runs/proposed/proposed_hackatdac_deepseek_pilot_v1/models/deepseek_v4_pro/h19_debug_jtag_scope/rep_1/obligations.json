@@ -1,0 +1,315 @@
+{
+  "scope_id": "csr_debug_peripherals",
+  "obligations": [
+    {
+      "obligation_id": "OBL-JTAG-AUTH-001",
+      "reason": "DMI interface from JTAG to debug module may lack authentication, allowing unauthorized access to debug features.",
+      "subject": "external JTAG controller (via tck, tms, td_i, etc.)",
+      "operation": "initiate DMI transactions (read/write debug registers, run abstract commands)",
+      "object": "Debug Module internal state (dm_csrs, dm_top)",
+      "expected_guard": "jtag_key comparison or debug authentication latch that gates dmi_req_valid",
+      "candidate_path": "JTAG pins -> dmi_jtag_tap -> dmi_jtag -> DMI request/response -> dm_csrs/dm_top",
+      "state_conditions_to_check": [
+        "testmode_i (debug modules)",
+        "jtag_key input value",
+        "dmactive state",
+        "dmi_reset / dmihardreset",
+        "any authentication flag"
+      ],
+      "required_evidence_slots": [
+        "presence of key comparison logic involving jtag_key",
+        "gating condition on dmi_req_valid_o",
+        "reset behavior of authentication state",
+        "absence of bypass paths when jtag_key is incorrect"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dm_csrs.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "low"
+    },
+    {
+      "obligation_id": "OBL-DBG-SBA-ROM2-001",
+      "reason": "Debug System Bus Access (SBA) can read/write memory regions like ROM2, potentially exposing boot keys or secure code.",
+      "subject": "debug module via system bus access (dm_sba instance)",
+      "operation": "read or write memory via SBA",
+      "object": "ROM2 module (rom2.sv) and its contents",
+      "expected_guard": "debug SBA authorization state, address range restrictions, or write protection",
+      "candidate_path": "dm_top -> i_dm_sba -> AXI master -> ariane_peripherals -> i_rom2",
+      "state_conditions_to_check": [
+        "dmactive_o (debug module active)",
+        "sbaddress value matching ROM2 base",
+        "sbreadondata / sbreadonaddr",
+        "rom2_we / we_i (write enable to ROM2)",
+        "rom2 internal write logic",
+        "any secure region exclusion for SBA"
+      ],
+      "required_evidence_slots": [
+        "ability to set sbaddress to ROM2 address range",
+        "we_i driven high in any scenario",
+        "data read back via sbdata",
+        "absence of address filter for debug SBA to ROM2"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_top.sv",
+        "tb/ariane_peripherals.sv",
+        "src/rom2/rom2.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "low"
+    },
+    {
+      "obligation_id": "OBL-DBG-CSR-ACCESS-001",
+      "reason": "Debug module may be able to read/write CPU CSRs, bypassing privilege-level protections.",
+      "subject": "debug module (via abstract commands or direct DMI operations)",
+      "operation": "read/write machine-mode or supervisor CSRs",
+      "object": "CSR registers in csr_regfile (e.g., mstatus, mepc, dcache_q, satp fields)",
+      "expected_guard": "debug mode with halted state and proper privilege level; CSR access should not be allowed from debug if security-enforced write protection exists",
+      "candidate_path": "DMI request -> dm_csrs -> hartsel, haltreq -> csr_regfile debug_req_i -> csr_we path",
+      "state_conditions_to_check": [
+        "debug_req_i asserted",
+        "debug_mode_q / debug_mode_o",
+        "halted state of target hart",
+        "privilege mode of hart when halted",
+        "csr_we gating during debug_mode"
+      ],
+      "required_evidence_slots": [
+        "demonstration of a CSR write succeeding via debug when it should be blocked (e.g., locked register or lower privilege)",
+        "absence of lock-bit check in debug path for protected CSRs",
+        "csr_wdata source from debug controlled data"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "medium"
+    },
+    {
+      "obligation_id": "OBL-LOCK-WRITE-PROTECTION-001",
+      "reason": "Some CSRs may have lock bits that, once set, should prevent further writes; check that lock bits cannot be bypassed by debug or test paths.",
+      "subject": "any write path (CPU CSR instruction, debug abstract command, test mode)",
+      "operation": "write to a locked CSR",
+      "object": "locked CSR register (e.g., pmpcfg, mcounteren, or custom lock-protected registers)",
+      "expected_guard": "a hardware lock bit that masks write enable regardless of accessor",
+      "candidate_path": "csr_we generation in csr_regfile; debug writable path via DMI; testmode override paths",
+      "state_conditions_to_check": [
+        "lock bit value",
+        "debug_mode_q",
+        "testmode_i",
+        "csr_we signal logic",
+        "possible bypass through dmi_req or SBA"
+      ],
+      "required_evidence_slots": [
+        "existence of a lock bit in the design",
+        "write pulse arriving at a locked register when debug is active",
+        "the lock bit not being checked in all CSR write paths"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "high"
+    },
+    {
+      "obligation_id": "OBL-RESET-DEBUG-STATE-001",
+      "reason": "Debug mode should be disabled after reset to prevent unauthorized immediate control; a reset leaving the debug module active would be a security weakness.",
+      "subject": "system reset (rst_ni)",
+      "operation": "reset assertion",
+      "object": "debug state signals: debug_mode_q, dmactive_o, debug_req_o",
+      "expected_guard": "reset values must set debug_mode_q=0, dmactive_o=0, debug_req_o=0",
+      "candidate_path": "rst_ni -> sequential elements in csr_regfile, dm_csrs, dm_top",
+      "state_conditions_to_check": [
+        "dmactive_o after reset deassertion",
+        "debug_mode_q after reset",
+        "ndmreset_o state",
+        "any sticky authentication bit reset value"
+      ],
+      "required_evidence_slots": [
+        "check reset assignment for dmactive, debug_mode, debug_req",
+        "verify no external agent can hold these signals active during reset",
+        "examine testmode or jtag influence on reset values"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "low"
+    },
+    {
+      "obligation_id": "OBL-TESTMODE-BYPASS-001",
+      "reason": "testmode_i may enable internal scan or override that bypasses security checks, granting unrestricted access to internal state.",
+      "subject": "test controller (external testmode pin)",
+      "operation": "assert testmode_i",
+      "object": "security-critical signals (dcache_en_o, debug_mode, lock bits, CSR write enables)",
+      "expected_guard": "testmode should be disabled in functional mode, or gated by a secure lifecycle state (e.g., fuse, authentication)",
+      "candidate_path": "testmode_i input port -> internal muxes, override logic in dm_csrs, dm_top, dmi_jtag, dmi_jtag_tap",
+      "state_conditions_to_check": [
+        "testmode_i high",
+        "lifecycle fuse / secure state",
+        "effect on dmactive, ndmreset, debug_req",
+        "effect on dmi_cdc or JTAG tap bypass",
+        "any direct register overwrite via test path"
+      ],
+      "required_evidence_slots": [
+        "demonstrate that testmode_i allows reading/writing a protected register without normal guards",
+        "absence of a hardware fuse/tie-off to disable testmode in production",
+        "impact on debug authentication or lock bits"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "medium"
+    },
+    {
+      "obligation_id": "OBL-DEBUG-HALT-ELEVATION-001",
+      "reason": "An unauthenticated halt request can force any hart into debug mode, bypassing normal privilege and enabling full system control.",
+      "subject": "external debugger via DMI",
+      "operation": "issue halt request (haltreq) to a hart",
+      "object": "hart (csr_regfile debug_req_i, halt_csr_o, debug_mode_o)",
+      "expected_guard": "authentication must be completed before haltreq can be asserted, or a secure lock must block halt requests for secure harts",
+      "candidate_path": "DMI -> dm_csrs haltreq_o -> dm_top debug_req_o -> csr_regfile debug_req_i",
+      "state_conditions_to_check": [
+        "dmactive state",
+        "any authentication flag (e.g., authenticated bit)",
+        "hartsel selection",
+        "secure/non-secure hart attribute",
+        "lock step that prevents halt before authentication"
+      ],
+      "required_evidence_slots": [
+        "verification that haltreq is generated without any prior key check",
+        "haltreq gated by any authentication signal",
+        "hart halt state before/after unauthenticated request"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "low"
+    },
+    {
+      "obligation_id": "OBL-ROM2-WRITE-PROTECTION-001",
+      "reason": "ROM2 is conceptually a read-only memory; if write enable can be asserted, attackers could modify critical data (e.g., a JTAG key or boot code).",
+      "subject": "any bus master (e.g., debug SBA, CPU)",
+      "operation": "write to ROM2 address space",
+      "object": "ROM2 memory array (rom2.sv internal storage)",
+      "expected_guard": "we_i must always be '0'; any write request must be ignored or impossible.",
+      "candidate_path": "rom2_req/rom2_we signals from ariane_peripherals, or debug SBA via AXI.",
+      "state_conditions_to_check": [
+        "we_i driven by any logic",
+        "rom2_we signal in ariane_peripherals",
+        "write pulse in simulation",
+        "any debug/test path that forces we_i high"
+      ],
+      "required_evidence_slots": [
+        "RTL evidence that we_i can take value '1'",
+        "source of write enable signal",
+        "consequence of a successful write (data corruption, key modification)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "low"
+    },
+    {
+      "obligation_id": "OBL-LOCKBIT-RESET-DEFAULT-001",
+      "reason": "If lock bits reset to an unlocked state, an attacker may modify protected resources before the lock is set. Check that any security lock defaults to a safe state.",
+      "subject": "system reset",
+      "operation": "reset",
+      "object": "any lock-bit register that protects a security-critical resource",
+      "expected_guard": "lock bits must reset to a locked state (secure default) or be set by early boot firmware before untrusted code executes.",
+      "candidate_path": "reset assignment of lock-bit registers in csr_regfile",
+      "state_conditions_to_check": [
+        "reset value of lock bits (e.g., lock for pmp, mcounteren, custom registers)",
+        "ability to change lock before secure boot completes",
+        "debug/test ability to clear lock after reset"
+      ],
+      "required_evidence_slots": [
+        "identify lock-bit registers in the design",
+        "check their reset values in RTL",
+        "verify that they cannot be cleared after being set (if sticky)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "high"
+    },
+    {
+      "obligation_id": "OBL-ADDRESS-MAP-DEBUG-VISIBILITY-001",
+      "reason": "Debug SBA may have unrestricted access to the full system address space, allowing reads from security-critical memories (e.g., bootrom).",
+      "subject": "debug module SBA (i_dm_sba)",
+      "operation": "read from a protected memory region (e.g., bootrom)",
+      "object": "bootrom instance i_bootrom and its contents",
+      "expected_guard": "debug SBA requests should be filtered by address range or require authentication before accessing secure partitions.",
+      "candidate_path": "dm_top -> i_dm_sba -> AXI bus -> ariane_testharness interconnects -> i_bootrom",
+      "state_conditions_to_check": [
+        "sbaddress within bootrom address range",
+        "sbreadonaddr / sbreadondata",
+        "any secure range check in dm_sba or interconnect",
+        "dmactive and authentication state",
+        "bootrom's internal read-only behavior"
+      ],
+      "required_evidence_slots": [
+        "ability to set sbaddress to bootrom base",
+        "successful data return on sbdata",
+        "absence of access control logic in the debug SBA path"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_top.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "medium"
+    }
+  ]
+}

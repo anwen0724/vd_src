@@ -1,0 +1,378 @@
+{
+  "scope_id": "ariane_openpiton_peripherals",
+  "obligations": [
+    {
+      "obligation_id": "OB-01",
+      "reason": "Debug transport (DTM) and JTAG may provide a side channel to bypass normal access controls on protected assets. The RTL contains DMI, debug slave interface (dm_slave_req/we/addr) and a hash-based unlock mechanism (jtag_hash, jtag_unlock). It is necessary to verify that no read/write to protected registers (e.g., lock control, crypto key storage, PMP config) is possible through the debug path without first satisfying the jtag_unlock condition or other authentication checks.",
+      "subject": "Debug interface (i_SimDTM, i_dmi_jtag, i_SimJTAG) / external debugger",
+      "operation": "Read/Write via debug slave (dm_slave) or DMI",
+      "object": "Protected registers and memory: reglk_ctrl, acc_ctrl, fuse values, PMP configuration, bootrom, crypto state, etc.",
+      "expected_guard": "Debug accesses to protected assets must be gated by jtag_unlock (authentication) or appropriate debug authorization state. Non-debug interfaces must not be reachable through debug path unless properly authorized.",
+      "candidate_path": "JTAG pins -> dmi_jtag -> dm_slave_req/dm_slave_we/dm_slave_addr -> register file access or external bus. Alternatively, debug_req_valid and DMI path could target protected assets.",
+      "state_conditions_to_check": [
+        "jtag_unlock state (0 or 1)",
+        "testmode_i active",
+        "debug_mode_i active",
+        "reset state of jtag_hash and jtag_unlock",
+        "Whether dm_slave_be/wdata can write to locked register address",
+        "Whether debug access can bypass reglk_ctrl or we_flag protections"
+      ],
+      "required_evidence_slots": [
+        "Destination address decode of dm_slave_addr for protected assets",
+        "Write enable gating logic for dm_slave_we/path",
+        "Connection between dm_slave and any lock/access-control signals (reglk_ctrl, acc_ctrl_c)",
+        "Presence of jtag_unlock in the guard expression for debug reads/writes",
+        "Test/debug mode overrides of normal lock logic"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "dmi_jtag module (may be in separate file)"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access vulnerability family",
+        "Lock/Sticky Bit/Write Protection bypass via debug paths",
+        "CSR/MMIO access control: requester, decode, write enable, protected register, expected guard"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm exact address map and register grouping; dm_slave interface may only target a limited debug region, but any overlap with security registers is a risk."
+    },
+    {
+      "obligation_id": "OB-02",
+      "reason": "The design includes a register lock control signal reglk_ctrl and per-peripheral write-enable flags we_flag_i. Lock bits are supposed to prevent further writes to protected registers. A common flaw is that the lock state can be bypassed by alternate write paths (e.g., debug, test mode, or a different bus master) or can be cleared after being set without requiring an explicit unlock sequence or reset condition.",
+      "subject": "Any bus master (CPU, debugger, test logic) or internal FSM",
+      "operation": "Write to any register protected by reglk_ctrl/we_flag",
+      "object": "Peripheral control registers (AES, SHA, HMAC, CLINT config, DMA config, etc.)",
+      "expected_guard": "When the associated lock bit (from reglk_ctrl) is set, no further write should be accepted from any source until the lock is cleared by a specific, secure mechanism.",
+      "candidate_path": "CPU MMIO writes via AXI slave interface -> register update; DMA configuration writes; debug writes via dm_slave; test mode override.",
+      "state_conditions_to_check": [
+        "reglk_ctrl bits after reset",
+        "Write-enable generation gated by reglk_ctrl",
+        "Any direct path that ignores reglk_ctrl (e.g., testmode_i bypass)",
+        "Lock clear condition: is it accessible to software after lock, or only through a hardware reset?",
+        "we_flag_i inputs: how they are generated externally, and if they can be spoofed or forced."
+      ],
+      "required_evidence_slots": [
+        "Extract logic for each register's write enable: must include reglk_ctrl bit and we_flag signal in the AND tree.",
+        "Check that dm_slave_we path does not bypass lock when writing to locked peripherals.",
+        "Examine lock reset value (should be locked/permissive as per security policy).",
+        "Look for any unlock command that could be issued by untrusted software."
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Lock/Sticky Bit/Write Protection family",
+        "CSR/MMIO access control with lock guard",
+        "Reset/Lifecycle state residue: lock reset default"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to see how reglk_ctrl is set/cleared; if it is itself a locked register, ensure the lock path does not lock itself out permanently."
+    },
+    {
+      "obligation_id": "OB-03",
+      "reason": "Boot ROM access is gated by rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0], indicating a privilege level check. If debug or other masters can assert rom_req_acct without going through this privilege check, or if the privilege level can be forged, boot ROM contents could be read by unauthorized requesters, potentially leaking sensitive boot code.",
+      "subject": "Any bus master (CPU, debug, DMA)",
+      "operation": "Read from boot ROM address space",
+      "object": "Boot ROM (i_bootrom_bm or i_bootrom_linux) data",
+      "expected_guard": "Only reads from requesters with appropriate privilege (e.g., M-mode) should be allowed; all other requests must be denied or result in zero data. The guard should not be bypassable by debug or test interfaces.",
+      "candidate_path": "rom_req_acct wire can be driven by different paths: debug master, DMA, or AXI-to-ROM bridge. Need to verify that rom_req_acct is only asserted when the requester is legitimate and that the priv_lvl_i reflects the true initiator's privilege.",
+      "state_conditions_to_check": [
+        "How rom_req_acct is generated; does debug master have a path to assert it?",
+        "priv_lvl_i source: is it always correct for the transaction, or can it be spoofed in debug mode?",
+        "The muxing of rom_rdata: is there a path that returns ROM data even when rom_req is low?",
+        "Testmode_i influence on bootrom access",
+        "Access during debug mode (debug_mode_i) – does privilege checking still hold?"
+      ],
+      "required_evidence_slots": [
+        "Source of rom_req_acct: trace all drivers.",
+        "The acc_ctrl_c generation and its relation to priv_lvl_i and any debug overrides.",
+        "Any structural path from debug slave to bootrom address that circumvents rom_req gate.",
+        "Reset value of acc_ctrl and rom access default."
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control: privilege check, address decode",
+        "Debug/Test Access bypassing privilege mediation",
+        "Fabric/Address Map vulnerability: unauthorized access to memory region"
+      ],
+      "priority": "medium",
+      "uncertainty": "rom_req_acct might be driven solely by the CPU's load path; need to verify that debug master cannot trigger it. Also, DMA may have access control elsewhere."
+    },
+    {
+      "obligation_id": "OB-04",
+      "reason": "The DMA engine has its own PMP check (signals pmp_allow_reg, pmp_check_ctr_en, pmp_addr_reg). A vulnerability could exist if the DMA can execute a transfer to/from a protected memory region without a valid PMP allow, or if the PMP check can be bypassed by toggling control registers during an active transfer. Additionally, DMA configuration registers must be protected by lock (reglk_ctrl) to prevent an attacker from reprogramming addresses to bypass protections.",
+      "subject": "DMA engine (dma module) or any entity capable of programming DMA registers",
+      "operation": "DMA memory transfer (read/write) using dma_ctrl_en and valid_o",
+      "object": "System memory or peripheral address space",
+      "expected_guard": "Every DMA memory access must be gated by a positive pmp_allow check (pmp_allow_reg set) and the associated PMP region must match the actual transfer access type (read/write) and privilege. DMA registers should be write-protected when the DMA is locked (core_lock_reg).",
+      "candidate_path": "CPU programs DMA registers -> dma_wrapper AXI slave -> dma configuration -> dma_fsm asserts valid_o -> memory access. Possibly debug/test bypass to DMA registers.",
+      "state_conditions_to_check": [
+        "pmp_check_ctr_en: is it forced to 1 during transfers? Can it be cleared mid-transfer?",
+        "pmp_allow_reg generation: does it correctly reflect PMP entry evaluation?",
+        "Race condition: can dma_ctrl_en be set while PMP check is incomplete?",
+        "Resetting core_lock_reg: can an attacker clear the lock and reprogram?",
+        "Access to DMA registers via debug path while lock is set.",
+        "DMA transfers in test mode (testmode_i) might bypass PMP."
+      ],
+      "required_evidence_slots": [
+        "Logic of pmp_allow_reg: which PMP entries are consulted, access type matching.",
+        "Write protection of DMA registers: core_lock_reg -> we_flag or similar.",
+        "Integration of dma_wrapper's reglk_ctrl_i and we_flag to block unpermitted writes.",
+        "Timing diagram showing pmp_check_ctr_en deassertion during transfer."
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/dma/dma.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/pmp/pmp.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP vulnerability family",
+        "Lock/Sticky Bit protection for DMA config",
+        "Race between configuration update and active transfer"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to examine exact PMP integration and whether DMA has separate PMP entries or shares CPU PMP. Also, is pmp_allow_reg a sampled signal or combinatorial?"
+    },
+    {
+      "obligation_id": "OB-05",
+      "reason": "The JTAG system includes a 256-bit hash (jtag_hash) and an unlock signal (jtag_unlock). Secret or cryptographic values (fuse_req, fuse_addr, fuse_rdata) may be exposed if the unlock mechanism leaks the hash or if fuse data is accessible without proper authorization. Similarly, the hash itself could be read out through a scan chain or debug path, compromising the authentication token.",
+      "subject": "JTAG/debug circuitry, any internal scanner",
+      "operation": "Read of jtag_hash, fuse_data, or anyother internal state considered secret",
+      "object": "jtag_hash register, fuse memory interface, any output pin driven by secret state",
+      "expected_guard": "jtag_hash must never be readable from outside the core (no scan-out). Fuse reads should only be possible from privileged software and not via debug or test modes. Outputs (td_o) must not output these values.",
+      "candidate_path": "Debug slave read of fuse address space; DMI read of jtag_hash; scan chain shifting out jtag_hash; td_o driving internal signals.",
+      "state_conditions_to_check": [
+        "fuse_req/fuse_addr/fuse_rdata access control: which masters can trigger fuse_req?",
+        "jtag_hash read path: is there any address mapped to it or a register file that includes it?",
+        "td_o and tdo_oe_o logic: ensure they do not reflect internal secret state even in test mode.",
+        "jtag_unlock generation: ensure it does not reveal bits of the hash (e.g., side-channel)."
+      ],
+      "required_evidence_slots": [
+        "Tracing fuse_req driver: only core or also debug?",
+        "Any DMI command that returns the hash directly or via status.",
+        "Check that td_o is tied to 0 except in certain modes, and that those modes are safe.",
+        "Reset of jtag_hash: is it cleared? If power-on value is known, might be weak."
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "any dmi_jtag implementation (likely external module)"
+      ],
+      "knowledge_used": [
+        "Crypto/Secret State Exposure family",
+        "Debug/JTAG access to security-sensitive registers"
+      ],
+      "priority": "high",
+      "uncertainty": "The jtag_hash is a 256-bit signal, but it may be compared to a known hash; if the comparison is done outside the chip, the hash might be readable. Need more design detail."
+    },
+    {
+      "obligation_id": "OB-06",
+      "reason": "The testmode_i input is a dedicated pin that, when asserted, may change the behavior of the chip (e.g., shift into manufacturing test mode). Such test modes often bypass normal functional security checks, allowing access to internal registers or memories. It is essential to verify that testmode_i does not disable access controls (reglk, acc_ctrl, PMP, debug auth) and does not expose secret state.",
+      "subject": "External test pin (testmode_i) / internal test controller",
+      "operation": "Any memory or register access while testmode_i is high",
+      "object": "All protected assets (registers, memories, secret keys)",
+      "expected_guard": "When testmode_i is asserted, the device should either be in a secure disabled state (e.g., all debug/auth enforced) or test mode should be locked out once security-sensitive fuses/keys are programmed. At minimum, testmode must not bypass access control.",
+      "candidate_path": "testmode_i enters module and may gate write enables, reset sequences, or expose scan chains.",
+      "state_conditions_to_check": [
+        "Where is testmode_i used? Does it override reglk_ctrl or we_flag?",
+        "Does testmode enable reading of internal buses or registers through debug/jtag?",
+        "Is testmode gated by a security fuse (e.g., only available before part is provisioned)?",
+        "Effect on PMP: does testmode disable PMP checks?"
+      ],
+      "required_evidence_slots": [
+        "Search for 'testmode_i' in riscv_peripherals.sv and submodules.",
+        "Look for any assignment that uses testmode_i to bypass security logic.",
+        "Check that JTAG scan chains are not expanded under testmode to include secret registers."
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "all submodules"
+      ],
+      "knowledge_used": [
+        "Debug/Test Access bypass",
+        "Lifecycle state / test mode vulnerability"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer does not show how testmode_i is used internally; likely it is connected to some test wrapper."
+    },
+    {
+      "obligation_id": "OB-07",
+      "reason": "Multiple reset signals (rst_1 ... rst_11, rst_13) indicate that different security domains may be reset independently. If a lock register or security configuration resets to an unlocked/permissive state by default, an attacker could trigger a partial reset (e.g., via software reset or debug) to clear security locks without clearing the asset they protect, leading to unauthorized access.",
+      "subject": "Reset controller or any source that can assert these resets individually",
+      "operation": "Assertion of a reset affecting lock/access control registers while leaving protected assets intact",
+      "object": "reglk_ctrl registers, acc_ctrl registers, PMP configuration registers, jtag_unlock state",
+      "expected_guard": "All security-critical registers must reset to a locked/secure default (e.g., all reglk bits set, acc_ctrl set to lowest privilege). Partial resets must not leave the system in an inconsistent state where protections are cleared but the asset remains accessible.",
+      "candidate_path": "Any reset input (external or software-generated) toggling rst_x for a peripheral domain while the rest of the chip continues operating.",
+      "state_conditions_to_check": [
+        "Reset values of reglk_ctrl bits per domain.",
+        "Reset values of acc_ctrl bits.",
+        "Whether a debug reset request (ndmreset_o) can cause selective reset of security registers.",
+        "Whether DMI/jtag can assert resets.",
+        "Power-up sequence ensuring security registers are not in undetermined state."
+      ],
+      "required_evidence_slots": [
+        "Find assignment of reset defaults for reglk_ctrl and acc_ctrl registers.",
+        "Map each rst_x to the registers it resets; verify no lock register is reset without also resetting the corresponding protected asset.",
+        "Check that ndmreset_o does not selectively clear lock bits."
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Reset/Lifecycle/State Residue family",
+        "Lock/Sticky Bit reset default"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need to see how many reset domains exist and the reset value assignments, which are not all in the fact layer."
+    },
+    {
+      "obligation_id": "OB-08",
+      "reason": "The CLINT (Core Local Interruptor) is accessed via an AXI-to-register interface (axi_lite_interface). CLINT contains timer registers that can trigger machine-level interrupts. If a lower privilege level can write to machine timer compare registers, it could influence or preempt M-mode execution, leading to privilege escalation. The interface must enforce that only M-mode accesses are allowed unless the design intentionally permits S-mode timer access.",
+      "subject": "AXI master accessing CLINT (CPU or debug)",
+      "operation": "Write to machine timer compare register (mtimecmp) or read/write to mtime",
+      "object": "CLINT registers (timer compare, mtime)",
+      "expected_guard": "Writes to M-mode timer compare must be restricted to M-mode accesses. Reads may be allowed but must be evaluated. The AXI interface should carry a privilege signal or memory attribute to enforce this; if not, it must be implemented inside clint module.",
+      "candidate_path": "CPU load/store -> AXI bus -> axi_lite_interface -> address decode -> clint register write. Debug master could also initiate AXI transaction.",
+      "state_conditions_to_check": [
+        "Does axi_lite_interface receive any privilege/mode signal? (ariane_axi struct may include such)",
+        "How is we_o generated: does it incorporate privilege check?",
+        "Can debug master access CLINT address space? (dm_master is tied to zero, but dm_slave might offer a path)",
+        "Address mapping: CLINT base address and upper bits."
+      ],
+      "required_evidence_slots": [
+        "Inspect axi_lite_interface.sv for we_o logic and any input from ariane_axi that indicates privilege.",
+        "Check clint RTL if available; if not, assume privilege check must occur in interface.",
+        "Examine any debug path to CLINT."
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/clint/axi_lite_interface.sv",
+        "clint module (if visible)",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv (debug path)"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control: privilege level guard",
+        "Debug/Test Access bypass"
+      ],
+      "priority": "medium",
+      "uncertainty": "ARI-related CLINT may not be fully detailed; need to examine AXI signals for AxPROT or equivalent privilege indication."
+    },
+    {
+      "obligation_id": "OB-09",
+      "reason": "PMP configuration registers are CSRs that define memory access permissions. If a bug allows low-privilege code to modify PMP entries (e.g., due to missing CSR privilege check or debug bypass), then an attacker could grant itself access to protected regions. Moreover, PMP entry logic (conf_addr_n, base, mask) might have corner cases in NAPOT/TOR mode that result in unintended matches (e.g., a zero-sized region allowing full access).",
+      "subject": "CPU instruction writing to PMP CSR, or debug DMI",
+      "operation": "Write to PMP configuration registers (PMPCFG, PMPADDR)",
+      "object": "PMP entries and their effect on memory access checks",
+      "expected_guard": "PMP writes must be restricted to M-mode (or optionally S-mode with proper locking) and must not be alterable via debug unless the debugger is authenticated. The PMP entry logic must correctly handle all configuration modes and provide strict matching.",
+      "candidate_path": "CSR write -> pmp_entry capture -> match logic. Debug path may write directly to pmp_addr_reg in dma (separate PMP for DMA).",
+      "state_conditions_to_check": [
+        "Privilege level gating on PMP CSR writes (not in provided RTL, but assumed in core).",
+        "Debug access to PMP registers: is there a DMI command that writes to PMP CSRs?",
+        "PMP entry configuration: check NAPOT and TOR logic for off-by-one errors, wrap-around, or zero-size regions that might open access.",
+        "Locking of PMP entries (msel, lock bit) – is lock hardware-enforced?"
+      ],
+      "required_evidence_slots": [
+        "Examine pmp_entry.sv for match logic: ensure it correctly handles base, mask, and comparison.",
+        "Check if pmp_addr_reg (in dma) is separate and can be written independent of CPU PMP CSRs.",
+        "Verify that dm_slave cannot target PMP addresses (likely in memory-mapped CSRs)."
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/pmp/pmp.sv",
+        "piton/design/chip/tile/ariane/src/pmp/pmp_entry.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP vulnerability: incorrect range check, configuration bypass",
+        "CSR/MMIO Access Control: privilege level guard for PMP config"
+      ],
+      "priority": "high",
+      "uncertainty": "The exact privilege enforcement for CSR writes is likely in the CPU core, not in the pmp module itself. We must check integration."
+    },
+    {
+      "obligation_id": "OB-10",
+      "reason": "The acc_ctrl (access control) signal is a 4-bit per peripheral field used, for example, to gate boot ROM access. It is likely a software-programmable register mapping that determines which privilege levels can access each peripheral. If this register itself is not properly protected (e.g., writable by low privilege or through debug), an attacker could reassign access rights and gain access to restricted peripherals (crypto, keys, etc.).",
+      "subject": "Any bus master capable of writing to acc_ctrl registers",
+      "operation": "Write to acc_ctrl configuration",
+      "object": "acc_ctrl register and the resulting access control matrix",
+      "expected_guard": "acc_ctrl must be locked or writable only from a highly privileged level (M-mode) and must be protected by reglk_ctrl or a similar lock to prevent runtime modification. Debug/Test must not be able to change it.",
+      "candidate_path": "Software writes to a specific memory-mapped register -> acc_ctrl. Debug path via dm_slave -> same register.",
+      "state_conditions_to_check": [
+        "How acc_ctrl is implemented (register array).",
+        "Write enable for acc_ctrl: must include privilege and lock checks.",
+        "Reset default: should be restrictive.",
+        "Any bypass through testmode_i."
+      ],
+      "required_evidence_slots": [
+        "Locate the acc_ctrl register and its write logic in riscv_peripherals.sv.",
+        "Verify that we_flag or reglk_ctrl is part of write condition.",
+        "Check debug access path to that register."
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control: protection of access-control policy itself",
+        "Lock/Sticky Bit to protect security configuration"
+      ],
+      "priority": "high",
+      "uncertainty": "acc_ctrl might be part of a larger control register file; need to confirm address and write protection."
+    },
+    {
+      "obligation_id": "OB-11",
+      "reason": "The register lock block (reglk) in the design provides per-peripheral lock bits, and the dma_wrapper module includes a core_lock_reg. A race condition may exist if a write to a register is in flight while the lock is being set, or if the lock signal is not sampled synchronously before the write takes effect. Additionally, if the we_flag input is generated externally with insufficient timing, a glitch could allow a write after the lock is asserted.",
+      "subject": "Any initiator performing a write to a locked register",
+      "operation": "Write to a register after lock is asserted or during lock transition",
+      "object": "Locked peripheral registers",
+      "expected_guard": "Once the lock signal (reglk_ctrl bit) is set, all writes to the protected register must be blocked on the same cycle, without any glitch or timing window.",
+      "candidate_path": "Asynchronous or synchronous path where we_flag arrives late or lock clears early. E.g., dma_wrapper's core_lock_reg gates the AXI write enable.",
+      "state_conditions_to_check": [
+        "Sampling of reglk_ctrl relative to we_flag and write strobe.",
+        "Comb path from lock to write enable: any glitch sensitivity.",
+        "In dma_wrapper: assignment of 'en' and 'we' from arian_axi; how core_lock_reg and reglk_ctrl_i affect them.",
+        "Whether lock can be cleared by a specific write sequence that race with a concurrent write."
+      ],
+      "required_evidence_slots": [
+        "Examine dma_wrapper.sv for write enable generation: check that core_lock_reg and reglk_ctrl_i participate in we/en logic.",
+        "Ensure that lock registers themselves are not writable once locked (no self-unlock).",
+        "Check timing constraints or clock enable synchronizers."
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv (we_flag usage)"
+      ],
+      "knowledge_used": [
+        "Lock/Sticky Bit vulnerability: race condition during lock set/clear"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need to see actual RTL code for we_flag generation and lock integration in dma_wrapper."
+    },
+    {
+      "obligation_id": "OB-12",
+      "reason": "The design contains a debug reset request (ndmreset_o) and debug active signal (dmactive_o). If debug can reset the CPU or peripherals independently, it could disrupt security state (e.g., clear pending locks, reset privilege levels) and then gain control. Check that ndmreset does not clear critical security registers (like reglk_ctrl, jtag_unlock) or, if it does, that it also resets the protected assets to prevent data leakage.",
+      "subject": "Debug module (DTM) via ndmreset_o",
+      "operation": "Assertion of ndmreset_o while system may be partially operating",
+      "object": "System reset affecting security registers but not necessarily the whole SoC",
+      "expected_guard": "ndmreset_o should either reset the entire SoC into a secure state (clearing all secrets) or must be prevented from clearing security-lock registers while secrets remain in memory/flip-flops.",
+      "candidate_path": "DMI command -> ndmreset_o assertion -> reset domain tree.",
+      "state_conditions_to_check": [
+        "Which registers/resets are connected to ndmreset_o?",
+        "Does ndmreset clear reglk_ctrl, acc_ctrl, jtag_unlock?",
+        "Does it also clear sensitive data in crypto modules, keys, etc.?",
+        "After ndmreset, is debug still authenticated (jtag_unlock)?"
+      ],
+      "required_evidence_slots": [
+        "Trace ndmreset_o in riscv_peripherals.sv and submodules.",
+        "Identify reset distribution logic.",
+        "Check if jtag_unlock is reset by ndmreset_o; if so, authentication would be lost, which might be acceptable; but if reglk_ctrl is cleared while keys remain, that's a vulnerability."
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Reset/Lifecycle/State Residue: debug reset affecting security state"
+      ],
+      "priority": "medium",
+      "uncertainty": "The effect of ndmreset depends on integration; not all reset connections are visible in the fact layer."
+    }
+  ]
+}

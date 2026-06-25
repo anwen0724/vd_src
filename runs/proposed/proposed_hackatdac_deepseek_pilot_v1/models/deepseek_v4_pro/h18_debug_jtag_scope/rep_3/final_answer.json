@@ -1,0 +1,252 @@
+{
+  "analysis_summary": "The proposed method produced 5 finding(s) from 8 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "Debug bus master path (AXI/LINT) lacks any per-module authorization gating; bus access can be initiated without additional lock/auth check after debug module activation.",
+      "vulnerability_category": "read/write to bus / protected SoC memory/peripherals (APB peripherals, TCDM, ROM) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "module_id_reg sets module_selects directly based on shifted command; no auth gating.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "module_select_i input directly enables module without additional checks.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "BIU's strobe_i starts transaction unconditionally.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG/debug interface (adbg_axi_module, adbg_lint_module) Operation: read/write to bus Object: protected SoC memory/peripherals (APB peripherals, TCDM, ROM) Expected guard: Debug authorization signal (dbg_auth, lock bit) or lifecycle state preventing debug transactions until explicitly enabled Observed behavior: Module select from top level adbg_top directly enables the AXI/LINT module without any authorization gating; the BIU strobe initiates bus transactions with no lock or auth check. Path: adbg_top -> module_select_i -> adbg_axi_module/adbg_lint_module -> adbg_axi_biu/adbg_lint_biu -> AXI/LINT bus Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "External JTAG user can access arbitrary memory/peripheral regions without authorization, once debug instruction is loaded and password is passed (but password is separate, this obligation concerns internal gating). The lack of per-path gating means even after password authentication, no further checks prevent access to protected regions.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Not directly observed: SoC-level address decoder (pulp_soc.sv, soc_domain.sv) but debug module itself lacks authorization gating.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "No sticky lock bit exists to gate writes to debug configuration registers after a debug session is established; configuration remains mutable.",
+      "vulnerability_category": "write to lock bit configuration register / debug module configuration registers (control registers, access enables) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Internal registers and control signals; no lock flop.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Similarly, no lock register.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Passchk mechanism for password, but no lock bit for configuration registers.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software/debug command Operation: write to lock bit configuration register Object: debug module configuration registers (control registers, access enables) Expected guard: Once lock bit is set, it must gate all write enables to protected registers and cannot be cleared without a reset or higher authority. Observed behavior: No lock bit flop or sticky bit exists in the AXI or LINT modules; internal registers (address_counter, operation, word_count, etc.) are updated via update_dr_i based on module_select_i and command decode without any lock gating. The TAP password check (passchk) gates entry to DR scan, but does not provide a lock bit that prevents further configuration changes after being set. Path: JTAG TAP (IR + password) -> DR shift -> update_dr_i -> register write logic in adbg_axi_module/adbg_lint_module Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Once debug access is authenticated via password, all debug module configuration registers can be freely modified; there is no mechanism to lock the debug interface to prevent further reconfiguration, which could allow an attacker to alter access settings or escalate privileges after initial access.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No evidence of lock bit elsewhere.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "OR1K debug module likely lacks necessary privilege checks when accessing CPU status registers.",
+      "vulnerability_category": "read/write to processor status registers / OR1K processor internal state (status register, control registers) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Registers and control signals; no debug mode gating observed.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Conditional logic not clearly showing debug mode dependence.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: debug interface via OR1K module Operation: read/write to processor status registers Object: OR1K processor internal state (status register, control registers) Expected guard: Debug access to processor state is only allowed in debug mode and/or when debug authorization is asserted; not accessible in normal operation. Observed behavior: The partial OR1K module code shows no evidence of a privilege check or debug mode requirement before accessing status registers. The BIU and module appear to allow CPU status reads/writes based solely on JTAG commands, without checking the CPU's debug mode signal. The TAP password protects against completely unauthorized access, but once authenticated, an attacker could read/write CPU state even if the processor is in normal operation, potentially bypassing software-enforced isolation. Path: adbg_or1k_module -> adbg_or1k_status_reg -> CPU status bus Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Potential exposure of internal CPU state or manipulation of control registers while CPU is running, leading to privilege escalation or information leakage.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Full content of adbg_or1k_module.sv and adbg_or1k_status_reg.sv not provided; could contain hidden checks.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "potential_warning",
+      "summary": "Unable to determine if debug bus transactions are properly restricted from secure memory regions.",
+      "vulnerability_category": "bus transactions / secure memory regions (ROM, L2 memory, safe domain) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "AXI master outputs including aw_prot, but driving logic not observed; default likely 0.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: debug bus master (AXI or LINT) Operation: bus transactions Object: secure memory regions (ROM, L2 memory, safe domain) Expected guard: Address decoder checks security attribute or separate secure access control; debug master's AxPROT forced to non-secure and rejected by slave. Observed behavior: The AXI BIU and LINT BIU do not show any explicit AxPROT driving logic or security attribute forcing in the examined code. The provided tool observations lack the SoC-level address decoder files (pulp_soc.sv, soc_domain.sv, safe_domain.sv) needed to determine if secure regions are gated against debug master accesses. Path: adbg_axi_biu -> AXI bus -> SoC address decoder -> memory controller Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Could allow debug master to access secure memory regions if address decode does not enforce security.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "SoC-level address decoder and secure domain files not inspected; security attribute (e.g., AxPROT) enforcement unknown.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "Bytefifo lacks session-termination clear logic, possibly leaking stale data between debug sessions.",
+      "vulnerability_category": "read after write / buffered data from previous debug transaction / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/bytefifo.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/bytefifo.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "FIFO implementation with RST but no session-clear signal; counters and data registers reset only on RST.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: internal debug buffer (bytefifo) Operation: read after write Object: buffered data from previous debug transaction Expected guard: Buffer is cleared on reset, on debug session termination, or when lock/unlock events occur; no stale data accessible. Observed behavior: The bytefifo module only clears its contents on a global reset (RST). There is no dedicated clear input or logic to flush the FIFO upon debug session termination (e.g., when password lock is re-engaged or debug module is deselected). If a new debug session begins without a system reset, stale data from previous transactions could be read through the FIFO output. Path: bytefifo -> data_o port -> debug output (lint_rdata or similar) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Potential leakage of sensitive data across debug sessions if the chip is not reset between sessions.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No evidence of any clear mechanism triggered by lock events or session end.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

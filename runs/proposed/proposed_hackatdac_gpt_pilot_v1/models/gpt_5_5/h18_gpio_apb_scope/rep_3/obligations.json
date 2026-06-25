@@ -1,0 +1,365 @@
+{
+  "scope_id": "pulp_soc_apb_interconnect_permission_scope",
+  "obligations": [
+    {
+      "obligation_id": "PERM-APB-SOCCTRL-001",
+      "reason": "apb_soc_ctrl exposes security-sensitive SoC execution and cluster-control outputs through an APB register interface; visible facts show no requester privilege metadata on the APB ports, so the RTL must be checked for any internal or upstream guard before allowing writes.",
+      "subject": "APB requester reaching soc_peripherals/s_soc_ctrl_bus",
+      "operation": "write/configure/trigger",
+      "object": "fc_bootaddr_o, fc_fetchen_o, cluster_boot_addr_o, cluster_fetch_enable_o, cluster_rstn_o, cluster_pow_o, cluster_byp_o, sel_hyper_axi_o, cluster_irq_o",
+      "expected_guard": "Writes to SoC control registers that change boot address, fetch enable, cluster reset/power/bypass, IRQ, and AXI route selection should be mediated by a privilege/lifecycle/debug-authorization or equivalent access-control condition beyond raw APB decode.",
+      "candidate_path": "pulp_soc APB/peripheral interconnect -> soc_peripherals -> apb_soc_ctrl APB registers -> boot/fetch/power/reset outputs",
+      "state_conditions_to_check": [
+        "reset defaults for boot/fetch/reset/power controls",
+        "whether controls can be changed after boot/fetch enable is asserted",
+        "whether any lock/sticky bit exists and protects all write paths"
+      ],
+      "required_evidence_slots": [
+        "subject/requester APB master or bus path",
+        "write enable and address decode",
+        "protected register/output assignment",
+        "expected guard signal or absence at write site",
+        "upstream decode/reachability from periph bus",
+        "impact on boot/fetch/reset/power/route"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv",
+        "ips/apb/apb_node/apb_node.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Reset / Lifecycle / State Residue",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer is truncated and does not include full internal register decode; obligation is to inspect visible RTL."
+    },
+    {
+      "obligation_id": "PERM-DEBUG-JTAG-002",
+      "reason": "The top-level facts expose s_lint_debug_bus, s_lint_jtag_bus, s_apb_debug_bus, and an i_lint_jtag instance; debug paths are common bypass candidates but require RTL evidence of reachability and missing authorization.",
+      "subject": "JTAG/debug requester",
+      "operation": "read/write/access/route",
+      "object": "L2/SCM/ROM memory buses and APB peripheral register space reachable from debug/JTAG paths",
+      "expected_guard": "Debug/JTAG-originated memory or peripheral accesses should be authorized by debug authentication/lifecycle enable and should preserve address-range and access-policy checks for protected memories/peripherals.",
+      "candidate_path": "JTAG/debug bus/interface -> pulp_soc lint_jtag_wrap or s_lint_jtag_bus/s_lint_debug_bus -> SoC interconnect/L2/ROM/peripheral paths",
+      "state_conditions_to_check": [
+        "debug disabled/unauthenticated state",
+        "reset/lifecycle default of debug enable",
+        "whether debug can access while CPU/peripheral locks are set"
+      ],
+      "required_evidence_slots": [
+        "debug/JTAG subject signal and instance connection",
+        "target memory/peripheral object",
+        "address decode/routing path",
+        "authorization/lifecycle/debug-enable guard at entry or use site",
+        "read/write control propagation",
+        "observed behavior for unauthorized state"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/pulp_soc/rtl/components/pulp_interfaces.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Fabric / Address Map / DMA / PMP",
+        "Common False-positive Risks"
+      ],
+      "priority": "high",
+      "uncertainty": "Do not assume vulnerability from debug signal presence; prove reachable protected object and guard behavior."
+    },
+    {
+      "obligation_id": "PERM-FLL-LOCK-003",
+      "reason": "apb_fll_if has explicit fll1_lock/fll2_lock/fll3_lock inputs and APB-controlled FLL request/write outputs; inspect whether lock state actually gates all write/configuration paths and cannot be bypassed by address cases or pending transactions.",
+      "subject": "APB requester reaching FLL interface",
+      "operation": "write/configure/read",
+      "object": "fll1_req/fll1_wrn/fll1_add/fll1_data, fll2_*, fll3_* frequency/clock configuration interface",
+      "expected_guard": "Writes/configuration updates to FLL control/status registers should be blocked or constrained when corresponding fll*_lock indicates locked state, and readback of lock/status should not create an unsafe control bypass.",
+      "candidate_path": "APB bus -> apb_fll_if -> fll1/fll2/fll3 request/write/read ports and lock inputs",
+      "state_conditions_to_check": [
+        "lock asserted during APB write",
+        "lock changes while request pending",
+        "reset defaults for request/write state",
+        "multi-FLL address selection consistency"
+      ],
+      "required_evidence_slots": [
+        "APB subject and address decode",
+        "per-FLL write enable/request generation",
+        "use site of fll*_lock",
+        "behavior when lock asserted",
+        "read path PRDATA for FLL registers",
+        "ack/pending transaction handling"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/apb/apb_fll_if/apb_fll_if.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "The lock semantics must be inferred from RTL use, not from port names alone."
+    },
+    {
+      "obligation_id": "PERM-APB-DECODE-004",
+      "reason": "The design uses APB node/wrapper address routing to multiple security-relevant peripherals; permission failures can arise from aliasing or default routing that exposes protected registers to unintended address regions.",
+      "subject": "Any APB master on peripheral bus",
+      "operation": "route/read/write",
+      "object": "APB slave select signals for soc_ctrl, FLL, GPIO, uDMA, timers, stdout, event generator and protected configuration registers",
+      "expected_guard": "Peripheral address decoding should enforce non-overlapping ranges, generate PSEL only for intended slaves, and return errors/no access for unmapped or out-of-range addresses without aliasing protected registers.",
+      "candidate_path": "APB bus -> apb_node/apb_node_wrap/periph_bus_wrap/soc_peripherals -> individual APB slaves",
+      "state_conditions_to_check": [
+        "overlapping range definitions",
+        "partial address decode/truncation",
+        "default slave selection",
+        "read vs write decode consistency"
+      ],
+      "required_evidence_slots": [
+        "base/mask/range constants",
+        "PADDR decode equations",
+        "PSEL/PENABLE/PWRITE propagation",
+        "PRDATA/PREADY/PSLVERR mux behavior",
+        "unmapped address behavior",
+        "target protected register/object"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/apb/apb_node/apb_node.sv",
+        "ips/apb/apb_node/apb_node_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "rtl/includes/periph_bus_defines.sv",
+        "rtl/includes/soc_bus_defines.sv",
+        "rtl/includes/pulp_soc_defines.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Need exact constants and decode code from includes/RTL."
+    },
+    {
+      "obligation_id": "PERM-UDMA-RANGE-005",
+      "reason": "Top-level facts show uDMA APB configuration bus and lint uDMA TX/RX buses; DMA engines can act as independent bus masters and require range/permission mediation distinct from CPU access.",
+      "subject": "uDMA TX/RX engine",
+      "operation": "DMA read/write/configure",
+      "object": "L2/SCM/ROM or peripheral address spaces reachable by uDMA TX/RX bus paths",
+      "expected_guard": "uDMA-generated read/write transfers should be constrained by address range checks or configuration permissions, and configuration updates should not alter active transfer addresses/lengths to bypass intended bounds.",
+      "candidate_path": "uDMA subsystem master ports -> SoC interconnect/L2/peripheral/memory regions",
+      "state_conditions_to_check": [
+        "configuration write during active transfer",
+        "crossing memory region boundary",
+        "reset/default enable of channels",
+        "read/write direction-specific checks"
+      ],
+      "required_evidence_slots": [
+        "uDMA requester/master bus signals",
+        "APB configuration registers for address/length/control",
+        "address/range check logic",
+        "interconnect target decode",
+        "active transfer state machine behavior",
+        "error/deny response handling"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/pulp_soc/rtl/components/pulp_interfaces.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Internal uDMA channel details not visible in facts; inspect module body and connections."
+    },
+    {
+      "obligation_id": "PERM-GPIO-PINPOL-006",
+      "reason": "GPIO registers are externally observable/controlling; if any GPIO pins are security-sensitive in this SoC scope, APB writes/reads require appropriate mediation. Obligation focuses on checking visible RTL paths and pin use, not assuming all GPIOs are protected.",
+      "subject": "APB requester reaching GPIO",
+      "operation": "read/write/configure/expose",
+      "object": "gpio_out, gpio_dir, gpio_in/gpio_in_sync, interrupt configuration registers",
+      "expected_guard": "GPIO direction/output/interrupt control that can affect board-level security signals should be protected by pin policy, lock, or privilege guard where pins are designated sensitive; reads of gpio_in should not expose protected strap/debug/lifecycle pins without mediation.",
+      "candidate_path": "APB bus -> apb_gpio -> gpio_dir/gpio_out/interrupt configuration and external pins",
+      "state_conditions_to_check": [
+        "reset defaults for gpio_dir/gpio_out",
+        "ability to change direction after boot/lifecycle",
+        "interrupt trigger configuration on sensitive pins"
+      ],
+      "required_evidence_slots": [
+        "GPIO APB address decode and register writes",
+        "pin mapping to SoC top-level or sensitive functions",
+        "any lock/privilege guard",
+        "read mux exposing gpio_in",
+        "interrupt configuration effects",
+        "external observability/control impact"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/apb/apb_gpio/apb_gpio.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure",
+        "Common False-positive Risks"
+      ],
+      "priority": "medium",
+      "uncertainty": "Sensitivity depends on top-level pin mapping; verify before escalating."
+    },
+    {
+      "obligation_id": "PERM-TIMER-EVENT-007",
+      "reason": "Timer peripherals can generate SoC events/IRQs and external channel outputs from APB-programmed state; inspect whether any protected interrupt/event routing requires guards beyond raw APB access.",
+      "subject": "APB requester and external timer event inputs",
+      "operation": "write/configure/trigger",
+      "object": "events_o, ch_0_o..ch_3_o, irq_lo_o, irq_hi_o, timer compare/count/config registers",
+      "expected_guard": "Timer/event generator configuration capable of triggering interrupts, events, or output waveforms should be restricted if used for privileged control, and event inputs should not allow untrusted external events to override protected timer state without enable/policy checks.",
+      "candidate_path": "APB bus -> apb_adv_timer/apb_timer_unit -> event/IRQ/PWM/channel outputs",
+      "state_conditions_to_check": [
+        "pending event/IRQ after reset or disable",
+        "external event input while timer disabled",
+        "reconfiguration while timer running"
+      ],
+      "required_evidence_slots": [
+        "APB write decode for timer control",
+        "event/IRQ/output generation path",
+        "enable/mask/lock/policy guards",
+        "connection to SoC interrupt/event fabric",
+        "reset/clear behavior",
+        "external input event influence"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/apb/apb_adv_timer/apb_adv_timer.sv",
+        "ips/pulp_soc/rtl/components/apb_timer_unit.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Only security-relevant if connected to privileged event/interrupt effects; check SoC connections."
+    },
+    {
+      "obligation_id": "PERM-CLKRST-008",
+      "reason": "Clock/reset controls can disable or perturb protected domains; visible APB clock divider and SoC control modules should be checked for permission gating and safe transition conditions.",
+      "subject": "APB requester reaching clock/reset control registers",
+      "operation": "write/configure/reset",
+      "object": "clk_div0/1/2, clk_div*_valid, sel_fll_clk_i related controls, reset/clock-domain control outputs",
+      "expected_guard": "Clock divider, clock selection, and reset-generation control registers should require privilege/lifecycle guard or safe-state checks before changing clock/reset behavior for protected domains.",
+      "candidate_path": "APB bus -> apb_clkdiv and clock/reset generator controls -> clock dividers/valids and reset/clock selection outputs",
+      "state_conditions_to_check": [
+        "divider update while valid/running",
+        "reset assertion/deassertion sequence",
+        "unsafe reset default enabling access",
+        "debug/test clock override interaction"
+      ],
+      "required_evidence_slots": [
+        "APB register write sites for dividers/control",
+        "clock/reset output use sites",
+        "guard or lock condition",
+        "reset defaults",
+        "transition logic/glitch-safe handshake",
+        "affected protected domain"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/components/apb_clkdiv.sv",
+        "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need module internals and clock/reset generator connections to decide security impact."
+    },
+    {
+      "obligation_id": "PERM-TEST-MUX-009",
+      "reason": "The interface definitions include test/BIST and routing/control signals that can affect memory/core behavior; inspect whether any normal-mode APB/debug path can manipulate them without test/lifecycle authorization.",
+      "subject": "APB/debug/test requester or configuration driver",
+      "operation": "configure/override/route/expose",
+      "object": "bist_en/bist_pattern/result, bbmux_* selects, clkgate_* selects, mmu_sram_seqsec_size, mmu_scm_seqsec_size",
+      "expected_guard": "Test/BIST, mux, clock-gate, and MMU size/control signals should be driven only by authorized configuration or lifecycle/test mode and should not be writable or controllable by untrusted APB/debug paths in normal operation.",
+      "candidate_path": "pulp_interfaces test/BIST/MMU/clock-gate/bbmux interfaces -> SoC memory/core routing controls",
+      "state_conditions_to_check": [
+        "normal operation with test mode disabled",
+        "after reset defaults",
+        "mode transitions into/out of test",
+        "sticky lock or one-way lifecycle behavior"
+      ],
+      "required_evidence_slots": [
+        "driver of each test/mux/MMU/clkgate signal",
+        "normal vs test mode condition",
+        "APB/debug reachability to driver",
+        "protected memory/core effect",
+        "readback/exposure path for BIST results",
+        "reset defaults"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Fabric / Address Map / DMA / PMP",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "pulp_interfaces is mostly interface definitions; need connected drivers/use sites."
+    },
+    {
+      "obligation_id": "PERM-INTERCONNECT-ATTR-010",
+      "reason": "Multiple masters are visible (FC data/instr, debug, JTAG, uDMA) and multiple protected regions exist; check for inconsistent decode, missing requester-based restrictions, and read/write/fetch policy differences.",
+      "subject": "FC data/instruction, debug/JTAG, uDMA masters",
+      "operation": "read/write/fetch/route",
+      "object": "s_mem_rom_bus, s_scm_l2_data_bus, s_scm_l2_instr_bus, peripheral bus, L2/SCM/ROM target regions",
+      "expected_guard": "Interconnect should preserve requester identity/security attributes or otherwise enforce address-range policy consistently for instruction/data/debug/DMA/JTAG masters accessing protected memory and peripheral regions.",
+      "candidate_path": "SoC interconnect and wrappers -> ROM/L2/SCM memory buses and peripheral bus bridges",
+      "state_conditions_to_check": [
+        "simultaneous master arbitration",
+        "address boundary crossing",
+        "read-only ROM write attempt",
+        "debug/JTAG/DMA access to instruction/data regions"
+      ],
+      "required_evidence_slots": [
+        "list of masters and target ports",
+        "address decode/range equations",
+        "read vs write/fetch controls",
+        "requester-specific gating or lack thereof",
+        "error/default response behavior",
+        "path from unauthorized requester to protected target"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv",
+        "rtl/includes/soc_bus_defines.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "The visible facts do not show a privilege signal; determine whether policy is intended in RTL or external system."
+    }
+  ]
+}

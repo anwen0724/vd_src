@@ -1,0 +1,346 @@
+{
+  "scope_id": "h19_aes_rom2_security_scope",
+  "obligations": [
+    {
+      "obligation_id": "bootrom_write_protection",
+      "reason": "The bootrom module has a write enable input (we_i) and a data input (wdata_i). If writes are allowed by any bus master, an attacker could modify boot code or sensitive constants stored in ROM, undermining secure boot.",
+      "subject": "Any bus master on the system interconnect (CPU, DMA, debug module) that can generate a write transaction targeting the bootrom address range",
+      "operation": "write",
+      "object": "bootrom memory array (mem[])",
+      "expected_guard": "we_i must be permanently tied to 0 or the bootrom must ignore writes; alternatively, write access must be restricted by a privilege mode or locked by a sticky bit",
+      "candidate_path": "From the system bus (AXI) through ariane_testharness module to the i_bootrom instance; we_i is driven by the bus interface logic inside ariane_testharness (rom_we signal)",
+      "state_conditions_to_check": [
+        "we_i = 1 while req_i is active",
+        "raddr_q captures write address if write is accepted",
+        "mem[] is updated with wdata_i on a write cycle"
+      ],
+      "required_evidence_slots": [
+        "subject (who can assert the write)",
+        "operation (write to bootrom)",
+        "object (bootrom memory)",
+        "expected guard (write disable or privilege check)",
+        "observed behavior (whether we_i is driven high and mem[] is written)",
+        "path (from AXI master to i_bootrom.we_i)",
+        "state conditions (reset default, any lock bit)",
+        "impact (boot code corruption)"
+      ],
+      "files_or_modules_to_inspect": [
+        "bootrom/bootrom.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to verify whether we_i can be asserted by a bus master other than the processor and if any lock or privilege mechanism exists."
+    },
+    {
+      "obligation_id": "aes_key_read_exposure",
+      "reason": "The aes_wrapper exposes read access to the cryptographic key (key_big), intermediate state (inter_state), ciphertext (ct), and plaintext/state (p_c, state) through the external_bus_io.rdata bus. If any untrusted master can read these registers, secret key material or internal cryptographic state could be leaked.",
+      "subject": "Any bus master (CPU in user mode, debug master, DMA) that can perform a read transaction targeting the AES wrapper address range",
+      "operation": "read",
+      "object": "AES key_big, inter_state, ct, p_c, state registers",
+      "expected_guard": "Read addresses that return key_big or inter_state must be restricted to machine-mode privilege (or fully disabled); the read multiplexer condition should enforce access control before providing data.",
+      "candidate_path": "APB bus from i_apb_to_reg_aes in ariane_peripherals drives external_bus_io.req, addr, etc.; the aes_wrapper returns rdata based on addr decoding (lines 109-149).",
+      "state_conditions_to_check": [
+        "read address selects a key/intermediate state slice",
+        "no privilege check on the read request (i_apb_to_reg_aes does not filter based on priv_lvl)",
+        "key_big is connected directly to the output mux without a secure read fence"
+      ],
+      "required_evidence_slots": [
+        "subject (read initiator privilege level)",
+        "operation (read from key/state address)",
+        "object (key_big, inter_state)",
+        "expected guard (privilege-based read restrict)",
+        "observed behavior (rdata returns key slice)",
+        "path (from APB to aes_wrapper read mux)",
+        "state conditions (no lock/secure guard active)",
+        "impact (key exposure)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/aes/aes_wrapper.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Depends on whether i_apb_to_reg_aes or the APB bridge enforces privilege on the AES address range."
+    },
+    {
+      "obligation_id": "aes_write_control_without_privilege",
+      "reason": "The aes_wrapper allows writing to the start bit and the plaintext/state registers (p_c, state) via external_bus_io.wdata. If any bus master can write these registers without privilege control, it could trigger AES operation or inject chosen plaintext, affecting cryptographic confidentiality/integrity.",
+      "subject": "Any bus master that can issue a write to the AES wrapper APB address range",
+      "operation": "write",
+      "object": "AES start, p_c[0..3], state[0..3] registers",
+      "expected_guard": "Writes to these registers must be restricted to machine-mode or a trusted security domain; at minimum, the start register should require a lock release or privilege check.",
+      "candidate_path": "APB write from ariane_peripherals i_apb_to_reg_aes -> external_bus_io.wdata drives p_c and state assignment (lines 78-96).",
+      "state_conditions_to_check": [
+        "no privilege gating on write enable signals",
+        "start bit can be set by any write to address 0x00",
+        "p_c and state can be overwritten while AES is idle or running"
+      ],
+      "required_evidence_slots": [
+        "subject (unprivileged master)",
+        "operation (write to AES control/state)",
+        "object (start, p_c, state registers)",
+        "expected guard (privilege restriction)",
+        "observed behavior (register update on write)",
+        "path (APB write to aes_wrapper)",
+        "state conditions (no lock, no privilege decode)",
+        "impact (bypass of AES security)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/aes/aes_wrapper.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Same as above; check whether APB bridge or i_apb_to_reg_aes implements privilege filtering."
+    },
+    {
+      "obligation_id": "debug_master_access_to_protected_peripherals",
+      "reason": "The testharness includes a debug module (i_SimDTM, i_dmi_jtag, i_axi_master_dm) that connects a debug master to the system AXI bus. If this debug master can access sensitive peripherals (AES, bootrom, rom2) without authentication or lock, it could bypass all software-enforced protections.",
+      "subject": "Debug master (i_axi_master_dm) acting as an AXI initiator",
+      "operation": "read, write",
+      "object": "All address-mapped resources accessible from the AXI node, specifically AES registers, bootrom, rom2",
+      "expected_guard": "The debug master should be disabled or require successful JTAG authentication (e.g., via jtag_key) before granting bus access, or the bus fabric should enforce permission checks that include a 'debug' source identification and deny access to protected regions.",
+      "candidate_path": "i_axi_master_dm -> i_axi_slave_dm -> AXI node (connectivity_mapping) -> slave ports (AES, bootrom, rom2, etc.)",
+      "state_conditions_to_check": [
+        "jtag_key match logic not present or not enforced before bus access",
+        "debug_req_valid/debug_resp_ready signals not gated by authentication",
+        "AXI node does not differentiate debug master from CPU master for access control"
+      ],
+      "required_evidence_slots": [
+        "subject (debug master)",
+        "operation (read/write via debug)",
+        "object (bootrom, rom2, AES registers)",
+        "expected guard (authentication or disable)",
+        "observed behavior (debug read/write succeeds)",
+        "path (from JTAG/DMI to AXI bus)",
+        "state conditions (no auth lock)",
+        "impact (complete bypass of security)"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "src/axi_node/src/axi_node_intf_wrap.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm whether the debug module requires authentication (jtag_key) before the DMI/AXI bridge enables transactions."
+    },
+    {
+      "obligation_id": "rom2_write_allowed",
+      "reason": "The rom2 module has write inputs (we_i, wdata_i) and an output pkey_loc_o that might indicate stored key material. If rom2 is writable in normal operation, an attacker could alter key storage or configuration data.",
+      "subject": "Any bus master that can assert a write to the rom2 address range via the APB bus (i_rom2 in ariane_peripherals)",
+      "operation": "write",
+      "object": "rom2 internal memory array (mem[])",
+      "expected_guard": "rom2 should be read-only after initial provisioning; we_i must be tied to 0 or write access disabled by a lock bit or by the interconnect.",
+      "candidate_path": "rom2_req, rom2_we, rom2_wdata driven by ariane_peripherals to i_rom2 instance; inside rom2, raddr_q and mem[] may be updated if we_i is honored.",
+      "state_conditions_to_check": [
+        "rom2 we_i signal not tied to 0",
+        "mem[] is writable when we_i = 1",
+        "no lock bit prevents writes after provisioning",
+        "pkey_loc_o exposes remaining key location"
+      ],
+      "required_evidence_slots": [
+        "subject (write initiator)",
+        "operation (write to rom2)",
+        "object (rom2 memory)",
+        "expected guard (write protect)",
+        "observed behavior (mem[] update)",
+        "path (APB to rom2 we_i)",
+        "state conditions (reset, lock bit)",
+        "impact (key corruption)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to see the actual logic inside rom2 to determine if we_i causes a write; the name 'rom2' suggests read-only but the writability is in question."
+    },
+    {
+      "obligation_id": "priv_lvl_propagation_and_enforcement",
+      "reason": "The system defines a privilege level signal (priv_lvl_i) that passes through the connectivity_mapping to the bus node. If this signal is not used by the bus fabric or peripherals to gate access to protected regions, software running at lower privilege (user mode) could access machine-mode peripherals.",
+      "subject": "Any bus master with a privilege level attribute (CPU priv_lvl) that accesses address-mapped resources",
+      "operation": "read, write",
+      "object": "Peripheral register spaces (PLIC, AES, packet, uart, etc.) that are expected to be machine-mode only",
+      "expected_guard": "The bus node or APB bridge must decode the priv_lvl signal and block transactions from user mode to sensitive address ranges.",
+      "candidate_path": "ariane_testharness drives priv_lvl from CPU to axi_node_intf_wrap; axi_node_intf_wrap distributes to connectivity_mapping, which should enforce per-slave privilege checks.",
+      "state_conditions_to_check": [
+        "priv_lvl_i is not used in connectivity_mapping or in any slave address decode",
+        "APB bridges do not check priv_lvl",
+        "all slave peripherals accept transactions regardless of priv_lvl"
+      ],
+      "required_evidence_slots": [
+        "subject (user-mode initiator)",
+        "operation (read/write to protected slave)",
+        "object (protected registers)",
+        "expected guard (priv_lvl check)",
+        "observed behavior (transaction succeeds)",
+        "path (priv_lvl from CPU to slave)",
+        "state conditions (no check)",
+        "impact (privilege escalation)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv",
+        "tb/ariane_testharness.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "The connectivity_mapping module includes priv_lvl_i; need to see how it uses it (or if it ignores it)."
+    },
+    {
+      "obligation_id": "test_en_bypass",
+      "reason": "The axi_node_intf_wrap has a test_en_i input. Test enable signals are often used to bypass security checks during manufacturing. If this signal is not securely deasserted in mission mode, an attacker could enable test mode and gain unrestricted access to all peripherals.",
+      "subject": "Any entity that can set test_en_i = 1 (e.g., a hardware pin, debug logic, or software-accessible register if connected)",
+      "operation": "bypass access controls",
+      "object": "All address-mapped resources that rely on axi_node_intf_wrap for protection (privilege checks, lock signals)",
+      "expected_guard": "test_en_i must be tied to 0 in mission mode and only controllable via a hardware fuse or secure boot mechanism that cannot be altered at runtime.",
+      "candidate_path": "test_en_i input of axi_node_intf_wrap; used inside the module to potentially disable protection logic.",
+      "state_conditions_to_check": [
+        "test_en_i is connected to a GPIO or software-writable register",
+        "test_en_i disables privilege or lock checks inside axi_node_intf_wrap",
+        "reset default of test_en_i is 1 or unknown"
+      ],
+      "required_evidence_slots": [
+        "subject (attacker-controlled signal)",
+        "operation (bypass)",
+        "object (security guards)",
+        "expected guard (test_en_i=0)",
+        "observed behavior (test mode enables unrestricted access)",
+        "path (test_en_i to internal logic)",
+        "state conditions (reset, controllability)",
+        "impact (total security bypass)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to see internal usage of test_en_i; it might only affect test logic but could inadvertently defeat protection."
+    },
+    {
+      "obligation_id": "dma_engine_memory_protection_bypass",
+      "reason": "The system includes DMA-capable peripherals (xlnx_axi_ethernetlite, xlnx_axi_quad_spi) with AXI master interfaces. If these DMA engines are not subject to PMP or address-range checks, they could be programmed to read/write sensitive memory regions (AES key buffers, bootrom, rom2) by software lacking such permission.",
+      "subject": "DMA masters (Ethernet, SPI) initiated by software configuration",
+      "operation": "read, write via DMA",
+      "object": "Protected memory/peripherals (bootrom, rom2, AES data registers)",
+      "expected_guard": "DMA transactions must be checked by an IOMMU or a per-source address filter that restricts the master to allowed regions.",
+      "candidate_path": "From the peripheral (master) through connectivity_mapping to slave ports; there is no visible PMP or address filter in the fact layer.",
+      "state_conditions_to_check": [
+        "DMA master AR/AW addresses are not checked against any protection unit",
+        "connectivity_mapping routes DMA requests to bootrom/rom2/AES slaves without filtering",
+        "software can write arbitrary addresses into DMA descriptors"
+      ],
+      "required_evidence_slots": [
+        "subject (DMA engine)",
+        "operation (read/write to protected slave)",
+        "object (protected memory)",
+        "expected guard (address range check)",
+        "observed behavior (transaction succeeds)",
+        "path (DMA master to slave)",
+        "state conditions (no filtering)",
+        "impact (data leakage/tampering)"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_peripherals.sv",
+        "src/axi_node/src/axi_node_intf_wrap.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Not sure if the DMA engines are used in a way that allows arbitrary address programming, but it's a standard concern."
+    },
+    {
+      "obligation_id": "aes_state_residue_on_reset",
+      "reason": "Security-critical state in aes_wrapper (p_c, state, inter_state, ct) must be cleared on reset to prevent residual secret data from being observed after a reset by a subsequent untrusted operation.",
+      "subject": "Any observer that can read AES registers after a system reset",
+      "operation": "read after reset",
+      "object": "AES internal state registers (p_c, state, inter_state, ct) after a reset",
+      "expected_guard": "Reset logic must clear all state registers to zero or a known-safe value before the AES wrapper can be accessed by any bus master.",
+      "candidate_path": "The reset assignments in aes_wrapper (lines 65-73) clear p_c and state to 0; need to verify inter_state and ct are also cleared (they may have separate reset).",
+      "state_conditions_to_check": [
+        "inter_state and ct not cleared by rst_ni",
+        "ct_valid not cleared on reset",
+        "after reset, reading address for ct or inter_state returns non-zero previous data"
+      ],
+      "required_evidence_slots": [
+        "subject (post-reset reader)",
+        "operation (read after reset)",
+        "object (internal state registers)",
+        "expected guard (complete reset clear)",
+        "observed behavior (non-zero read)",
+        "path (rst_ni to all registers)",
+        "state conditions (missing reset for some registers)",
+        "impact (information leakage)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/aes/aes_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Only visible is that p_c and state are cleared; the ct and inter_state are not shown in reset assignments; need to check if they have their own reset or if they retain data."
+    },
+    {
+      "obligation_id": "jtag_key_protection_and_usage",
+      "reason": "A 32-bit jtag_key signal is output from ariane_peripherals and appears as an input in ariane_testharness, likely for debug unlock. If the key is stored in an unsecured location (like rom2 or accessible register) or can be read back, the debug authorization could be circumvented.",
+      "subject": "Any attacker who can read jtag_key or the source register that drives it (e.g., rom2 output pkey_loc_o)",
+      "operation": "read",
+      "object": "jtag_key value (or the source register that holds the key)",
+      "expected_guard": "The key must not be readable by software, and the debug unlock mechanism should not allow the key to be extracted via timing or brute-force attacks.",
+      "candidate_path": "rom2 pkey_loc_o -> ariane_peripherals jtag_key output -> ariane_testharness jtag_key input; possibly used by debug module logic.",
+      "state_conditions_to_check": [
+        "jtag_key path is observable by software (e.g., mapped as a read-only register)",
+        "no read protection on the key source (rom2)",
+        "debug module allows unlimited authentication attempts"
+      ],
+      "required_evidence_slots": [
+        "subject (software attacker)",
+        "operation (read key or brute-force)",
+        "object (jtag_key)",
+        "expected guard (key secrecy, anti-hammering)",
+        "observed behavior (key readable or many attempts allowed)",
+        "path (rom2 to jtag_key output)",
+        "state conditions (no lockout)",
+        "impact (debug unlock bypass)"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_peripherals.sv",
+        "tb/ariane_testharness.sv",
+        "src/rom2/rom2.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "The exact usage of jtag_key in the debug module is unknown; need to see if it's matched against an expected value and if anti-hammering exists."
+    }
+  ]
+}

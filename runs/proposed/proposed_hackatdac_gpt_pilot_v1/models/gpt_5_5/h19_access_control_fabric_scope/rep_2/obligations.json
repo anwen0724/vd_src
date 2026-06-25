@@ -1,0 +1,373 @@
+{
+  "scope_id": "current_scope_axi_rom2_ariane_harness",
+  "obligations": [
+    {
+      "obligation_id": "PERM-DBG-001",
+      "reason": "The fact layer shows SimJTAG, dmi_jtag, SimDTM, jtag_req/dmi_req/debug_req signals, jtag_key, and muxing by jtag_enable. Need to verify whether the visible RTL mediates external debug access before it can affect protected state or core control.",
+      "subject": "JTAG/DMI debug requester",
+      "operation": "read/write/control via debug request/response path",
+      "object": "debug capability and any protected registers/memory reachable through debug_req/debug_resp",
+      "expected_guard": "debug/JTAG/DMI requests that can access protected SoC state or control core reset/halt must be covered by an explicit debug authorization/authentication or enable policy, not only by a mux selecting JTAG vs DMI",
+      "candidate_path": "ariane_testharness debug selection: SimJTAG/dmi_jtag/SimDTM -> debug_req/debug_resp -> downstream debug module/bus effects",
+      "state_conditions_to_check": [
+        "jtag_enable state",
+        "reset/init_done state",
+        "debug_req_valid/debug_resp_valid handshakes",
+        "whether dmi_req_valid is tied off for non-JTAG path"
+      ],
+      "required_evidence_slots": [
+        "subject signal/source (JTAG or DMI)",
+        "operation encoding and valid/ready handshake",
+        "target object or downstream effect",
+        "authorization/authentication guard",
+        "mux/select conditions such as jtag_enable",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "evidence closure: subject, operation, object, expected guard, observed path"
+      ],
+      "priority": "high",
+      "uncertainty": "The visible scope may only be a test harness; downstream debug module details may be outside scope."
+    },
+    {
+      "obligation_id": "PERM-DBG-002",
+      "reason": "Signals ndmreset, ndmreset_n, debug_req_core, and debug request muxing are present; check whether debug control operations are mediated before affecting reset/debug state.",
+      "subject": "external debug/JTAG/DMI interface",
+      "operation": "trigger reset or debug entry",
+      "object": "core reset/debug control state (ndmreset, debug_req_core)",
+      "expected_guard": "debug-originated reset, halt, or core debug request should require debug authorization and should not be triggerable solely from unauthenticated JTAG/DMI traffic",
+      "candidate_path": "ariane_testharness: ndmreset/debug_req_core/debug request signals into SoC/core reset and debug control",
+      "state_conditions_to_check": [
+        "rst_ni/init_done",
+        "ndmreset assertion and deassertion",
+        "jtag_enable selection",
+        "debug_req_valid/ready"
+      ],
+      "required_evidence_slots": [
+        "debug subject source",
+        "control signal assignment/connection",
+        "guard condition",
+        "reachable state after reset/init",
+        "affected core/SoC instance connection",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need downstream instance connections to determine whether these signals reach protected core control."
+    },
+    {
+      "obligation_id": "PERM-FAB-001",
+      "reason": "The wrapper has priv_lvl_i, access_ctrl_i, start/end address inputs, s_valid_rule='1, and connectivity_map_o computed from access_ctrl_i. Need to verify routing cannot bypass privilege/connectivity policy.",
+      "subject": "AXI bus manager/requester",
+      "operation": "route AXI read/write transactions",
+      "object": "SoC address-map subordinates including AES, ROM2, ROM, Debug, CLINT/PLIC, DRAM",
+      "expected_guard": "AXI manager-to-subordinate connectivity must be gated by the correct access_ctrl entry indexed by current privilege level for every protected subordinate, with no unintended aliases or unconditional valid rules bypassing the map",
+      "candidate_path": "axi_node_intf_wrap/connectivity_mapping: access_ctrl_i + priv_lvl_i -> connectivity_map_o -> AXI routing rules",
+      "state_conditions_to_check": [
+        "priv_lvl_i value per request",
+        "access_ctrl_i contents",
+        "start_addr_i/end_addr_i ranges",
+        "s_valid_rule behavior",
+        "read vs write channel consistency"
+      ],
+      "required_evidence_slots": [
+        "requesting manager/slave port",
+        "target subordinate index/address range",
+        "privilege level source",
+        "access_ctrl bit used",
+        "route/connectivity decision",
+        "valid rule/address decode behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv",
+        "tb/ariane_testharness.sv",
+        "tb/ariane_soc_pkg.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "The actual axi_node instance and policy update mechanism may be partially outside the provided facts."
+    },
+    {
+      "obligation_id": "PERM-FAB-002",
+      "reason": "The explicit expression grants j==6 connectivity if access_ctrl_i[i][7][priv_lvl_i] is set. Since package enumerates PLIC=6 and CLINT=7, verify this alias does not unintentionally expand permissions.",
+      "subject": "AXI requester indexed by i",
+      "operation": "grant AXI read/write connectivity",
+      "object": "PLIC subordinate index 6 and CLINT subordinate index 7 connectivity policy",
+      "expected_guard": "special-case permission aliasing between subordinate 7 (CLINT) and subordinate 6 (PLIC) must be intentional and must not grant access to PLIC when only CLINT is authorized, unless both objects share the same policy",
+      "candidate_path": "connectivity_mapping special case: connectivity_map_o[i][j] includes ((j==6) && access_ctrl_i[i][7][priv_lvl_i])",
+      "state_conditions_to_check": [
+        "priv_lvl_i index",
+        "access_ctrl_i[i][6] vs access_ctrl_i[i][7] values",
+        "transactions targeting PLIC/CLINT ranges"
+      ],
+      "required_evidence_slots": [
+        "subordinate index mapping",
+        "connectivity expression",
+        "access_ctrl policy entries for indices 6 and 7",
+        "privilege level condition",
+        "downstream target address ranges",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv",
+        "tb/ariane_soc_pkg.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Common false-positive risks: explain expected guard"
+      ],
+      "priority": "high",
+      "uncertainty": "Need confirm that package indices are the same indices consumed by connectivity_mapping in this instantiation."
+    },
+    {
+      "obligation_id": "PERM-FAB-003",
+      "reason": "The wrapper passes start/end address arrays and sets s_valid_rule to all ones. Check whether all visible address ranges are valid, non-overlapping, and privilege/connectivity is applied after decode.",
+      "subject": "AXI manager/requester",
+      "operation": "decode and route AXI AW/AR transactions",
+      "object": "address-decoded protected regions (DebugBase, ROMBase, ROM2Base, AESBase, CLINTBase, PLICBase, DRAMBase)",
+      "expected_guard": "address range checks should reject out-of-range or overlapping protected targets and should apply consistently to both read and write address channels",
+      "candidate_path": "axi_node_intf_wrap: start_addr_i/end_addr_i -> s_start_addr/s_end_addr; s_valid_rule='1; AXI AW/AR address routing",
+      "state_conditions_to_check": [
+        "boundary addresses",
+        "overlapping base ranges from package",
+        "burst length crossing ranges",
+        "read and write route behavior"
+      ],
+      "required_evidence_slots": [
+        "AW/AR address source",
+        "start/end range configuration",
+        "valid rule value",
+        "decode target",
+        "connectivity/privilege gate",
+        "read/write channel comparison",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv",
+        "tb/ariane_soc_pkg.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "End addresses and axi_node internals may not be fully visible in the fact layer."
+    },
+    {
+      "obligation_id": "PERM-ROM2-001",
+      "reason": "The rom2 always block writes secure_reg indexed by addr_i when req_i and we_i are true, and facts show ROM2 address-map entry. Check whether any wrapper or bus guard prevents unauthorized writes to this protected ROM/secure storage.",
+      "subject": "bus requester driving rom2 req_i/we_i",
+      "operation": "write secure_reg",
+      "object": "rom2 secure_reg memory contents",
+      "expected_guard": "ROM2/secure_reg writes should be blocked or require an explicit privileged/authorized write guard; a ROM-like protected memory should not be writable merely when req_i && we_i",
+      "candidate_path": "rom2: req_i/we_i/addr_i/wdata_i -> secure_reg array update; rdata_o readback",
+      "state_conditions_to_check": [
+        "req_i && we_i",
+        "addr_i within RomSize",
+        "priv_lvl/access_ctrl for ROM2",
+        "reset state loads mem into secure_reg"
+      ],
+      "required_evidence_slots": [
+        "requester and bus path to rom2",
+        "write enable source",
+        "address range decode",
+        "expected privilege/lock guard",
+        "secure_reg update behavior",
+        "write response behavior if any",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_testharness.sv",
+        "tb/ariane_soc_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "high",
+      "uncertainty": "Whether ROM2 is intended immutable/protected must be inferred from module name and secure_reg; confirm with surrounding decode and policy."
+    },
+    {
+      "obligation_id": "PERM-ROM2-002",
+      "reason": "rdata_o continuously reflects secure_reg[raddr_q] for the last captured read address, independent of req_i in the assignment. Check whether external bus response valid/authorization prevents stale or unauthorized observation.",
+      "subject": "bus requester observing rom2 rdata_o",
+      "operation": "read/expose secure_reg contents",
+      "object": "secure_reg read data on rdata_o",
+      "expected_guard": "reads of secure_reg/ROM2 should be gated by request validity and access authorization, and stale raddr_q data should not remain externally observable after unauthorized or idle cycles",
+      "candidate_path": "rom2: raddr_q update only on req_i && !we_i; rdata_o = secure_reg[raddr_q]",
+      "state_conditions_to_check": [
+        "idle cycles after a valid read",
+        "unauthorized requests blocked upstream but rdata_o still toggles",
+        "reset initializes secure_reg and raddr_q state",
+        "out-of-range address behavior"
+      ],
+      "required_evidence_slots": [
+        "read requester path",
+        "raddr_q update condition",
+        "rdata_o external connection",
+        "response valid/ready or req gating",
+        "authorization/privilege guard",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "Reset / Lifecycle / State Residue",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need visible bus wrapper behavior to know whether rdata_o is sampled only under an authorized response."
+    },
+    {
+      "obligation_id": "PERM-ROM2-003",
+      "reason": "The read data path checks raddr_q < RomSize, but the write path assigns secure_reg[addr_i[...]] <= wdata_i without an obvious local bounds check. Verify decode/range guards prevent out-of-range writes or undefined effects.",
+      "subject": "bus requester writing ROM2",
+      "operation": "write by address index",
+      "object": "secure_reg array and adjacent/undefined memory behavior",
+      "expected_guard": "writes should either be range-checked against RomSize or the upstream address decoder must guarantee addr_i indexes are within secure_reg bounds",
+      "candidate_path": "rom2: addr_i index into secure_reg write path without visible bounds check",
+      "state_conditions_to_check": [
+        "addr_i producing index >= RomSize",
+        "req_i && we_i",
+        "bus range decode for ROM2 window",
+        "reset/reload behavior"
+      ],
+      "required_evidence_slots": [
+        "write address source",
+        "index calculation",
+        "local or upstream bounds check",
+        "RomSize/address range relation",
+        "write enable condition",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "SystemVerilog array out-of-range semantics and synthesis behavior may depend on implementation; upstream decode may be sufficient."
+    },
+    {
+      "obligation_id": "PERM-POL-001",
+      "reason": "Facts show access_ctrl derived from access_ctrl_reg and used by connectivity mapping. The policy state is security-sensitive; verify where it is written/reset and whether updates are privileged and lock-protected.",
+      "subject": "software/bus/debug requester configuring access_ctrl_reg",
+      "operation": "configure/change access policy",
+      "object": "access_ctrl_reg/access_ctrl matrix controlling bus permissions",
+      "expected_guard": "software-visible or externally driven access_ctrl_reg updates must themselves be privileged/locked and must not allow unprivileged code to change the access policy that protects subordinates",
+      "candidate_path": "ariane_testharness: access_ctrl_reg -> access_ctrl[i][j] -> axi_node connectivity policy",
+      "state_conditions_to_check": [
+        "reset/default contents",
+        "write/update cycles",
+        "priv_lvl at update time",
+        "lock bit or lifecycle state if present",
+        "race with active AXI transactions"
+      ],
+      "required_evidence_slots": [
+        "access_ctrl_reg declaration and write sites",
+        "requester able to write policy",
+        "privilege/lock/update guard",
+        "reset/default policy",
+        "use site in connectivity_mapping",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "src/axi_node/src/axi_node_intf_wrap.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer excerpt shows use but not all write sites; inspect full testharness for declarations and assignments."
+    },
+    {
+      "obligation_id": "PERM-PRIV-001",
+      "reason": "The harness assigns a single priv_lvl from priv_lvl_processor, while the interconnect may have multiple managers/requesters. Check whether all subjects are correctly represented and whether privilege is latched per request.",
+      "subject": "AXI requesters including processor, debug, or DMA-like masters",
+      "operation": "authorize AXI read/write based on privilege",
+      "object": "privilege-mediated bus access policy",
+      "expected_guard": "privilege level used for bus access control must correspond to the requesting transaction/master and be stable for the transaction, not a global value that can mismatch DMA/debug/other masters or change mid-transfer",
+      "candidate_path": "ariane_testharness: priv_lvl = priv_lvl_processor -> axi_node priv_lvl_i/connectivity_mapping",
+      "state_conditions_to_check": [
+        "multiple concurrent masters",
+        "debug/DMA/peripheral initiated accesses",
+        "privilege mode transition during outstanding transaction",
+        "read vs write channel timing"
+      ],
+      "required_evidence_slots": [
+        "requesting subject(s)/masters",
+        "priv_lvl source",
+        "connection to axi_node priv_lvl_i",
+        "authorization decision use",
+        "transaction timing/latching",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "src/axi_node/src/axi_node_intf_wrap.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need inspect instantiation parameters and master count to confirm whether multiple requester classes share this privilege signal."
+    },
+    {
+      "obligation_id": "PERM-ATTR-001",
+      "reason": "Facts show aw_prot/ar_prot/user signals being passed through the wrapper and DRAM bridge, while permission decisions may use separate priv_lvl/access_ctrl. Verify no protected target depends on missing or stale attributes.",
+      "subject": "AXI requester with prot/user metadata",
+      "operation": "propagate/mediate access-control attributes",
+      "object": "AXI security/privilege attributes and downstream access decisions",
+      "expected_guard": "security attributes such as AXI prot/user must be preserved or explicitly checked; downstream protected targets should not rely on attributes that are dropped, overwritten, or inconsistent across channels",
+      "candidate_path": "AXI metadata propagation: aw_prot/ar_prot/aw_user/ar_user through axi_node_intf_wrap and DRAM bridge",
+      "state_conditions_to_check": [
+        "read vs write attributes",
+        "burst transfers",
+        "bridge conversion to aw_chan/ar_chan",
+        "user fields for write data and response"
+      ],
+      "required_evidence_slots": [
+        "attribute source",
+        "attribute propagation or transformation",
+        "target use of attributes",
+        "privilege/connectivity guard comparison",
+        "channel consistency",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Downstream target attribute checks may not be present in visible scope."
+    }
+  ]
+}

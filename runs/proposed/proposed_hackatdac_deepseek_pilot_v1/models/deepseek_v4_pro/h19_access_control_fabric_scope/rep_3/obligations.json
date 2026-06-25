@@ -1,0 +1,178 @@
+{
+  "scope_id": "rom2_and_axi_access_control_scope",
+  "obligations": [
+    {
+      "obligation_id": "OBL-001",
+      "reason": "ROM2 module implements a write-capable secure_reg without any internal permission guard. Any AXI write reaching ROM2 will modify its content. Upstream access controls must be verified to prevent unauthorized writes.",
+      "subject": "any bus master (processor, debug, DMA) that can issue an AXI write transaction targeting the ROM2 address region",
+      "operation": "write",
+      "object": "ROM2 internal memory (secure_reg)",
+      "expected_guard": "privilege-level check, lock bit, or access-control matrix entry that denies write access from insufficiently privileged masters",
+      "candidate_path": "From master AXI write interface through ariane_testharness network to rom2.we_i signal; specifically, verify that connectivity_map_o or equivalent gate blocks the write channel when the master lacks permission.",
+      "state_conditions_to_check": [
+        "we_i = 1 and req_i = 1 in rom2",
+        "connectivity_map_o for slave index corresponding to ROM2 (ariane_soc::ROM2 = 9) is 0",
+        "access_ctrl_i matrix values for ROM2 target and current master",
+        "priv_lvl_i value of the requesting master"
+      ],
+      "required_evidence_slots": [
+        "who drives rom2.we_i and rom2.req_i",
+        "which master ID corresponds to the access",
+        "how connectivity_map_o gates the write path to ROM2",
+        "any bypass from debug/JTAG that can assert we_i regardless of connectivity_map_o"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "src/axi_node/src/axi_node_intf_wrap.sv (connectivity_mapping)",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm that connectivity_map_o is actually used to qualify writes to slaves, and that no alternative path (e.g., direct AXI slave connection without gate) exists."
+    },
+    {
+      "obligation_id": "OBL-002",
+      "reason": "The debug subsystem (SimJTAG, dmi_jtag, SimDTM, i_axi_master_dm) can generate AXI transactions. If these transactions do not pass through the same access_ctrl_i matrix as the processor, or if the debug master is assigned a hardwired high privilege, it could bypass all access controls and write to protected slaves like ROM2.",
+      "subject": "debug master (i_axi_master_dm) or debug-originated AXI requests via jtag/dmi",
+      "operation": "read or write",
+      "object": "any access-controlled slave (ROM2, AES, UART, etc.)",
+      "expected_guard": "Either the same priv_lvl-based access_ctrl_i matrix or an independent debug authentication/authorization check that prevents unrestricted access",
+      "candidate_path": "From jtag_req/dmi_req → i_SimDTM → i_axi_master_dm → AXI node; inspect how the privilege level (priv_lvl_i) of this master is determined and whether it is included in the access_ctrl_i matrix evaluation for every slave.",
+      "state_conditions_to_check": [
+        "jtag_enable signal state",
+        "priv_lvl of debug master connection (if any)",
+        "access_ctrl_reg permissions assigned to the debug master's AXI ID",
+        "ndmreset and debug_req_core interactions that might override access control"
+      ],
+      "required_evidence_slots": [
+        "AXI master ID assigned to i_axi_master_dm",
+        "the priv_lvl_i input to connectivity_mapping when the debug master is active",
+        "whether debug transactions are gated by connectivity_map_o or by a separate decode",
+        "the reset value of access_ctrl_reg for the debug master's index"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "src/axi_node/src/axi_node_intf_wrap.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "The actual connection of the debug master to the access control logic is not fully detailed in the provided fact layer; need to inspect how the debug master's transactions are routed in the AXI node."
+    },
+    {
+      "obligation_id": "OBL-003",
+      "reason": "access_ctrl_reg defines the permission matrix that gates connectivity. If this register is writable by any master without strong privilege protection, a malicious or buggy master could escalate permissions and access any slave.",
+      "subject": "any bus master that can write to the address to which access_ctrl_reg is mapped",
+      "operation": "write",
+      "object": "access_ctrl_reg (access control configuration)",
+      "expected_guard": "Only the highest privilege mode (e.g., Machine mode) should be able to write access_ctrl_reg; ideally a lock bit should prevent further modification after boot.",
+      "candidate_path": "From AXI write request → address decoder enabling write to access_ctrl_reg; check the privilege level required and whether any lock disables writes.",
+      "state_conditions_to_check": [
+        "access_ctrl_reg write enable logic",
+        "privilege-level check on the register bus",
+        "existence and state of a lock bit for this register"
+      ],
+      "required_evidence_slots": [
+        "address map of access_ctrl_reg",
+        "write strobe generation and conditioning",
+        "lock mechanism (e.g., a sticky bit) that prevents later writes"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "the module containing access_ctrl_reg (not fully provided)"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "access_ctrl_reg implementation is not included in the current fact layer; must locate its source file."
+    },
+    {
+      "obligation_id": "OBL-004",
+      "reason": "The connectivity_mapping contains the expression `connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i])`. This grants access to PLIC (j=6) whenever CLINT (j=7) access is permitted, which may allow a master with only CLINT permission to manipulate PLIC. If PLIC should be independently protected, this creates an unintended backdoor.",
+      "subject": "any master whose CLINT permission bit is set but PLIC permission bit is not",
+      "operation": "access (read/write) the PLIC peripheral",
+      "object": "PLIC (interrupt controller)",
+      "expected_guard": "PLIC access should be controlled solely by its own permission bit, not derived from CLINT access.",
+      "candidate_path": "Examine connectivity_map_o for j=6; if it is used to gate PLIC transactions, then a master with CLINT permission can reach PLIC even if access_ctrl_i[i][6] is 0.",
+      "state_conditions_to_check": [
+        "access_ctrl_i[i][7][priv_lvl_i] is true while access_ctrl_i[i][6][priv_lvl_i] is false",
+        "connectivity_map_o[i][6] = 1"
+      ],
+      "required_evidence_slots": [
+        "design documentation or specification of PLIC and CLINT isolation requirements",
+        "how connectivity_map_o is applied to PLIC slave port"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv (connectivity_mapping)"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "It is unclear whether this sharing is intentional (e.g., CLINT and PLIC share the same privilege group). Assessment depends on system-level security policy."
+    },
+    {
+      "obligation_id": "OBL-005",
+      "reason": "Debug reset signal ndmreset (non-maskable reset from debug) could be used to reset security-critical registers such as access_ctrl_reg or any lock bits, thereby restoring default (permissive) permissions and defeating access controls.",
+      "subject": "ndmreset (debug non-maskable reset)",
+      "operation": "reset",
+      "object": "access_ctrl_reg or any lock/security state registers",
+      "expected_guard": "ndmreset should not reset security configuration; or assertion of ndmreset should itself be protected by an authentication/authorization check.",
+      "candidate_path": "Distribution of ndmreset signal to resets of access_ctrl_reg flops; check if the register is reset by ndmreset, and if so, what its reset value is.",
+      "state_conditions_to_check": [
+        "ndmreset is asserted (ndmreset=1 or ndmreset_n=0)",
+        "the reset condition of access_ctrl_reg includes ndmreset",
+        "reset value of access_ctrl_reg grants broad access"
+      ],
+      "required_evidence_slots": [
+        "connectivity of ndmreset to individual register resets",
+        "reset value description of access_ctrl_reg"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "access_ctrl_reg module (to be located)"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "The fact layer does not show ndmreset effect on access_ctrl_reg; requires inspection of register implementation."
+    },
+    {
+      "obligation_id": "OBL-006",
+      "reason": "ROM2 contains boot code or configuration data (mem initialized at reset). If the design expects ROM2 to be read-only or only accessible after authentication, but the RTL provides an unguarded read path, secret information could be leaked.",
+      "subject": "any bus master able to read the ROM2 address range",
+      "operation": "read",
+      "object": "ROM2 memory contents (secure_reg)",
+      "expected_guard": "Either ROM2 is always readable (safe) or a lifecycle/lock signal prevents read until a security state is reached.",
+      "candidate_path": "From AXI read request to rdata_o; rdata_o is always driven from secure_reg[raddr_q] with no disable except address range check. Verify whether there is any upstream read gate controlled by a lock or lifecycle state.",
+      "state_conditions_to_check": [
+        "any lock or lifecycle signal gating reads to ROM2",
+        "ROM2 address decode outside of ROM2 module"
+      ],
+      "required_evidence_slots": [
+        "presence of a read-lock mechanism in the system",
+        "definition of ROM2 content sensitivity"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "low",
+      "uncertainty": "Without knowledge of ROM2's content sensitivity, this may be a false positive; the read path may be intentionally open."
+    }
+  ]
+}

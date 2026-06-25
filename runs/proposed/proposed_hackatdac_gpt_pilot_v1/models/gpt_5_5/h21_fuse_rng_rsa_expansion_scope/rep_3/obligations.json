@@ -1,0 +1,417 @@
+{
+  "scope_id": "piton_ariane_riscv_peripherals_crypto_debug_permission_scope",
+  "obligations": [
+    {
+      "obligation_id": "PERM-RISCVPERIPH-DBG-JTAG-AUTH-001",
+      "reason": "The scope exposes JTAG ports, SimDTM/SimJTAG/dmi_jtag instances, debug request/response signals, jtag_hash and jtag_unlock, and hart debug outputs. Check that external or simulated debug subjects cannot exercise protected debug capabilities without the intended unlock/auth guard.",
+      "subject": "external JTAG/test/debug requester",
+      "operation": "trigger/control/read-write debug module",
+      "object": "hart debug control outputs and debug module access path",
+      "expected_guard": "JTAG/debug requests that can halt/reset/control harts or access debug module state should be gated by an authorization/unlock condition such as jtag_unlock derived from jtag_hash/lifecycle/test policy, not merely by testmode/debug presence.",
+      "candidate_path": "JTAG/SimDTM/Debug request path into riscv_peripherals debug module and exported debug_req_o/ndmreset_o/dmactive_o",
+      "state_conditions_to_check": [
+        "reset value and update of jtag_unlock",
+        "whether testmode_i or debug_mode_i bypasses authorization",
+        "whether SimDTM/SimJTAG paths are synthesis/test-only or active in this scope"
+      ],
+      "required_evidence_slots": [
+        "subject: JTAG/SimDTM/SimJTAG/dmi_jtag source signals",
+        "operation: debug request type/read/write/reset/halt",
+        "object: debug_req_o/ndmreset_o/dmactive_o or debug module registers",
+        "expected guard: jtag_unlock/auth/lifecycle/testmode condition",
+        "observed RTL gating at request and output use sites",
+        "reachability from ports to protected outputs"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "evidence closure: subject, operation, object, guard, reachability"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer lists signals and instances but not assignments; inspect RTL connectivity and guards."
+    },
+    {
+      "obligation_id": "PERM-CRYPTO-DBG-BYPASS-002",
+      "reason": "Both rng_wrapper and rsa_wrapper have debug_mode_i along with reglk_ctrl_i/acct_ctrl_i and AXI register interfaces. Verify debug_mode_i is not used to bypass access control or lock protection for sensitive crypto/RNG state unless tied to authenticated debug authorization.",
+      "subject": "debug-mode requester through AXI/peripheral wrapper",
+      "operation": "read/write/configure crypto peripheral registers in debug mode",
+      "object": "RNG seed/poly/control/status registers and RSA key/message/control/result registers",
+      "expected_guard": "Debug-mode access to crypto/RNG wrapper registers should be covered by the same or stronger access-control/lock policy as normal software access, unless debug is explicitly authenticated by the top-level debug unlock.",
+      "candidate_path": "debug_mode_i propagation into rng_wrapper and rsa_wrapper register access/write/read mux logic",
+      "state_conditions_to_check": [
+        "debug_mode_i asserted with acct_ctrl_i denying access",
+        "debug_mode_i asserted after reglk_ctrl_i lock set",
+        "reset/default values of access-control and lock bits"
+      ],
+      "required_evidence_slots": [
+        "subject: debug-mode software/debug master",
+        "operation: register read/write/configure",
+        "object: RNG/RSA sensitive registers and outputs",
+        "expected guard: acct_ctrl_i/reglk_ctrl_i plus authenticated debug condition",
+        "observed behavior of debug_mode_i in decode/write/read muxes",
+        "top-level source of debug_mode_i and any jtag_unlock relationship"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/rsa/rsa_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need RTL inspection of wrapper access-control expressions."
+    },
+    {
+      "obligation_id": "PERM-REGLK-STICKY-COVERAGE-003",
+      "reason": "A global reglk_ctrl array and per-wrapper reglk_ctrl_i ports indicate intended register lock protection. Check actual use sites to ensure coverage and stickiness rather than assuming lock existence is sufficient.",
+      "subject": "software-visible AXI/NoC requester",
+      "operation": "write/configure/clear lock-protected registers",
+      "object": "protected configuration/state registers controlled by reglk_ctrl_i and the reglk_ctrl array itself",
+      "expected_guard": "Once a lock bit controlling a protected peripheral/register is set, all software-visible write paths to that protected register and to the lock bit itself should be blocked or sticky until reset, including debug/test paths.",
+      "candidate_path": "reglk_ctrl distribution from riscv_peripherals to pkt_wrapper/rng_wrapper/rsa_wrapper and any reglk peripheral write path",
+      "state_conditions_to_check": [
+        "after reglk_ctrl bit becomes 1",
+        "attempted write through normal AXI path",
+        "attempted write while debug_mode_i asserted",
+        "reset state of reglk_ctrl"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/NoC/peripheral requester",
+        "operation: writes to protected config and lock registers",
+        "object: each reglk-controlled register in PKT/RNG/RSA and top reglk storage",
+        "expected guard: relevant reglk_ctrl bit",
+        "observed write-enable equations",
+        "evidence that lock cannot be cleared except reset",
+        "bypass paths via debug/test/reset-specific inputs"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/rsa/rsa_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer does not enumerate all wrapper internal registers; inspect write enables."
+    },
+    {
+      "obligation_id": "PERM-ACCTCTRL-MEDIATION-004",
+      "reason": "Top-level acc_ctrl and wrapper acct_ctrl_i ports suggest a software-visible access policy. Verify that access denial is enforced for both writes and reads, and that top-level routing cannot bypass wrapper mediation.",
+      "subject": "software-visible AXI/NoC requester",
+      "operation": "read/write peripheral MMIO registers",
+      "object": "PKT/RNG/RSA peripheral register spaces and protected response data",
+      "expected_guard": "Access-control bits should mediate all read/write requests to protected peripherals consistently at decode/request acceptance and response data mux sites; denied access should not update state or return protected data.",
+      "candidate_path": "acct_ctrl/acc_ctrl distribution to peripheral wrappers and top-level peripheral request routing",
+      "state_conditions_to_check": [
+        "acct_ctrl_i deasserted/deny state",
+        "read vs write differences",
+        "debug_mode_i interaction",
+        "NoC direct peripheral port access"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/NoC requester or bus master",
+        "operation: read and write transaction",
+        "object: protected peripheral address/register",
+        "expected guard: acct_ctrl_i/acc_ctrl bit for the target peripheral",
+        "observed request enable/write enable/read data behavior",
+        "address decode and response mux locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/rsa/rsa_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Need address decode and wrapper internals to determine exact policy polarity."
+    },
+    {
+      "obligation_id": "PERM-FUSE-PKT-READ-AUTH-005",
+      "reason": "The design has a fuse memory with jtag_hash_o and a PKT wrapper that can issue fuse_req_o/fuse_addr_o and receive fuse_rdata_i. Fuses and key-location outputs are protected assets requiring explicit mediation.",
+      "subject": "PKT peripheral requester / software via AXI",
+      "operation": "read/expose fuse data or fuse-derived key metadata",
+      "object": "fuse_mem contents, jtag_hash_o, fuse_rdata, pkey_loc_o/fuse-derived key location",
+      "expected_guard": "Reads of fuse memory or fuse-derived key locations should require an authorized subject and address-range/index check; response data should not be exposed through PKT outputs or AXI read data without acct_ctrl/reglk/debug authorization.",
+      "candidate_path": "pkt_wrapper fuse_req_o/fuse_addr_o to fuse_mem req_i/addr_i/rdata_o and pkt pkey_loc_o",
+      "state_conditions_to_check": [
+        "acct_ctrl_i deny state",
+        "locked PKT configuration",
+        "out-of-range or arbitrary fuse_addr_o",
+        "reset/default fuse index"
+      ],
+      "required_evidence_slots": [
+        "subject: PKT AXI requester and any top-level fuse requester",
+        "operation: fuse read/address selection",
+        "object: fuse_mem entry/jtag_hash/key location",
+        "expected guard: acct_ctrl_i/reglk_ctrl_i/authorized debug or address-range policy",
+        "observed req/address generation and read data return path",
+        "reachability to externally visible AXI/NoC or JTAG hash outputs"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/pkt/pkt.sv",
+        "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Need inspect if fuse_mem is read-only ROM and how rdata_o is muxed back."
+    },
+    {
+      "obligation_id": "PERM-JTAG-HASH-EXPOSURE-006",
+      "reason": "The fact layer identifies jtag_hash_o from fuse_mem and jtag_hash/jtag_unlock in the top module. Check both protection of the hash as a secret/auth asset and correctness of the unlock guard use.",
+      "subject": "external JTAG/debug requester or software-visible fuse reader",
+      "operation": "expose/use authentication material and set unlock state",
+      "object": "JTAG authentication hash and unlock state",
+      "expected_guard": "JTAG unlock comparison/authentication should use the intended fuse hash without exposing enough information for unauthorized unlock; jtag_hash_o should not be readable by unauthenticated software/debug paths.",
+      "candidate_path": "fuse_mem jtag_hash_o to riscv_peripherals jtag_hash and jtag_unlock generation",
+      "state_conditions_to_check": [
+        "reset value of jtag_unlock",
+        "failed authentication state",
+        "debug/test mode state",
+        "hash read path during normal operation"
+      ],
+      "required_evidence_slots": [
+        "subject: JTAG/debug/software requester",
+        "operation: read hash or assert unlock",
+        "object: jtag_hash/jtag_unlock",
+        "expected guard: authentication comparison and no unauthenticated read path",
+        "observed RTL paths from fuse_mem to debug/JTAG logic and any read muxes",
+        "impact on debug authorization outputs"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Hash may be public by design; obligation is to check whether RTL treats it as protected auth material."
+    },
+    {
+      "obligation_id": "PERM-RNG-CONFIG-READBACK-007",
+      "reason": "RNG modules expose seed input, seed outputs, random segments, and control/status state. If software-visible through rng_wrapper, these are security-sensitive because they can make randomness predictable or leak state.",
+      "subject": "software-visible RNG peripheral requester",
+      "operation": "write seed/poly/load and read RNG/internal state",
+      "object": "RNG seed registers, polynomial configuration, load control, random output and internal state outputs",
+      "expected_guard": "Configuration of RNG seed, polynomial, load, and any readback of internal seeds/segments should be mediated by access-control and lock bits; unprivileged or denied requesters should not be able to force predictable RNG state or observe internal seed state.",
+      "candidate_path": "rng_wrapper AXI register writes to rng_top load_i/seed_i/poly*_i and reads of seed*_o/rand segments/cs_state",
+      "state_conditions_to_check": [
+        "after lock bit set",
+        "acct_ctrl_i deny state",
+        "debug_mode_i asserted",
+        "reset/seed initialization values"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/NoC requester",
+        "operation: write configuration and readback",
+        "object: seed_i/poly*_i/load_i/seed*_o/rand_seg*_o/cs_state_o/rand_num_o",
+        "expected guard: acct_ctrl_i and reglk_ctrl_i; debug authorization if debug path exists",
+        "observed wrapper register decode/write enables/read muxes",
+        "external response path to ariane_rng_buf_noc3_data_o"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/rand_num/rng_top.v",
+        "piton/design/chip/tile/ariane/src/rand_num/rng_cs.v",
+        "piton/design/chip/tile/ariane/src/rand_num/rng_128.v",
+        "piton/design/chip/tile/ariane/src/rand_num/rng_64.v",
+        "piton/design/chip/tile/ariane/src/rand_num/rng_32.v",
+        "piton/design/chip/tile/ariane/src/rand_num/rng_16.v"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need determine which internal RNG signals are actually mapped to readable registers."
+    },
+    {
+      "obligation_id": "PERM-RSA-REG-AUTH-RESIDUE-008",
+      "reason": "RSA wrapper exposes AXI access and receives lock/access-control/debug signals. Its input/output message and key-related signals are protected assets requiring mediated access and lifecycle clearing checks.",
+      "subject": "software-visible RSA peripheral requester",
+      "operation": "configure/read cryptographic operation state",
+      "object": "RSA p_i, msg_in, encrypt/decrypt control, msg_out, operation status and any wrapper registers",
+      "expected_guard": "RSA key/modulus/message/control registers and result readout should require authorized access and obey lock bits; debug or reset-specific paths should not clear locks or expose stale/plaintext/intermediate data.",
+      "candidate_path": "rsa_wrapper AXI register writes/reads to rsa_top p_i,msg_in,encrypt_decrypt_i,msg_out,finish",
+      "state_conditions_to_check": [
+        "access denied state",
+        "lock set state",
+        "debug_mode_i asserted",
+        "after operation finish",
+        "rst_13 or rst_ni assertion"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/NoC requester or debug-mode requester",
+        "operation: write key/message/control and read result/status",
+        "object: RSA internal/wrapper registers and msg_out",
+        "expected guard: acct_ctrl_i/reglk_ctrl_i and authorized debug",
+        "observed write/read mux and response behavior",
+        "reset/operation-completion clearing evidence"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/rsa/rsa_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/rsa/rsa_top.v",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "rsa_top itself is thin; wrapper likely holds security-relevant registers."
+    },
+    {
+      "obligation_id": "PERM-SWRESET-AUTH-LOCKEFFECT-009",
+      "reason": "Top-level signals include multiple peripheral resets and wrapper-specific reset ports. Check whether reset control is software-visible and permission-guarded, and whether reset can defeat lock or access-control protections.",
+      "subject": "software-visible reset requester",
+      "operation": "trigger reset / clear state",
+      "object": "peripheral reset lines rst_5/rst_10/rst_13 and protected wrapper state/locks/access controls",
+      "expected_guard": "Software-controllable resets of security peripherals should require authorization and should not be usable to clear locks/access controls or leave protected outputs in unsafe residue states.",
+      "candidate_path": "top-level reset control peripheral/NoC path to rst_1..rst_13 including rst_5/rst_10/rst_13 used by PKT/RNG/RSA",
+      "state_conditions_to_check": [
+        "lock set then peripheral reset",
+        "acct_ctrl deny state",
+        "debug/test reset path",
+        "rst_ni global reset vs local rst_*"
+      ],
+      "required_evidence_slots": [
+        "subject: reset peripheral/AXI/NoC requester",
+        "operation: assert peripheral reset",
+        "object: security peripheral state and lock/access control state",
+        "expected guard: privileged/access-control check and no lock-clearing bypass",
+        "observed reset register write path and reset fanout",
+        "post-reset values of protected state"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/rsa/rsa_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need inspect generation of rst_1..rst_13 around top-level lines 902 onward."
+    },
+    {
+      "obligation_id": "PERM-DMA-FABRIC-RANGE-010",
+      "reason": "The top module exposes a DMA NoC port alongside security-sensitive peripherals and access-control signals. Check that DMA cannot bypass CPU privilege/PMP-like checks or wrapper acct_ctrl mediation when targeting protected regions.",
+      "subject": "DMA engine / DMA NoC master",
+      "operation": "DMA read/write to peripheral MMIO/fabric endpoints",
+      "object": "protected peripheral address spaces: debug, fuse/PKT, RNG, RSA, reglk/acct/reset, crypto peripherals",
+      "expected_guard": "DMA-originated transactions should preserve requester identity/security attributes and be blocked from protected MMIO/fuse/crypto/debug regions unless explicitly authorized by access-control/range checks.",
+      "candidate_path": "DMA NoC port and top-level peripheral/fabric routing to protected peripheral address spaces",
+      "state_conditions_to_check": [
+        "DMA targets RNG/RSA/PKT/fuse/debug/reglk/acct/reset regions",
+        "access-control deny state",
+        "overlapping address ranges",
+        "active transfer during policy update"
+      ],
+      "required_evidence_slots": [
+        "subject: DMA NoC requester",
+        "operation: read/write transaction",
+        "object: target peripheral addresses and registers",
+        "expected guard: address-range/access-control/PMP-like mediation",
+        "observed routing/decode and security attribute propagation",
+        "response path for protected data"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Fact layer lists DMA port but not routing internals; inspect address map/decode."
+    },
+    {
+      "obligation_id": "PERM-CLINT-MMIO-PRIV-011",
+      "reason": "CLINT controls interrupt state and has an AXI-lite interface emitting address/en/we. Check privilege/address-map mediation for writes that can trigger interrupts or affect timer behavior.",
+      "subject": "software-visible AXI requester",
+      "operation": "read/write timer/IPI MMIO state",
+      "object": "CLINT timer interrupt and IPI control registers",
+      "expected_guard": "Writes to timer compare/software interrupt registers should be restricted to the intended privileged requester or protected address space; read/write enables from AXI should not be generated solely from valid handshakes without privilege/range mediation where required.",
+      "candidate_path": "CLINT axi_lite_interface address_o/en_o/we_o to timer/software interrupt registers",
+      "state_conditions_to_check": [
+        "unprivileged requester if priv_lvl_i is available",
+        "DMA/NoC requester path",
+        "write vs read behavior",
+        "reset state of CLINT registers"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/NoC requester",
+        "operation: CLINT read/write",
+        "object: timer compare, mtime, MSIP/IPI registers or equivalent",
+        "expected guard: machine-mode/privileged/range/access-control check",
+        "observed en_o/we_o generation and top-level routing guards",
+        "impact on timer_irq_o/ipi_o"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/clint/axi_lite_interface.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need inspect CLINT integration and whether privilege is enforced elsewhere."
+    },
+    {
+      "obligation_id": "PERM-BOOTROM-SELECTION-012",
+      "reason": "The top-level includes boot ROM instances and ariane_boot_sel_i. Verify visible RTL does not allow unauthorized boot policy changes or unintended exposure if boot ROM content is security-sensitive in this design.",
+      "subject": "boot strap/software-readable requester",
+      "operation": "select/read boot ROM contents",
+      "object": "boot ROM selection, bootrom_bm/linux contents and boot response data",
+      "expected_guard": "Boot ROM selection and reads of boot code/configuration should be mediated by intended lifecycle/boot policy; software should not be able to change boot source or read restricted boot ROM contents through unintended routes after boot if policy forbids it.",
+      "candidate_path": "boot ROM selection and read response path controlled by ariane_boot_sel_i/bootrom instances",
+      "state_conditions_to_check": [
+        "after reset vs runtime change of ariane_boot_sel_i",
+        "NoC read access to ROM",
+        "debug/test mode"
+      ],
+      "required_evidence_slots": [
+        "subject: boot selection source or AXI/NoC requester",
+        "operation: select boot ROM/read boot data",
+        "object: boot ROM mux and rom_rdata",
+        "expected guard: lifecycle/strap-only/reset-time selection or access-control policy",
+        "observed selection logic and read path",
+        "state timing of ariane_boot_sel_i sampling"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "low",
+      "uncertainty": "Boot ROM may be intended public; obligation is lower priority and should not be reported absent protected-content rationale."
+    }
+  ]
+}

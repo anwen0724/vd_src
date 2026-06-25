@@ -1,0 +1,199 @@
+{
+  "analysis_summary": "The proposed method produced 6 finding(s) from 7 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "DMA register lock bypass: The lock mechanism (reglk_ctrl) is not integrated into dma_wrapper's write enable logic, violating expected guard.",
+      "vulnerability_category": "write / DMA control registers (start_reg, length_reg, source_addr_*, dest_addr_*, core_lock_reg) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": 129,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": 129,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug module (dm_slave_req, dm_master AXI) Operation: write Object: DMA control registers (start_reg, length_reg, source_addr_*, dest_addr_*, core_lock_reg) Expected guard: Debug master writes to DMA registers must be gated by debug authentication or the same register lock (reglk_ctrl) that applies to CPU-initiated accesses. Observed behavior: dma_wrapper.sv does not use the provided reglk_ctrl_i signal to gate write accesses to DMA registers. The write enable depends solely on acct_ctrl_i, which is tied to CPU privilege level (acc_ctrl_c[priv_lvl_i][8]). The lock bits from reglk_ctrl are not consulted. Therefore, debug-initiated writes (which travel from dm_master through the NOC to dma_wrapper) are not subject to register locks. Path: debug.request → dm_slave_req → AXI fabric (noc_axilite_bridge) → dma_wrapper AXI interface → dma_wrapper write block (no lock check). Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debug master can modify DMA configuration registers even if locks are set for CPU, potentially violating memory protection.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "potential_warning",
+      "summary": "reglk_wrapper resets all lock registers when jtag_unlock is high: condition ~(rst_ni && ~jtag_unlock && ~rst_9). The generation of jtag_unlock from dmi_jtag is not visible in provided observations.",
+      "vulnerability_category": "set/unlock / Register lock control outputs (reglk_ctrl_o) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 86,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 86,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG debug interface (jtag_hash, jtag_unlock) Operation: set/unlock Object: Register lock control outputs (reglk_ctrl_o) Expected guard: jtag_unlock asserted only after successful authentication. Observed behavior: reglk_wrapper resets all lock registers when jtag_unlock is high: condition ~(rst_ni && ~jtag_unlock && ~rst_9). The generation of jtag_unlock from dmi_jtag is not visible in provided observations. Path: JTAG TAP → dmi_jtag → jtag_unlock → reglk_wrapper Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If jtag_unlock can be asserted without proper authentication, all peripheral locks are cleared, weakening lock mechanism.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Internal logic of dmi_jtag module that generates jtag_unlock. Need to inspect dmi_jtag.sv.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "Hardcoded access override for PKT peripheral (fuse read) may allow unauthorized access to keys.",
+      "vulnerability_category": "read/write / Peripheral with index 5 (PKT, fuse access) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 222,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 222,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: CPU privilege level (priv_lvl_i) used in access control Operation: read/write Object: Peripheral with index 5 (PKT, fuse access) Expected guard: Access controlled solely by programmed acc_ctrl bits without hardwired OR exceptions. Observed behavior: acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]); hardcoded OR enables access to peripheral 5 whenever acc_ctrl[4*4+i] is set, regardless of the entry for that privilege level and peripheral. Path: priv_lvl_i → acc_ctrl_c row selection → gating of peripheral read/write enables (via acct_ctrl_i input to pkt_wrapper). Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthorized access to cryptographic key material stored in fuses (pkey_loc) even if acc_ctrl for that privilege level restricts peripheral 5.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "Incomplete fuse read lock: most fuse words not protected, potential key leakage.",
+      "vulnerability_category": "read / Fuse data (fuse_rdata_i) containing keys (pkey_loc) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": 80,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": 80,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: CPU or debug master (AXI read requests) Operation: read Object: Fuse data (fuse_rdata_i) containing keys (pkey_loc) Expected guard: Fuse read access limited to machine mode or disabled after boot via sticky lock. Observed behavior: pkt_wrapper read path only locks specific addresses (pkey_loc at addresses 2,3) via reglk_ctrl_i bits 4 and 5. Other fuse addresses (default case) return raw fuse_rdata_i without lock check, if fuse_addr_o > 110. So entire fuse region is not protected by the lock mechanism. Path: AXI read → pkt_wrapper decode → fuse_req_o → fuse_addr_o → fuse_rdata_i → read response. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Secret key material beyond pkey_loc or other sensitive fuses could be read even after locks are set, especially if fuse_addr_o is set to a high index.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Full fuse memory map to confirm sensitivity of entries >110.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "potential_warning",
+      "summary": "we_flag signals are used in some lock overrides (e.g., we_flag_1 ORed with reglk_ctrl bits). Their generation is external to riscv_peripherals and not visible in provided observations.",
+      "vulnerability_category": "write / Peripherals protected by we_flag signals / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1194,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1194,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug mode (debug_mode_i) or test mode (testmode_i) Operation: write Object: Peripherals protected by we_flag signals Expected guard: Debug and test modes must not bypass hardware write gate signals. Observed behavior: we_flag signals are used in some lock overrides (e.g., we_flag_1 ORed with reglk_ctrl bits). Their generation is external to riscv_peripherals and not visible in provided observations. Path: debug_mode_i / testmode_i → (external logic) → we_flag_x → lock override. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If debug_mode_i or testmode_i can assert we_flags, peripheral locks could be bypassed.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Generation logic for we_flag_0..4, and connections from debug_mode_i/testmode_i.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "DMA configuration not protected during active transfers; in-flight hijack possible.",
+      "vulnerability_category": "write / DMA configuration registers (start_reg, length_reg, source_addr_*, dest_addr_*) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": 129,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": 129,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: CPU or debug master Operation: write Object: DMA configuration registers (start_reg, length_reg, source_addr_*, dest_addr_*) Expected guard: While DMA transfer active (busy), configuration writes blocked by hardware lock or software-set lock (core_lock_reg). Observed behavior: dma_wrapper.sv writes to configuration registers occur on en && we with no check of DMA busy state (no busy signal present). The core_lock_reg is a writable register but its value is not used to gate writes to other registers. Path: AXI write → dma_wrapper decode → register file → no busy/lock gating. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Attacker can reprogram DMA while transfer is in progress, redirecting data destination/source and violating memory isolation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Absence of DMA busy signal and lock check.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

@@ -1,0 +1,145 @@
+{
+  "analysis_summary": "The proposed method produced 9 finding(s) from 10 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "needs_more_evidence",
+      "summary": "DMI authentication appears incomplete: dm_csrs reports authenticated unconditionally and accepts DMI requests through the CDC path; the visible request-valid path into dm_csrs is not guarded by pass_chk/jtag_key.",
+      "vulnerability_category": "DMI read/write operations that can reach debug CSRs and issue downstream debug commands/SBA operations. / dm_csrs registers/control outputs and downstream debug actions in dm_top. / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: External JTAG/TAP requester or SimJTAG/SimDTM source driving DMI through dmi_jtag. Operation: DMI read/write operations that can reach debug CSRs and issue downstream debug commands/SBA operations. Object: dm_csrs registers/control outputs and downstream debug actions in dm_top. Expected guard: JTAG/DMI accesses that can issue debug module commands or system bus accesses should be gated by explicit authentication/authorization, e.g. jtag_key/pass_chk and/or debug enable/lifecycle condition, before dmi_req_valid_o reaches dm_csrs. Observed behavior: dmi_jtag has jtag_key/pass/pass_chk signals, but the observed CDC instantiation forwards dmi_req_valid to core_dmi_valid_o without a visible pass_chk gate. dm_csrs sets dmstatus.authenticated = 1'b1 and accepts requests when dmi_req_valid_i & dmi_req_ready_o. pass is only loaded from jtag_key during reset; no observed evidence shows pass_chk mediating the outbound DMI valid path. Path: dmi_jtag_tap TAP signals generate dmi_access/dmi_tdi/dmi_tdo; dmi_jtag constructs dmi_req and sends it through dmi_cdc to dmi_req_o/dmi_req_valid_o; dm_top forwards to dm_csrs; dm_csrs processes dmi_req_valid_i. Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "An external JTAG requester may be able to access debug CSRs, halt/resume harts, issue abstract commands, reset the system, or use debug SBA without proving possession of the JTAG key.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PO-DBG-DMI-AUTH-001."
+      ]
+    },
+    {
+      "finding_id": "F2",
+      "status": "needs_more_evidence",
+      "summary": "Hart control writes can drive haltreq/resumereq via selected_hart without a visible dmactive/auth guard or bounds guard on the output index; nonexistent status is reported but output generation still indexes selected_hart.",
+      "vulnerability_category": "Write dmcontrol/command-like registers to halt, resume, select hart, and execute abstract command. / haltreq_o, resumereq_o, cmd_valid_o, hartsel_o, debug_req_o path through dm_mem. / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: DMI debug requester. Operation: Write dmcontrol/command-like registers to halt, resume, select hart, and execute abstract command. Object: haltreq_o, resumereq_o, cmd_valid_o, hartsel_o, debug_req_o path through dm_mem. Expected guard: Hart halt/resume and abstract command execution should require the selected hart to be valid/available and the debug module to be active/authorized; writes while cmdbusy should be rejected or recorded as errors. Observed behavior: DMControl writes assign dmcontrol_d directly from DMI data. haltreq_o[selected_hart] and resumereq_o[selected_hart] are driven from dmcontrol_q bits. dmstatus reports nonexistent harts when hartsel exceeds NrHarts-1, but the output mux still indexes selected_hart. Command writes are gated by !cmdbusy_i and busy errors are recorded, satisfying part of the busy-state obligation but not auth/valid hart gating. Path: DMI write in dm_csrs -> dmcontrol_q/command_q -> haltreq_o/resumereq_o/cmd_valid_o -> dm_top dm_mem -> debug_req_o. Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "An unauthenticated or improperly bounded DMI write could request hart halt/resume or command execution, potentially causing denial of service or arbitrary debug control of CPU execution.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PO-DBG-HARTCTRL-GUARD-002."
+      ]
+    },
+    {
+      "finding_id": "F3",
+      "status": "needs_more_evidence",
+      "summary": "Debug SBA has a direct AXI master path controlled by DMI-written SBA CSRs, with no visible address/range/security-attribute mediation in the inspected connection-level RTL.",
+      "vulnerability_category": "Read/write memory or peripherals through system bus access over AXI. / System bus address space reachable via sbaddress/sbdata and axi_m_req_o. / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: Debug module SBA requester. Operation: Read/write memory or peripherals through system bus access over AXI. Object: System bus address space reachable via sbaddress/sbdata and axi_m_req_o. Expected guard: Debug system bus access should be constrained by debug authorization and by address/range/security-attribute checks appropriate for protected memory/peripheral regions; invalid sizes/addresses and busy updates should be blocked or signaled. Observed behavior: dm_csrs exposes sbaddress, sbdata, sbaccess, sbreadonaddr/sbreadondata, and valid strobes. dm_top connects these directly to dm_sba, which drives axi_m_req_o. dm_sba receives dmactive_i but no visible address range or privilege filter is present in the inspected wrapper. Busy/error signaling exists, but writes to SBAddress/SBData update state even in blocks that set sbbusyerror. Path: DMI write/read -> dm_csrs SBA registers -> dm_top i_dm_sba -> axi_m_req_o into system fabric/peripheral address map. Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "A debugger with DMI access may be able to read or write protected memory and peripherals, including ROM2/key, AES, packet/PLIC, or RAM, bypassing CPU privilege/PMP-like checks.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PO-DBG-SBA-RANGE-003."
+      ]
+    },
+    {
+      "finding_id": "F4",
+      "status": "needs_more_evidence",
+      "summary": "Observed CSR read/write decode shows per-CSR behavior and update_access_exception/read_access_exception signals, but the provided snippets do not include a complete privilege legality predecode proving whether U/S/M/debug-only restrictions are enforced for all protected CSRs. Some WARL masks are present for SATP/delegation/status fields.",
+      "vulnerability_category": "Read and write CSR registers. / Privileged/debug CSRs including dpc/dscratch, mtvec/delegation/status/SATP/cache/perf controls. / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: CPU CSR interface requester. Operation: Read and write CSR registers. Object: Privileged/debug CSRs including dpc/dscratch, mtvec/delegation/status/SATP/cache/perf controls. Expected guard: CSR reads/writes to privileged or debug CSRs should be checked against current privilege/debug state and read/write legality, including umode_i and debug_mode_q/dret conditions; illegal access should raise exceptions and not update protected registers. Observed behavior: Observed CSR read/write decode shows per-CSR behavior and update_access_exception/read_access_exception signals, but the provided snippets do not include a complete privilege legality predecode proving whether U/S/M/debug-only restrictions are enforced for all protected CSRs. Some WARL masks are present for SATP/delegation/status fields. Path: csr_regfile csr_addr_i/csr_wdata_i/csr_we -> csr_read_process/csr_update -> protected CSR state registers. Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "Security impact is not fully established from visible evidence.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Need full CSR legality decode for privilege-level checks and debug-only CSR read/write restrictions; impact cannot be asserted from partial snippets alone. Missing evidence slots: impact, rtl_evidence.",
+      "recommended_follow_up": [
+        "Check security-sensitive consequence of the observed behavior for obligation PO-CSR-PRIV-DECODE-004.",
+        "Check source file, module, signal, or code block for obligation PO-CSR-PRIV-DECODE-004."
+      ]
+    },
+    {
+      "finding_id": "F5",
+      "status": "needs_more_evidence",
+      "summary": "csr_regfile enters debug on debug_req_i when not already in debug mode and a valid instruction commits, saving pc_i to dpc_d and setting set_debug_pc_o. Reset clears debug state. However, the observations do not show complete DRET decode/gating or debug CSR read/write decode for dpc/dscratch/dcsr.",
+      "vulnerability_category": "Enter debug, write/read debug CSRs, execute dret. / debug_mode_q, dpc_q, dscratch0_q, dscratch1_q, halt_csr_o, set_debug_pc_o, debug_mode_o. / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: Debug module and CPU CSR requester. Operation: Enter debug, write/read debug CSRs, execute dret. Object: debug_mode_q, dpc_q, dscratch0_q, dscratch1_q, halt_csr_o, set_debug_pc_o, debug_mode_o. Expected guard: Entering debug mode should require authorized debug request and precise state capture; exiting with dret should be permitted only when in debug mode and should restore/control PC without exposing or corrupting privileged state. Observed behavior: csr_regfile enters debug on debug_req_i when not already in debug mode and a valid instruction commits, saving pc_i to dpc_d and setting set_debug_pc_o. Reset clears debug state. However, the observations do not show complete DRET decode/gating or debug CSR read/write decode for dpc/dscratch/dcsr. Path: dm_top debug_req_o -> csr_regfile debug_req_i -> debug_mode_q/dpc_d/set_debug_pc_o; CSR instruction path controls dpc/dscratch/dret. Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "Security impact is not fully established from visible evidence.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Need complete DRET decode and debug CSR read/write cases to verify dret only in debug mode and dpc/dscratch access only under debug-mode/legal privilege. Missing evidence slots: impact, rtl_evidence.",
+      "recommended_follow_up": [
+        "Check security-sensitive consequence of the observed behavior for obligation PO-CSR-DEBUG-LIFECYCLE-005.",
+        "Check source file, module, signal, or code block for obligation PO-CSR-DEBUG-LIFECYCLE-005."
+      ]
+    },
+    {
+      "finding_id": "F6",
+      "status": "needs_more_evidence",
+      "summary": "SATP writes are WARL-filtered for ASID and mode, MSTATUS updates policy bits with hardwired zero fields, and outputs reflect satp/mstatus/debug conditions. Complete privilege gating for who may write SATP/MSTATUS is not visible in the snippets.",
+      "vulnerability_category": "Configure address translation and privilege policy. / SATP/status-derived translation controls and supervisor trap policy bits: satp_ppn_o, asid_o, en_translation_o, en_ld_st_translation_o, sum_o, mxr_o, tvm_o, tw_o, tsr_o. / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: CPU CSR interface requester. Operation: Configure address translation and privilege policy. Object: SATP/status-derived translation controls and supervisor trap policy bits: satp_ppn_o, asid_o, en_translation_o, en_ld_st_translation_o, sum_o, mxr_o, tvm_o, tw_o, tsr_o. Expected guard: Writes or transitions that alter address-translation and privilege policy should be restricted to the required privilege level; supervisor/user attempts should be blocked according to mode and status bits, and outputs should reflect safe reset/default states. Observed behavior: SATP writes are WARL-filtered for ASID and mode, MSTATUS updates policy bits with hardwired zero fields, and outputs reflect satp/mstatus/debug conditions. Complete privilege gating for who may write SATP/MSTATUS is not visible in the snippets. Path: csr_regfile CSR write decode for SATP/MSTATUS -> satp_q/mstatus_q -> translation/policy outputs. Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "Security impact is not fully established from visible evidence.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Need full access-right predecode for supervisor/user writes to SATP/status and exception generation on illegal writes. Missing evidence slots: impact, rtl_evidence.",
+      "recommended_follow_up": [
+        "Check security-sensitive consequence of the observed behavior for obligation PO-CSR-VM-POLICY-006.",
+        "Check source file, module, signal, or code block for obligation PO-CSR-VM-POLICY-006."
+      ]
+    },
+    {
+      "finding_id": "F7",
+      "status": "needs_more_evidence",
+      "summary": "Security-sensitive MMIO peripherals, including ROM2/key storage, packet, AES, and PLIC, are connected through generic AXI/APB bridges without visible requester privilege/security guards in the observed wrapper code.",
+      "vulnerability_category": "Read/write peripheral MMIO registers. / APB/AXI peripheral registers and data outputs, especially ROM2 key material, packet key table, AES, and PLIC. / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: AXI/APB bus requester, including CPU or debug SBA master. Operation: Read/write peripheral MMIO registers. Object: APB/AXI peripheral registers and data outputs, especially ROM2 key material, packet key table, AES, and PLIC. Expected guard: MMIO access to security-sensitive peripherals such as AES/key/packet/ROM2 should be mediated by address decode plus privilege/security attributes or explicit local guards; read data muxes should not expose secrets unless authorized. Observed behavior: ariane_peripherals instantiates AXI/APB bridges that pass psel/pwrite/penable/paddr/pwdata/prdata to peripherals. ROM2 is connected via axi2mem with req/we/addr/wdata/rdata and key_reg_out feeds jtag_key/access_ctrl_reg. Packet and AES use apb_to_reg bridges. No observed wrapper signals check requester identity, AXI protection, privilege, or authorization before reaching these peripheral buses. Path: System fabric AXI masters -> ariane_peripherals AXI/APB or AXI-to-memory bridges -> ROM2/PLIC/packet/AES register interfaces; debug SBA may reach the same fabric via axi_m_req_o. Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "Any bus master with address reachability, including debug SBA, may read or overwrite key/ROM2 material or program security-sensitive packet/AES/PLIC registers without privilege mediation.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PO-MMIO-PERIPH-GUARD-007."
+      ]
+    },
+    {
+      "finding_id": "F8",
+      "status": "needs_more_evidence",
+      "summary": "ROM2 key/fuse storage is writable through the bus and readable through rdata_o, and key material is routed directly to jtag_key without a provisioning/write-protect or read-authorization guard.",
+      "vulnerability_category": "Write/read ROM2 and route key material to JTAG authentication. / ROM2 secure_reg contents, key_reg_out, jtag_key, rom2_rdata. / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: AXI/APB bus requester and debug authentication path. Operation: Write/read ROM2 and route key material to JTAG authentication. Object: ROM2 secure_reg contents, key_reg_out, jtag_key, rom2_rdata. Expected guard: ROM-like or key-location storage should reject writes or require a provisioning/privileged guard; any key or key-derived value routed to jtag_key or bus read data should have explicit authorization and safe reset semantics. Observed behavior: rom2 initializes secure_reg from constant mem on reset, but when req_i and we_i are asserted it writes secure_reg[index] <= wdata_i. Reads set raddr_q and rdata_o returns secure_reg[raddr_q]. ariane_peripherals connects axi2mem we/addr/wdata to rom2 and assigns jtag_key = key_reg_out[1][31:0]. No write-protect, provisioning mode, or read authorization is visible. Path: AXI access to rom2_fuse -> axi2mem i_axi2rom2 -> rom2 req/we/addr/wdata/rdata -> key_reg_out -> jtag_key/access_ctrl_reg. Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "A bus master can overwrite debug authentication key material and access-control registers, potentially enabling JTAG/DMI access or corrupting access-control policy; reads can expose secret key contents over the bus.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PO-ROM2-KEY-WRITE-EXPOSE-008."
+      ]
+    },
+    {
+      "finding_id": "F9",
+      "status": "needs_more_evidence",
+      "summary": "Debug reset/control registers can be written through the unauthenticated DMI path; dmactive/ndmreset and havereset behavior are visible, but authorization and complete safe clearing of command/SBA state on dmactive deassertion are not shown.",
+      "vulnerability_category": "Assert/deassert non-debug reset, activate/deactivate debug module, observe/reset status. / ndmreset_o, dmactive_o, havereset_d, debug module internal command/SBA state. / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: DMI debug requester. Operation: Assert/deassert non-debug reset, activate/deactivate debug module, observe/reset status. Object: ndmreset_o, dmactive_o, havereset_d, debug module internal command/SBA state. Expected guard: Non-debug-module reset and dmactive changes should be allowed only through authorized debug writes and should safely clear/retain state according to spec; reset requests must not be asserted by unauthenticated or stale DMI state. Observed behavior: DMControl DMI writes assign dmcontrol_d directly from dmi_req_i.data, and dmactive_o is assigned from dmcontrol_q.dmactive. ndmreset_o is part of dm_csrs outputs and havereset is set when ndmreset_o is asserted. Given dmstatus.authenticated is hardwired and DMI request authentication is missing, reset controls are reachable by unauthenticated DMI writes. Observed snippets do not prove clearing of sbaddress/sbdata/command/progbuf when dmactive deasserts. Path: JTAG/DMI -> dmi_jtag/dmi_cdc -> dm_top/dm_csrs -> DMControl write -> dmactive_o/ndmreset_o/havereset/debug state. Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "Unauthenticated or stale DMI state may reset the non-debug system, change debug module active state, or preserve command/SBA state across lifecycle transitions, causing denial of service or unauthorized post-reset debug actions.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Need full sequential block for dmcontrol_q/ndmreset_o and dmactive deassertion clearing of SBA/command/progbuf state. Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PO-DBG-RESET-LIFECYCLE-010."
+      ]
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "14 evidence slot(s) remained incomplete after closure checking."
+}

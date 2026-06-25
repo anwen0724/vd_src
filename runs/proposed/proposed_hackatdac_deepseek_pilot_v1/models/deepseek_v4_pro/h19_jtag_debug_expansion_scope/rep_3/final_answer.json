@@ -1,0 +1,382 @@
+{
+  "analysis_summary": "The proposed method produced 8 finding(s) from 10 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "No firewall or access control; debug master has full SoC visibility. This violates the principle of least privilege for debug access.",
+      "vulnerability_category": "Read / Write / Any memory-mapped protected asset / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Debug master connects to slave[1] of the AXI interconnect.",
+          "supports_claim": ""
+        },
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "dm_top instantiation with axi_m_req_o and axi_m_resp_i connecting to the master interface.",
+          "supports_claim": ""
+        },
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Address map definition with no firewall IP; all slaves accessible.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug module AXI master (dm_top / i_axi_master_dm) Operation: Read / Write Object: Any memory-mapped protected asset Expected guard: Address-range filter, debug-auth state, or privilege-de-escalation logic Observed behavior: The debug module's AXI master connects directly to the system interconnect (slave[1]) without any address firewall, enabling unrestricted access to the entire address map including boot ROM, peripheral registers, and DDR memory. Path: dm_top (axi_m_req_o) -> axi_master_connect -> slave[1] (AXI slave port of interconnect) -> DDR, bootrom, CLINT, PLIC, etc. (interconnect master ports). No address-gating IP observed. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debugger can read/write any memory/register, bypassing CPU privilege checks and PMP, potentially extracting keys from boot ROM or manipulating peripheral configuration.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No documentation on AXI interconnect firewall configuration; but RTL shows no firewall module instantiated.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "potential_warning",
+      "summary": "Inconclusive – no obvious security bypass observed, but incomplete coverage.",
+      "vulnerability_category": "Bypass authentication/authorization checks / Debug interface, protected CSRs, lock mechanisms / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/debug/dmi_jtag_tap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dmi_jtag_tap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "testmode_i used only for clock mux, not for security bypass.",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Partial read shows no usage of testmode_i for security override.",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "testmode_i present but unused in DMI state machine.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Test logic driven by test_en / testmode_i Operation: Bypass authentication/authorization checks Object: Debug interface, protected CSRs, lock mechanisms Expected guard: test_en must be permanently disabled in production or require unlock; no security checks overridden. Observed behavior: test_en connected to testmode_i of dm_top, dm_csrs, dmi_jtag, dmi_jtag_tap. In dmi_jtag_tap, testmode_i only switches clock source (DFT mux). In dm_csrs partial RTL (lines 200-569), no evidence of security bypass. In dmi_jtag, testmode_i not used in combinational logic. Path: test_en (ariane_xilinx) -> testmode_i of debug modules. No logic found that gates authentication or disables lock checks. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If test_en could bypass security in undisclosed code sections, it would undermine all protections. Currently no such bypass found.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Full dm_csrs and dmi_jtag RTL not fully reviewed; could contain hidden test-dependent paths. Fuse/disable mechanism for test_en unknown.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "rom2 is writable, violating immutability of security-critical ROM. Write protection missing.",
+      "vulnerability_category": "Write to ROM address space / Boot ROM contents / ROM control registers (rom2) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Write logic: if req_i and we_i, secure_reg[addr] <= wdata_i; no write protection.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Bus master (CPU or debug AXI master) Operation: Write to ROM address space Object: Boot ROM contents / ROM control registers (rom2) Expected guard: ROM must reject writes; we_i tied to 0 or decode blocks writes. Observed behavior: The rom2 module has a we_i input that, when high with req_i, writes wdata_i to secure_reg (key storage). No write-protection is enforced in the module. Instantiation in tb/ariane_peripherals.sv may provide we_i, but no evidence of it being tied to 0. Path: Debug master AXI -> interconnect -> bootrom/rom2 slave. rom2.sv always allows writes if we_i asserted. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker with bus access (CPU or debug master) can overwrite AES keys and access-control keys in rom2, breaking secure boot and confidentiality.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Instantiation of rom2 not fully traced to confirm if we_i is forced to 0. Bootrom (i_bootrom) module RTL not available.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "potential_warning",
+      "summary": "Inconclusive – cannot determine if security state is reset by ndmreset.",
+      "vulnerability_category": "Reset / Security-relevant state (lock bits, lifecycle FSM, key registers) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "ndmreset used as reset for CPU and rtc; no security state visible.",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "rom2 uses rst_ni (PoR), not ndmreset.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug module (dm_csrs) asserting ndmreset Operation: Reset Object: Security-relevant state (lock bits, lifecycle FSM, key registers) Expected guard: ndmreset should not clear security state; separate reset domain or sticky bits. Observed behavior: ndmreset from dm_top is used as main reset for CPU and peripherals (e.g., rtc, ariane core). No security-specific lock registers observed; rom2 uses rst_ni (PoR), not ndmreset. Path: ndmreset_o -> top-level rstgen (i_rstgen_main) -> ndmreset_n -> CPU, rtc, etc. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If lock bits or lifecycle state were reset by ndmreset, security can be broken. Not observed.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "No lock bit or lifecycle register RTL available to check reset connectivity.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "potential_warning",
+      "summary": "Inconclusive due to missing lock register evidence.",
+      "vulnerability_category": "Write to locked registers / Any register protected by a lock bit / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "i_axi_slave_connect_rev instantiates slave connect for debug master, no lock logic.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug AXI master (via i_axi_slave_connect_rev) Operation: Write to locked registers Object: Any register protected by a lock bit Expected guard: Lock enforcement in common bus path. Observed behavior: No lock bit registers found in examined RTL. The debug AXI master's slave connect (i_axi_slave_connect_rev) provides access to the system bus without any evidence of lock-bit gating. However, without lock register implementations, bypass risk cannot be assessed. Path: CPU CSR/MMIO write path unknown; debug master AXI path to same registers goes through interconnect without firewall. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If locks exist, debug master could bypass them; if not, no impact.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "RTL of any lock registers not available; cannot verify lock placement. Missing rtl_evidence for OBLI-006.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "Security-critical ROM is always readable by debug master; no post-boot protection.",
+      "vulnerability_category": "Read / Boot ROM contents (code, embedded keys) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Read and write paths; no conditional on lifecycle or lock.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug AXI master Operation: Read Object: Boot ROM contents (code, embedded keys) Expected guard: Post-boot ROM visibility lock or remap to hide from debug. Observed behavior: rom2 is always readable via bus without any lifecycle-dependant lock. No remap register or lock bit observed. Debug master has direct access to the ROM address range. Path: Debug master -> AXI -> bootrom/rom2 slave; read path always enabled. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debugger can read out AES keys and access-control keys from rom2, compromising secure boot and confidentiality.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Bootrom (i_bootrom) RTL not available, but rom2 evidence is sufficient.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F7",
+      "status": "confirmed_finding",
+      "summary": "Debug master can write to CLINT/PLIC/peripheral registers without restriction.",
+      "vulnerability_category": "Write to APB peripheral registers / CLINT registers, PLIC registers, peripheral configuration registers / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "openpiton/serpent_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "openpiton/serpent_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "CLINT AXI bridge connected to NoC, which connects to main bus; no firewall.",
+          "supports_claim": ""
+        },
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Debug master connects to interconnect without address restriction.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug AXI master Operation: Write to APB peripheral registers Object: CLINT registers, PLIC registers, peripheral configuration registers Expected guard: APB space partitioning or firewall blocking debug accesses to interrupt controllers. Observed behavior: The debug master is connected to the same AXI interconnect that serves CLINT, PLIC, and other peripherals (via axi_master_connect). No address firewall or bus filter observed. The serpent_peripherals module instantiates CLINT/PLIC on separate NoC channels, but after the AXI bridge they are reachable from the main bus. Path: Debug master -> AXI interconnect -> CLINT slave port (i_clint_axilite_bridge) or PLIC -> writes allowed. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debugger can reconfigure interrupt routing (disable timers, spoof interrupts) and manipulate peripheral settings, causing denial-of-service or privilege escalation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "None.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F8",
+      "status": "confirmed_finding",
+      "summary": "PCIe DMA has full memory access; no IOMMU or firewall, violating DMA confinement requirement.",
+      "vulnerability_category": "Read / Write to system memory / System DRAM, internal SRAM, peripherals, CSR memory regions / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "xdma instantiation; no firewall or IOMMU.",
+          "supports_claim": ""
+        },
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "DMA AXI path to slave[1] without address filtering.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: PCIe DMA master (xdma_0) Operation: Read / Write to system memory Object: System DRAM, internal SRAM, peripherals, CSR memory regions Expected guard: DMA constrained to a predefined window, or IOMMU present; no unrestricted access. Observed behavior: xdma_0 is instantiated and its AXI master port, after width conversion and clock conversion, connects to slave[1] (the same interconnect port used by debug master). There is no IOMMU or address-range limiter visible; the xdma configuration is unknown. Path: pci_exp pins -> xdma_0 -> axi_master port -> axi_dwidth_converter -> axi_clock_converter -> slave[1] of interconnect -> DDR and peripherals. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Malicious PCIe endpoint can read/write any physical memory, including secure monitor areas and CSRs, bypassing all CPU-based protections.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "xdma source not available; BAR and control register details unknown, but typical xdma has no built-in memory protection.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

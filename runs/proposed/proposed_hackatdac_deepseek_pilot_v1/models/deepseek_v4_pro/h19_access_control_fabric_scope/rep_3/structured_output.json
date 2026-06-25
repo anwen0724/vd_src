@@ -1,0 +1,339 @@
+{
+  "analysis_summary": "The proposed method produced 4 finding(s) from 6 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "Debug master can access any peripheral with permissions in its access_ctrl row, using the processor's current privilege level, potentially bypassing intended restrictions.",
+      "vulnerability_category": "read or write / any access-controlled slave (ROM2, AES, UART, etc.) on master[0:11] / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "slave[1] for debug",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "priv_lvl = priv_lvl_processor",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "access_ctrl bit slicing",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "priv_lvl_i wired to AXI node",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "no HW auth for JTAG enable",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "single priv_lvl_i used for all slave indices",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: debug master (i_axi_master_dm connected to slave[1]) via JTAG/DMI path Operation: read or write Object: any access-controlled slave (ROM2, AES, UART, etc.) on master[0:11] Expected guard: Independent debug priv_lvl or debug authentication gating access_ctrl evaluation for slave[1] Observed behavior: Debug master shares processor's priv_lvl signal; its access_ctrl row (index 1) is evaluated using priv_lvl_processor. No separate debug authorization. Path: jtag_enable → i_SimJTAG → i_dmi_jtag → jtag_dmi_req → debug MUX → i_dm_top → dm_axi_m_req → i_axi_master_dm → slave[1] → i_axi_xbar → connectivity_map(slave=1, priv_lvl=processor) → master[j] Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debug master can access any peripheral whose access_ctrl_reg[1][*][priv_lvl_processor] bit is set; if access_ctrl_reg[1] is permissive, debug can read/write all slaves including ROM2 keys, AES, UART",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "potential_warning",
+      "summary": "access_ctrl_reg implementation inside ariane_peripherals module is not available in the visible RTL; write gating, privilege check, and lock mechanisms cannot be inspected.",
+      "vulnerability_category": "write / access_ctrl_reg (access control configuration) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "declaration: logic [1:0][47:0] access_ctrl_reg",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "access_ctrl derived from access_ctrl_reg via bit slicing",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "ROM2 mem contains initial values for access control master 0 and 1, but loading path into access_ctrl_reg is in the inaccessible ariane_peripherals",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any bus master that can write to access_ctrl_reg address Operation: write Object: access_ctrl_reg (access control configuration) Expected guard: Machine-mode only write access with optional lock bit Observed behavior: access_ctrl_reg implementation inside ariane_peripherals module is not available in the visible RTL; write gating, privilege check, and lock mechanisms cannot be inspected. Path: Unknown – ariane_peripherals source file missing Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If access_ctrl_reg is writable by a lower-privilege master and lacks a lock, an attacker could escalate privileges to access any peripheral.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "ariane_peripherals source not available; cannot inspect write gating, privilege check, or lock mechanism.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "PLIC access granted via CLINT permission bit creates unintended sharing of permissions.",
+      "vulnerability_category": "access (read/write) the PLIC peripheral / PLIC (interrupt controller) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "assign connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i])",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "PLIC=6, CLINT=7 enumeration",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "s_connectivity_map passed as cfg_connectivity_map_i to axi_node",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any master with CLINT permission but no PLIC permission Operation: access (read/write) the PLIC peripheral Object: PLIC (interrupt controller) Expected guard: PLIC access controlled solely by its own permission bit, not derived from CLINT Observed behavior: connectivity_map_o[i][6] = access_ctrl_i[i][6][priv_lvl_i] || access_ctrl_i[i][7][priv_lvl_i]; a master with CLINT access (i.e., j=7 bit set) gains PLIC access regardless of the dedicated PLIC bit. Path: connectivity_mapping module (generate block) → s_connectivity_map → cfg_connectivity_map_i → axi_node → master[6] (PLIC) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "A master intended to have only CLINT access can read/write PLIC, potentially manipulating interrupt priorities, enabling/disabling interrupts, and interfering with the security model.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Unclear if PLIC/CLINT sharing is intentional; requires system security policy confirmation.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "potential_warning",
+      "summary": "ndmreset is generated by dm_top and connected to AXI node reset (ndmreset_n) and to ariane_peripherals (ndmreset_n). The effect on access_ctrl_reg cannot be verified because ariane_peripherals source is missing.",
+      "vulnerability_category": "reset / access_ctrl_reg or any lock/security state registers / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "ndmreset_o from dm_top",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "rstgen uses ~ndmreset to generate ndmreset_n",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "ariane_peripherals reset connected to ndmreset_n",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "access_ctrl_reg feeds access_ctrl, but reg implementation location unknown",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: ndmreset (debug non-maskable reset) Operation: reset Object: access_ctrl_reg or any lock/security state registers Expected guard: ndmreset should not reset security configuration, or assertion protected by authentication Observed behavior: ndmreset is generated by dm_top and connected to AXI node reset (ndmreset_n) and to ariane_peripherals (ndmreset_n). The effect on access_ctrl_reg cannot be verified because ariane_peripherals source is missing. Path: dm_top → ndmreset → rstgen (ndmreset_n) → ariane_peripherals.rst_ni; access_ctrl_reg flip-flop reset condition unknown Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If ndmreset resets access_ctrl_reg to a permissive default, an attacker via debug could clear all access restrictions and gain unlimited peripheral access.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "access_ctrl_reg implementation inside ariane_peripherals not available; cannot verify if ndmreset resets access_ctrl_reg or its reset value.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

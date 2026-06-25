@@ -1,136 +1,186 @@
 {
-  "analysis_summary": "The CSR register file (csr_regfile.sv) in the Ariane RISC-V core was analyzed for permission-related security vulnerabilities. One critical privilege escalation vulnerability was identified: the `umode_i` input signal, when asserted, forces the core's effective privilege level (`priv_lvl_o`) to Machine mode (PRIV_LVL_M = 2'b11) unconditionally. This overrides the architectural privilege level (`priv_lvl_q`) and causes all CSR access privilege checks to pass, effectively granting Machine-mode CSR access to code running at any privilege level. Additionally, a specific bypass exists for CSR_MEPC, allowing read/write access to the Machine Exception Program Counter regardless of current privilege. These represent serious hardware-level privilege escalation paths.",
+  "analysis_summary": "Analyzed the RTL source files under the hackatdac19/h19_csr_privilege_scope directory, focusing on the CSR register file (csr_regfile.sv), the top-level Ariane core (ariane.sv), and the RISC-V package definitions (riscv_pkg.sv). The analysis identified multiple permission-related security vulnerabilities, including a severe privilege escalation path via the umode_i input, a privilege check bypass specifically for the MEPC CSR, and the absence of Physical Memory Protection (PMP).",
   "findings": [
     {
-      "finding_id": "F001",
+      "finding_id": "FINDING-01",
       "status": "confirmed_finding",
-      "summary": "Privilege escalation via `umode_i` input: when asserted, `priv_lvl_o` is unconditionally forced to Machine mode, bypassing all CSR access privilege checks.",
-      "vulnerability_category": "Privilege Escalation / Insufficient Access Control",
+      "summary": "umode_i input signal forces privilege level to Machine mode, bypassing all CSR access controls",
+      "vulnerability_category": "Privilege Escalation",
       "affected_locations": [
         {
           "file": "src/csr_regfile.sv",
           "line_start": 938,
           "line_end": 938,
           "module": "csr_regfile",
-          "signal_or_register": "priv_lvl_o, umode_i"
+          "signal_or_register": "priv_lvl_o"
         },
         {
           "file": "src/csr_regfile.sv",
-          "line_start": 854,
-          "line_end": 854,
+          "line_start": 83,
+          "line_end": 83,
           "module": "csr_regfile",
-          "signal_or_register": "priv_lvl_o (privilege check)"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "src/csr_regfile.sv",
-          "line_start": 938,
-          "line_end": 938,
-          "module": "csr_regfile",
-          "object": "assign priv_lvl_o",
-          "evidence_type": "source_code",
-          "description": "The output privilege level priv_lvl_o is assigned: (debug_mode_q || umode_i) ? riscv::PRIV_LVL_M : priv_lvl_q. When umode_i is high, priv_lvl_o becomes M-mode (2'b11) regardless of the actual architectural privilege state priv_lvl_q.",
-          "supports_claim": "Direct evidence that umode_i forces Machine mode privilege."
-        },
-        {
-          "file": "src/csr_regfile.sv",
-          "line_start": 854,
-          "line_end": 854,
-          "module": "csr_regfile",
-          "object": "CSR privilege check logic",
-          "evidence_type": "source_code",
-          "description": "The privilege check for CSR access uses priv_lvl_o: if ((riscv::priv_lvl_t'(priv_lvl_o & csr_addr.csr_decode.priv_lvl) != csr_addr.csr_decode.priv_lvl) && !(csr_addr.address==riscv::CSR_MEPC)). Since priv_lvl_o can be forced to M-mode by umode_i, the AND-mask always yields the required privilege level, always passing the check.",
-          "supports_claim": "Shows that the vulnerability in priv_lvl_o assignment propagates to privilege checks."
-        },
-        {
-          "file": "include/riscv_pkg.sv",
-          "line_start": 22,
-          "line_end": 24,
-          "module": "riscv_pkg",
-          "object": "PRIV_LVL_M",
-          "evidence_type": "source_code",
-          "description": "PRIV_LVL_M is defined as 2'b11. When ANDed with any other privilege level value, the result equals the other value, defeating the privilege-level masking check.",
-          "supports_claim": "Explains why forcing to M-mode bypasses the AND-based privilege check."
+          "signal_or_register": "umode_i"
         },
         {
           "file": "src/ariane.sv",
-          "line_start": 50,
+          "line_start": 51,
           "line_end": 51,
           "module": "ariane",
-          "object": "umode_i input port",
-          "evidence_type": "source_code",
-          "description": "umode_i is exposed as a top-level input port in ariane.sv, meaning it is externally controllable at the SoC level.",
-          "supports_claim": "umode_i is an externally accessible signal, increasing attack surface."
+          "signal_or_register": "umode_i"
         }
       ],
-      "reasoning_summary": "The `priv_lvl_o` signal is used downstream for all CSR access privilege decisions (line ~854). The assignment at line 938 allows `umode_i` to unconditionally elevate `priv_lvl_o` to Machine mode. Since the privilege check masks `priv_lvl_o` with the CSR-required privilege level, an M-mode `priv_lvl_o` (2'b11) will always satisfy any privilege requirement. This means asserting `umode_i` gives Machine-mode CSR access (read/write) to any less-privileged code, including the ability to modify `mstatus`, `mepc`, `mtvec`, `pmpcfg`, etc., leading to full system compromise.",
-      "security_impact": "Critical. An attacker who can assert the `umode_i` signal (via a compromised peripheral, software-controlled GPIO, or physical tampering) can escalate to Machine-mode privilege. This allows arbitrary modification of all machine-level CSRs, including the trap vector (mtvec), exception delegation (medeleg/mideleg), physical memory protection (PMP) settings, and satp (page table root). This results in complete compromise of the RISC-V hart's security properties, including TEE isolation, secure boot chains, and access control mechanisms.",
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 938,
+          "line_end": 938,
+          "module": "csr_regfile",
+          "object": "priv_lvl_o",
+          "evidence_type": "source_code",
+          "description": "assign priv_lvl_o = (debug_mode_q || umode_i) ? riscv::PRIV_LVL_M : priv_lvl_q;",
+          "supports_claim": "The umode_i input directly overrides the privilege level output to Machine mode (PRIV_LVL_M) whenever asserted, regardless of the internally tracked privilege state (priv_lvl_q)."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 852,
+          "line_end": 857,
+          "module": "csr_regfile",
+          "object": "exception_ctrl block",
+          "evidence_type": "source_code",
+          "description": "The privilege check for CSR access uses priv_lvl_o (the overridden signal): if ((riscv::priv_lvl_t'(priv_lvl_o & csr_addr.csr_decode.priv_lvl) != csr_addr.csr_decode.priv_lvl) ...)",
+          "supports_claim": "All CSR privilege checks depend on priv_lvl_o, which can be forced to M-mode by umode_i, thus bypassing all privilege-level access restrictions."
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": 51,
+          "line_end": 51,
+          "module": "ariane",
+          "object": "umode_i port",
+          "evidence_type": "source_code",
+          "description": "input logic umode_i is exposed as a top-level port of the Ariane core.",
+          "supports_claim": "The umode_i signal is externally accessible at the top level, making it a direct attack surface for privilege escalation."
+        }
+      ],
+      "reasoning_summary": "The umode_i input port is intended as a test/debug mechanism that forces the CPU into Machine mode. However, it is exposed as a top-level input on the Ariane core and directly feeds into the CSR register file's privilege level output (priv_lvl_o). This output is used for all CSR access privilege checks (line 854), interrupt enable decisions (lines 830-831, 840), and translation enable (line 948). An attacker who can assert umode_i can execute with full Machine-mode privileges, read/write any CSR including mstatus, mepc, satp, etc., and completely compromise the system's security boundaries.",
+      "security_impact": "CRITICAL - Complete privilege escalation. An external agent asserting umode_i gains full Machine-mode access, bypassing all RISC-V privilege-level protections. This allows arbitrary CSR read/write, memory translation manipulation, interrupt control takeover, and potential code execution at the highest privilege level.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "The exact intended purpose of `umode_i` is not documented in the provided source scope. While the signal name suggests 'user mode indication', the logic forces Machine mode when asserted, which appears inverted from the naming convention. Source comments from the original Ariane/CVA6 repository indicate this may be a debug or test feature, but without the full commit history or design documentation, we cannot confirm whether this was intentional backdoor access or a design flaw. Additionally, the full `ariane_pkg.sv` package file (which defines `csr_t`, `fu_op`, etc.) was not available in the input scope, limiting analysis of the CSR address decode logic.",
+      "uncertainty_or_missing_evidence": "The intended use case of umode_i is unclear from the provided files. It may be intended as a test-only signal that is tied low in production, but the RTL contains no internal safeguard, fuse, or compile-time guard to prevent its misuse. The surrounding SoC-level integration is not visible in the provided scope, so we cannot confirm whether this signal is exposed in actual silicon or only in simulation.",
       "recommended_follow_up": [
-        "Review the purpose and necessity of the `umode_i` input. If it is a debug-only feature, it should be gated by a debug authentication mechanism or fused off in production silicon.",
-        "Ensure `umode_i` is tied to 0 in production SoC integrations and cannot be toggled by software or external interfaces.",
-        "Consider removing the `umode_i` override of `priv_lvl_o` in the CSR file and instead using a dedicated debug-mode privilege mechanism.",
-        "Audit the CSR_MEPC bypass (line 854) to confirm whether unrestricted access to MEPC is architecturally acceptable."
+        "Confirm whether umode_i is tied to logic 0 in the production SoC integration.",
+        "If umode_i is needed for test/debug, gate it with a secure boot-time fuse or life-cycle state check so it cannot be asserted after secure boot.",
+        "Consider renaming the signal and adding explicit assertions that it cannot be asserted outside of test modes."
       ]
     },
     {
-      "finding_id": "F002",
-      "status": "potential_warning",
-      "summary": "CSR_MEPC privilege check bypass: the CSR access control logic unconditionally allows read/write access to CSR_MEPC regardless of current privilege level.",
-      "vulnerability_category": "Insufficient Access Control / Privilege Check Bypass",
+      "finding_id": "FINDING-02",
+      "status": "confirmed_finding",
+      "summary": "CSR privilege check explicitly exempts MEPC from privilege-level enforcement",
+      "vulnerability_category": "Insufficient Access Control",
       "affected_locations": [
         {
           "file": "src/csr_regfile.sv",
           "line_start": 854,
           "line_end": 854,
           "module": "csr_regfile",
-          "signal_or_register": "csr_addr (CSR_MEPC)"
+          "signal_or_register": "csr_exception_o"
         }
       ],
       "evidence": [
         {
           "file": "src/csr_regfile.sv",
-          "line_start": 854,
+          "line_start": 853,
           "line_end": 854,
           "module": "csr_regfile",
-          "object": "privilege check expression",
+          "object": "exception_ctrl block",
           "evidence_type": "source_code",
-          "description": "The privilege check has a bypass: && !(csr_addr.address==riscv::CSR_MEPC). This means MEPC (Machine Exception Program Counter) can be read and written from any privilege level without triggering an illegal instruction exception.",
-          "supports_claim": "Direct evidence of privilege bypass for CSR_MEPC."
+          "description": "//if ((riscv::priv_lvl_t'(priv_lvl_o & csr_addr.csr_decode.priv_lvl) != csr_addr.csr_decode.priv_lvl)) begin\nif ((riscv::priv_lvl_t'(priv_lvl_o & csr_addr.csr_decode.priv_lvl) != csr_addr.csr_decode.priv_lvl) && !(csr_addr.address==riscv::CSR_MEPC)) begin",
+          "supports_claim": "The privilege check is explicitly bypassed when the CSR address equals CSR_MEPC (0x341). The commented-out line above shows the original check without the exemption."
         },
         {
           "file": "src/csr_regfile.sv",
-          "line_start": 220,
-          "line_end": 220,
+          "line_start": 855,
+          "line_end": 856,
           "module": "csr_regfile",
-          "object": "CSR read for MEPC",
+          "object": "exception_ctrl block",
           "evidence_type": "source_code",
-          "description": "CSR_MEPC read returns mepc_q without any privilege check in the read path.",
-          "supports_claim": "Read bypass is consistent with the write bypass."
-        },
-        {
-          "file": "src/csr_regfile.sv",
-          "line_start": 484,
-          "line_end": 484,
-          "module": "csr_regfile",
-          "object": "CSR write for MEPC",
-          "evidence_type": "source_code",
-          "description": "CSR_MEPC write sets mepc_d without any privilege check in the update path.",
-          "supports_claim": "Write bypass is consistent with the read bypass."
+          "description": "csr_exception_o.cause = riscv::ILLEGAL_INSTR;\ncsr_exception_o.valid = 1'b1;",
+          "supports_claim": "This exception is NOT raised when accessing MEPC from any privilege level."
         }
       ],
-      "reasoning_summary": "The RISC-V privileged specification requires that attempts to access a CSR without appropriate privilege raise an illegal instruction exception. MEPC is a Machine-mode CSR and should only be accessible from M-mode. The explicit bypass in the privilege check (line 854) allows unrestricted access. Combined with F001, this could allow unprivileged code to read and manipulate the machine exception return address, subverting exception handling.",
-      "security_impact": "Medium-High. MEPC holds the return address from machine-mode traps. If an attacker can write MEPC, they can redirect machine-mode execution flow after an MRET instruction. This could be used to hijack control flow after any machine-mode trap handler returns. The RISC-V spec allows MEPC to be written with arbitrary addresses, so this is a vector for control-flow hijacking at the highest privilege level.",
-      "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The rationale for this bypass is unknown. It could be a debugging convenience, a workaround for a specific trap-handling flow, or a legacy artifact. The original Ariane/CVA6 designers may have had a specific architectural reason. Without the full design documentation or commit history, we cannot determine intent. The `ariane_pkg.sv` package file containing the full CSR address enum definitions was not included in the scope.",
+      "reasoning_summary": "The RISC-V privileged specification requires that CSR MEPC (Machine Exception Program Counter, address 0x341) be accessible only in Machine mode. The code in csr_regfile.sv line 854 adds an explicit exemption `&& !(csr_addr.address==riscv::CSR_MEPC)` to the privilege check, meaning any privilege level (U, S, or M) can read and write MEPC without triggering an illegal instruction exception. This allows a lower-privileged mode (e.g., Supervisor or User) to read the machine-mode exception PC or redirect machine-mode exception returns by modifying MEPC, which is a violation of the RISC-V privilege specification.",
+      "security_impact": "HIGH - Lower-privilege code (S-mode or U-mode) can read and modify the Machine-mode exception program counter (MEPC). This can be exploited to leak information about M-mode execution flow, redirect M-mode exception returns to attacker-controlled addresses, and potentially break the security guarantees of the privilege separation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The reasoning behind this explicit exemption is unclear from the code. It may have been a debug workaround or a deliberate design choice for a specific use case. There is no comment explaining why MEPC is exempted. The csr_write_process block (lines 483-484) does allow writing to MEPC from any mode that passes the privilege check, and since the check is bypassed, any mode can write it.",
       "recommended_follow_up": [
-        "Review the justification for the CSR_MEPC privilege bypass and remove it if not required by a specific, documented use case.",
-        "If the bypass is required for a specific flow, restrict it to only read access or add additional hardware checks (e.g., only allow the bypass during specific trap-handling sequences)."
+        "Remove the MEPC exemption from the privilege check unless there is a documented, security-reviewed reason for its presence.",
+        "If the exemption is needed for a specific debug scenario, ensure it is gated behind a debug authentication mechanism.",
+        "Verify against the RISC-V privileged specification that MEPC access is correctly restricted to M-mode."
+      ]
+    },
+    {
+      "finding_id": "FINDING-03",
+      "status": "potential_warning",
+      "summary": "No Physical Memory Protection (PMP) implemented - missing hardware enforcement of memory access permissions",
+      "vulnerability_category": "Missing Security Feature",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 1,
+          "line_end": 1057,
+          "module": "csr_regfile",
+          "signal_or_register": ""
+        },
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": 369,
+          "line_end": 370,
+          "module": "riscv",
+          "signal_or_register": "CSR_PMPCFG0, CSR_PMPADDR0"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": 369,
+          "line_end": 370,
+          "module": "riscv",
+          "object": "CSR definitions",
+          "evidence_type": "source_code",
+          "description": "CSR_PMPCFG0 = 12'h3A0, CSR_PMPADDR0 = 12'h3B0 are defined but never referenced in csr_regfile.sv.",
+          "supports_claim": "The PMP CSR addresses are defined in the package but have no read or write logic in the CSR register file."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 149,
+          "line_end": 250,
+          "module": "csr_regfile",
+          "object": "csr_read_process",
+          "evidence_type": "source_code",
+          "description": "The CSR read process has no cases for CSR_PMPCFG0 or CSR_PMPADDR0. Accesses fall through to the default case which sets read_access_exception = 1'b1.",
+          "supports_claim": "PMP CSRs are not readable; any read attempt triggers an illegal instruction exception."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 333,
+          "line_end": 512,
+          "module": "csr_regfile",
+          "object": "csr_update",
+          "evidence_type": "source_code",
+          "description": "The CSR write process has no cases for CSR_PMPCFG0 or CSR_PMPADDR0. Accesses fall through to the default case which sets update_access_exception = 1'b1.",
+          "supports_claim": "PMP CSRs are not writable; any write attempt triggers an illegal instruction exception."
+        }
+      ],
+      "reasoning_summary": "The RISC-V privileged specification defines Physical Memory Protection (PMP) as a standard mechanism for M-mode to restrict physical memory accesses by lower privilege levels. The CSR addresses for PMP configuration (CSR_PMPCFG0 at 0x3A0, CSR_PMPADDR0 at 0x3B0) are defined in the riscv package but have no functional implementation in the CSR register file. Any access to these CSRs results in an illegal instruction exception. This means there is no hardware-enforced memory protection between privilege levels beyond the virtual memory (SV39) translation, which itself is controlled via CSRs that could be vulnerable to the issues in FINDING-01 and FINDING-02.",
+      "security_impact": "MEDIUM - Without PMP, Machine-mode cannot restrict physical memory accesses from Supervisor or User mode. This is particularly critical if an attacker finds a way to disable virtual memory translation (via SATP CSR manipulation). The lack of PMP means there is no fallback hardware memory isolation mechanism.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "PMP may have been intentionally omitted for this configuration (e.g., for systems with a single privilege mode or where all memory is equally trusted). The README and file scope do not indicate the intended deployment context. It is also possible that PMP is implemented elsewhere in the SoC (e.g., in a bus fabric or memory controller) outside the provided file scope.",
+      "recommended_follow_up": [
+        "Assess whether the deployment context requires PMP based on the RISC-V privileged specification compliance requirements.",
+        "If PMP is required, implement the full PMP CSR read/write logic and the corresponding memory access checks.",
+        "If PMP is intentionally omitted, document this as a known security limitation."
       ]
     }
   ],
-  "no_finding_reason": "",
-  "global_uncertainty": "The input scope is limited to include/riscv_pkg.sv, src/csr_regfile.sv, and src/ariane.sv. The full ariane_pkg.sv (containing csr_t, fu_op, exception_t, and scoreboard_entry_t type definitions) was not available, limiting the ability to trace the complete CSR address decode path and all CSR access control decisions. Additionally, the README notes this is a local RTL view, so it may not represent the final, patched version of the design. The CVA6/Ariane core has undergone many revisions, and some of these issues may already be addressed in upstream versions."
+  "no_finding_reason": "N/A - Permission-related security vulnerabilities were identified.",
+  "global_uncertainty": "The analysis is limited to three source files (ariane.sv, csr_regfile.sv, riscv_pkg.sv) under the provided input scope. SoC-level integration details, production constraints (e.g., whether umode_i is tied low in the final netlist), and the broader system security architecture are not visible. The findings are based solely on the RTL as provided. Additionally, the Ariane core is an academic/research processor (ETH Zurich / University of Bologna) and some of these apparent vulnerabilities may be intentional design choices for a research platform. The ariane_pkg (imported but not fully provided) may contain additional definitions such as SMODE_STATUS_WRITE_MASK, SMODE_STATUS_READ_MASK, MODE_OFF, MODE_SV39, ZERO_TVAL, and FP_PRESENT that could not be fully verified."
 }

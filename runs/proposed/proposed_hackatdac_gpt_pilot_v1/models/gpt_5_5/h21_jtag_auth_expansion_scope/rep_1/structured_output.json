@@ -1,0 +1,847 @@
+{
+  "analysis_summary": "The proposed method produced 8 finding(s) from 10 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "External JTAG DMI read/response path is not consistently gated by a persistent authenticated unlock state; DMI reads can be accepted when we_flag is deasserted and response data is shifted to TDO under DMIACCESS without an unlock check.",
+      "vulnerability_category": "read/write DMI registers and receive DMI responses via DMI op encoding and valid/ready handshake / debug_req/debug_resp DMI interface through dmi_jtag/dmi_cdc into the debug module / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_cdc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_cdc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external JTAG/TAP requester driving tck_i/tms_i/trst_ni/td_i Operation: read/write DMI registers and receive DMI responses via DMI op encoding and valid/ready handshake Object: debug_req/debug_resp DMI interface through dmi_jtag/dmi_cdc into the debug module Expected guard: DMI request valid generation and response exposure should be gated by successful JTAG authentication/unlock, not merely TAP DMI selection/update events. Observed behavior: dmi_jtag sets jtag_unlock_o equal to combinational pass_check; pass_check is defaulted low each combinational evaluation and is not a persistent unlock register. The DMI read path accepts an update when `(pass_check | ~we_flag == 1)`, so reads are allowed if the top-level we_flag_4 is 0. Read/Write states assert dmi_req_valid, and capture/shift exposes dr_q through dmi_tdo/TDO when DMIACCESS is selected. dmi_cdc only transports the valid/data handshakes and does not add an authorization filter. Path: riscv_peripherals external JTAG pins -> dmi_jtag_tap DMIACCESS -> dmi_jtag FSM/DR -> dmi_cdc -> debug_req/debug_resp -> debug module Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthenticated external JTAG traffic can potentially read debug module DMI state and observe debug responses, enabling debug capability probing and information disclosure.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "The fuse memory stores JTAG authentication hash/key material in the same array returned by the generic fuse read port, with no filtering visible in fuse_mem.",
+      "vulnerability_category": "read fuse words through fuse_req/fuse_addr/fuse_rdata / fuse_mem rdata_o and the jtag_hash_o/ikey_hash_o/okey_hash_o material used by JTAG HMAC authentication / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software/NOC/MMIO requester reaching the PKT/fuse path Operation: read fuse words through fuse_req/fuse_addr/fuse_rdata Object: fuse_mem rdata_o and the jtag_hash_o/ikey_hash_o/okey_hash_o material used by JTAG HMAC authentication Expected guard: Fuse/hash material used for JTAG authentication should not be readable over ordinary software-visible/MMIO paths unless protected by privilege/lifecycle/access-control checks and secret-range filtering. Observed behavior: fuse_mem contains constants labeled JTAG expected HMAC hash, HMAC okey/ikey hashes, HMAC key, access-control words, SHA/AES keys, and returns mem[addr_q] on rdata_o for any in-range requested address. riscv_peripherals connects pkt_wrapper fuse_req/fuse_addr/fuse_rdata to fuse_mem and also wires jtag_hash/ikey_hash/okey_hash from the same fuse memory to dmi_jtag. Path: NOC PKT channel -> noc_axilite_bridge -> pkt_wrapper -> fuse_req/fuse_addr/fuse_rdata -> fuse_mem.mem -> jtag_hash/ikey_hash/okey_hash -> dmi_jtag Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "A requester able to drive the PKT/fuse read path can disclose JTAG authentication reference material and embedded crypto constants, undermining the JTAG authentication scheme and exposing secrets.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "Most security-sensitive wrappers receive acc_ctrl/reglk/debug inputs, but the debug NOC path is bridged directly into the debug module slave interface without visible top-level acc_ctrl/privilege/debug-mode mediation.",
+      "vulnerability_category": "read/write/configure protected peripheral/debug registers / debug module slave register path and security-sensitive peripheral wrappers / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software-visible NOC/MMIO requester, especially the debug NOC requester Operation: read/write/configure protected peripheral/debug registers Object: debug module slave register path and security-sensitive peripheral wrappers Expected guard: Security-sensitive peripheral and debug accesses should be mediated by acc_ctrl/priv_lvl_i/debug_mode_i/reglk_ctrl or equivalent checks before accept/ready/read-data behavior. Observed behavior: riscv_peripherals derives acc_ctrl_c from acc_ctrl and priv_lvl_i and passes acct_ctrl_i/reglk_ctrl_i/debug_mode_i to many wrappers. However, the debug NOC bridge maps directly to dm_master, axi2mem converts dm_master into dm_slave_req/we/addr/wdata/rdata, and dm_top receives those slave signals without visible top-level acc_ctrl, priv_lvl_i, debug_mode_i, or reglk_ctrl qualification. Path: buf_ariane_debug_noc* -> i_debug_axilite_bridge -> dm_master AXI -> axi2mem -> dm_slave_* -> dm_top Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Ordinary NOC/MMIO traffic on the debug channel may access debug module registers and potentially affect halt/reset/debug state without the access-control checks applied to other protected peripherals.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "potential_warning",
+      "summary": "riscv_peripherals instantiates reglk_wrapper producing reglk_ctrl and passes slices of reglk_ctrl to protected wrappers. AES0 ORs its lock slice with we_flag_1; DMA receives we_flag_3; dmi_jtag receives we_flag_4. The provided evidence does not include reglk_wrapper internals or update equations, so sticky behavior, authorized clear, and exact semantics of we_flag bypass/lock cannot be confirmed.",
+      "vulnerability_category": "set/clear lock bits and write locked registers / reglk_ctrl output from reglk_wrapper and protected wrapper reglk_ctrl_i inputs / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software/NOC requester on reglk channel and external we_flag_0..we_flag_4 sources Operation: set/clear lock bits and write locked registers Object: reglk_ctrl output from reglk_wrapper and protected wrapper reglk_ctrl_i inputs Expected guard: Lock bits should be safe on reset, sticky or only authorized-clearable, and should gate every protected write path including alternate external flags. Observed behavior: riscv_peripherals instantiates reglk_wrapper producing reglk_ctrl and passes slices of reglk_ctrl to protected wrappers. AES0 ORs its lock slice with we_flag_1; DMA receives we_flag_3; dmi_jtag receives we_flag_4. The provided evidence does not include reglk_wrapper internals or update equations, so sticky behavior, authorized clear, and exact semantics of we_flag bypass/lock cannot be confirmed. Path: reglk NOC channel -> reglk_axilite_bridge -> reglk_wrapper -> reglk_ctrl -> protected wrappers and external we_flag inputs Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Security impact is not fully established from visible evidence.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "reglk_wrapper source, reset value of reglk_ctrl, whether reglk_ctrl supports 1->0 transitions, semantics of external we_flag_* inputs, and final protected-register write gates. Missing evidence slots: impact.",
+      "recommended_follow_up": [
+        "Check security-sensitive consequence of the observed behavior for obligation PERM-REGLK-STICKY-004."
+      ]
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "The JTAG authentication decision appears transient and not tied to a persistent valid completed HMAC comparison before DMI access decisions; HMAC bypass-related sequencing remains risky in combination with pass_check/jtag_unlock wiring.",
+      "vulnerability_category": "provide password/message and trigger authentication / pass_check/pass_mode/jtag_unlock_o and HMAC comparison inputs/outputs / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/hmac/hmac.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/hmac/hmac.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/hmac/hmac.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/hmac/hmac.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/hmac/hmac.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/hmac/hmac.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external JTAG requester controlling DMI scan data Operation: provide password/message and trigger authentication Object: pass_check/pass_mode/jtag_unlock_o and HMAC comparison inputs/outputs Expected guard: Authentication should depend on a valid completed HMAC/hash comparison against fuse-provided reference, with no stale hash, bypass, or partial-load condition permitting unlock. Observed behavior: dmi_jtag has HMAC-related pass_data/exp_hash/pass_hash/startHash/hmac_ready/hashValid signals and instantiates hmac. hmac supports key_hash_bypass_i, which causes precomputed ikey/okey hash blocks to be used. The provided model record indicates pass_check is combinationally defaulted low, jtag_unlock_o is assigned directly to pass_check, and DMI read acceptance can depend on inverse we_flag rather than a persistent hashValid-authenticated unlock. This means the visible unlock/DMI policy is not a robust completed-HMAC authorization state. Path: JTAG DMI scan data -> dmi_jtag pass_data/startHash -> hmac -> pass_hash/hashValid/hmac_ready -> pass_check/jtag_unlock_o -> DMI access FSM Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "A non-persistent or bypassed authentication decision can allow failed, partial, stale, or policy-disabled authentication to leave DMI access reachable, weakening JTAG debug authentication.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Full line-level comparison equations in dmi_jtag PassChk/PassChkValid and exact key_hash_bypass_i connection value in the hmac instance were not fully visible in provided observations.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "potential_warning",
+      "summary": "The top-level instantiates dma_wrapper and provides reglk_ctrl_i, acct_ctrl_i derived from acc_ctrl_c[priv_lvl_i][8], pmpcfg_i, pmpaddr_i, and we_flag_3. The NOC DMA channel is bridged to dma_axi_req/resp. The provided observations do not include dma_wrapper internals or the DMA master transaction path/range-check equations, so adequacy of DMA address-range enforcement cannot be determined.",
+      "vulnerability_category": "configure DMA and issue reads/writes / DMA wrapper/master path and protected memory/peripheral address regions / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: DMA engine and software configuring DMA Operation: configure DMA and issue reads/writes Object: DMA wrapper/master path and protected memory/peripheral address regions Expected guard: DMA configuration and transfers should be constrained by access-control/range/PMP checks and should not race active transfers to escape bounds. Observed behavior: The top-level instantiates dma_wrapper and provides reglk_ctrl_i, acct_ctrl_i derived from acc_ctrl_c[priv_lvl_i][8], pmpcfg_i, pmpaddr_i, and we_flag_3. The NOC DMA channel is bridged to dma_axi_req/resp. The provided observations do not include dma_wrapper internals or the DMA master transaction path/range-check equations, so adequacy of DMA address-range enforcement cannot be determined. Path: buf_ariane_dma_noc* -> i_dma_axilite_bridge -> dma_axi_req/resp -> dma_wrapper with acct_ctrl/reglk/PMP inputs Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Security impact is not fully established from visible evidence.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "dma_wrapper internals, master egress path, PMP/range-comparison equations, active-transfer state behavior, and security impact of any missing range checks. Missing evidence slots: impact.",
+      "recommended_follow_up": [
+        "Check security-sensitive consequence of the observed behavior for obligation PERM-DMA-RANGE-008."
+      ]
+    },
+    {
+      "finding_id": "F7",
+      "status": "confirmed_finding",
+      "summary": "Visible requester paths to the debug module include an unguarded debug NOC slave path and a JTAG DMI path with weak authentication gating, creating a plausible unauthorized debug-control route.",
+      "vulnerability_category": "write/control debug module state to trigger halt/debug request/reset/debug activation / debug_req_o, ndmreset_o, dmactive_o and debug module control state / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG requester or software/NOC debug requester Operation: write/control debug module state to trigger halt/debug request/reset/debug activation Object: debug_req_o, ndmreset_o, dmactive_o and debug module control state Expected guard: Debug requests, dmactive, and ndmreset should require debug authorization and should not be triggerable by unprivileged MMIO/NOC traffic or unauthenticated JTAG. Observed behavior: riscv_peripherals connects i_dmi_jtag to debug_req/debug_resp and also connects the debug NOC bridge through dm_master/axi2mem into dm_top's slave interface. The debug NOC bridge path lacks visible top-level acc_ctrl/priv_lvl/debug_mode/reglk qualification. The JTAG path has the authentication weakness described in PERM-JTAG-DMI-AUTH-001. dm_top outputs ndmreset_o, dmactive_o, and debug_req_o at the top level. Path: (1) external JTAG -> dmi_jtag -> dmi_cdc -> debug_req/debug_resp -> dm_top; (2) debug NOC -> i_debug_axilite_bridge -> dm_master -> axi2mem -> dm_slave_* -> dm_top -> debug_req_o/ndmreset_o/dmactive_o Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthorized requester control of debug-module registers may halt harts, activate debug mode, or assert non-debug-module reset, causing privilege escalation, denial of service, or security-state manipulation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "dm_top internal authorization behavior is not included; however top-level debug NOC and JTAG ingress guards are visibly weak or absent.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F8",
+      "status": "potential_warning",
+      "summary": "riscv_peripherals declares rst_1 through rst_13 and instantiates a reset wrapper that receives reglk_ctrl_i, acct_ctrl_i, debug_mode_i, and rst_12. Individual wrappers receive rst_* inputs. The provided observations do not include reset wrapper internals, reset register write decode, rst_* mapping for all security-sensitive modules, or post-reset state defaults, so reset permission behavior cannot be determined.",
+      "vulnerability_category": "trigger peripheral reset / rst_1..rst_13 controlled peripheral resets and affected security state / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software/NOC reset requester Operation: trigger peripheral reset Object: rst_1..rst_13 controlled peripheral resets and affected security state Expected guard: Software-triggered resets of security-sensitive peripherals should be authorized and should not reset lock/access-control/authentication state into a permissive condition. Observed behavior: riscv_peripherals declares rst_1 through rst_13 and instantiates a reset wrapper that receives reglk_ctrl_i, acct_ctrl_i, debug_mode_i, and rst_12. Individual wrappers receive rst_* inputs. The provided observations do not include reset wrapper internals, reset register write decode, rst_* mapping for all security-sensitive modules, or post-reset state defaults, so reset permission behavior cannot be determined. Path: reset NOC channel -> rst axilite bridge -> reset wrapper -> rst_1..rst_13 -> protected peripheral wrappers/security state Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Security impact is not fully established from visible evidence.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "reset wrapper source/update equations, authorization checks for reset writes, full rst_* mapping, and security impact of post-reset defaults/residue. Missing evidence slots: impact.",
+      "recommended_follow_up": [
+        "Check security-sensitive consequence of the observed behavior for obligation PERM-SWRESET-GUARD-010."
+      ]
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "5 evidence slot(s) remained incomplete after closure checking."
+}

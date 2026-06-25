@@ -1,0 +1,236 @@
+{
+  "scope_id": "riscv_peripherals_scope",
+  "obligations": [
+    {
+      "obligation_id": "OBL-001",
+      "reason": "The rsa_wrapper and rng_wrapper have a debug_mode_i input that could be used to bypass the register lock (reglk_ctrl) protecting internal cryptographic or security-sensitive registers. If debug mode is not gated by the same access-control logic, a debugger could read/write secret state even when the lock is set.",
+      "subject": "debug_mode_i",
+      "operation": "write / read",
+      "object": "rsa_wrapper / rng_wrapper internal registers (key, seed, control, status)",
+      "expected_guard": "Access to protected registers should be denied or limited when reglk_ctrl is locked, regardless of debug_mode_i; or debug access must require a separate authentication (e.g., jtag_unlock).",
+      "candidate_path": "debug_mode_i signal → access decode logic inside rsa_wrapper / rng_wrapper → register write/read enables",
+      "state_conditions_to_check": [
+        "debug_mode_i assertion",
+        "reglk_ctrl lock bit state for RSA/RNG",
+        "access enable generation (e.g., we/addr decode) condition involving debug_mode_i"
+      ],
+      "required_evidence_slots": [
+        "RTL code in rsa_wrapper.sv and rng_wrapper.sv",
+        "usage of debug_mode_i in write/read enable logic",
+        "interaction between reglk_ctrl and debug_mode_i",
+        "absence of lock check when debug_mode_i is active"
+      ],
+      "files_or_modules_to_inspect": [
+        "rng_wrapper.sv",
+        "rsa_wrapper.sv",
+        "riscv_peripherals.sv (debug routing)"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "Lock/Sticky Bit/Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm that debug_mode_i is directly connected to wrapper logic and that no additional access-control layer exists."
+    },
+    {
+      "obligation_id": "OBL-002",
+      "reason": "The JTAG debug interface (i_dmi_jtag/SimJTAG) in riscv_peripherals can generate debug memory/register accesses (dm_master_req, dm_slave). If the fuse memory (fuse_mem) can be read via this path without the jtag_unlock signal being asserted, a connected debugger could extract sensitive hashes or configuration.",
+      "subject": "JTAG debug master (dm_master) / debug request path",
+      "operation": "read",
+      "object": "fuse_mem (jtag_hash, fuse_rdata)",
+      "expected_guard": "jtag_unlock must be set before any JTAG-initiated read to the fuse memory is allowed; the unlock should require proper authentication.",
+      "candidate_path": "dm_master_req → address decode → fuse_mem read request; also via debug_req to peripheral path",
+      "state_conditions_to_check": [
+        "jtag_unlock signal state",
+        "dm_master address routing that includes fuse memory region",
+        "absence of unlock check in the debug-to-fuse path"
+      ],
+      "required_evidence_slots": [
+        "riscv_peripherals.sv: address map and debug routing to fuse_mem",
+        "fuse_mem.sv: read enable logic (req_i, addr_i)",
+        "logic that gates debug access based on jtag_unlock"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv",
+        "fuse_mem.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "Crypto/Secret State Exposure"
+      ],
+      "priority": "high",
+      "uncertainty": "The exact connection between debug bus and fuse memory is not fully visible; need to trace the address decoder and any lock gates."
+    },
+    {
+      "obligation_id": "OBL-003",
+      "reason": "The pkt_wrapper can issue a read request to the fuse memory via fuse_req_o / fuse_addr_o. If the associated lock bit in reglk_ctrl (for the pkt peripheral) is not checked before issuing the request, software could read out fuse data even when the lock is meant to prevent it.",
+      "subject": "pkt_wrapper (software via AXI interface)",
+      "operation": "read",
+      "object": "fuse_rdata (read data returned to pkt)",
+      "expected_guard": "The reglk_ctrl lock bit corresponding to the PKT peripheral must prevent fuse_req_o from being asserted when locked.",
+      "candidate_path": "reglk_ctrl[i] → pkt_wrapper logic → fuse_req_o generation",
+      "state_conditions_to_check": [
+        "reglk_ctrl lock state for PKT",
+        "fuse_req_o toggle condition",
+        "any bypass of the lock (e.g., debug, acct_ctrl)"
+      ],
+      "required_evidence_slots": [
+        "pkt_wrapper.sv: fuse_req output logic",
+        "riscv_peripherals.sv: reglk_ctrl assignment to pkt_wrapper",
+        "evidence of lock gating on fuse read path"
+      ],
+      "files_or_modules_to_inspect": [
+        "pkt_wrapper.sv",
+        "riscv_peripherals.sv",
+        "fuse_mem.sv"
+      ],
+      "knowledge_used": [
+        "Lock/Sticky Bit/Write Protection",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "The pkt_wrapper may be intended to access fuse memory as part of its function; we need to verify if the lock is expected to block all accesses or only writes."
+    },
+    {
+      "obligation_id": "OBL-004",
+      "reason": "The riscv_peripherals module receives privilege level (priv_lvl_i) and write enables (we_flag_*) for various peripherals. If the access-control logic (acc_ctrl, reglk_ctrl) does not adequately consider privilege mode, an unprivileged software request could modify protected registers (e.g., RSA keys, RNG seeds).",
+      "subject": "software issued from riscv core (AXI master)",
+      "operation": "write",
+      "object": "protected peripheral registers (rsa_wrapper, rng_wrapper, pkt_wrapper)",
+      "expected_guard": "Privilege level must be machine-mode (or a specific mode) for security-critical writes; or the lock/access control must be enforced before any write, regardless of privilege.",
+      "candidate_path": "priv_lvl_i → address decode / acc_ctrl logic → peripheral write enable generation",
+      "state_conditions_to_check": [
+        "priv_lvl_i encoding",
+        "we_flag_* assignment and any privilege gating",
+        "acc_ctrl / reglk_ctrl bypass when a particular privilege is active"
+      ],
+      "required_evidence_slots": [
+        "riscv_peripherals.sv: decoding logic for we_flag_*",
+        "usage of priv_lvl_i in access control",
+        "absence of privilege check on certain we_flag_*"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Lock/Sticky Bit/Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "It is unclear whether all we_flag signals are gated by privilege; we need to inspect the implementation."
+    },
+    {
+      "obligation_id": "OBL-005",
+      "reason": "The testmode_i input in riscv_peripherals could be used to override normal operational locks or to expose internal state for test purposes. If testmode_i is not gated by a secure debug unlock (e.g., jtag_unlock) or is permanently driving access, a test attacker could bypass the lock mechanism.",
+      "subject": "testmode_i",
+      "operation": "override lock / read internal state",
+      "object": "any peripheral protected by reglk_ctrl / acc_ctrl",
+      "expected_guard": "testmode_i must not disable locks or must only be active under authenticated debug or manufacturing test conditions with secure key.",
+      "candidate_path": "testmode_i → control logic inside riscv_peripherals that affects lock behavior or directly gates register access",
+      "state_conditions_to_check": [
+        "testmode_i effect on lock signals (reglk_ctrl)",
+        "testmode_i effect on peripheral output muxes",
+        "whether testmode_i is disabled by jtag_unlock or other authentication"
+      ],
+      "required_evidence_slots": [
+        "riscv_peripherals.sv: testmode_i usage",
+        "any override of lock mechanisms",
+        "connection to SimDTM or other test logic"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "Reset/Lifecycle/State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "testmode_i may be intended only for simulation; need to check if it is present in synthesis and how it is tied off."
+    },
+    {
+      "obligation_id": "OBL-006",
+      "reason": "The bootrom modules (i_bootrom_bm, i_bootrom_linux) could contain sensitive code that should not be modified or read by untrusted masters. If the bootrom address decode and write enables do not enforce access control (lock or privilege), an attacker could overwrite or read bootrom contents.",
+      "subject": "any AXI master (including debug DMA)",
+      "operation": "write / read",
+      "object": "bootrom memory content",
+      "expected_guard": "BootROM should be read-only after initial programming, or writeable only under a specific lock state; debug should not be able to modify it.",
+      "candidate_path": "rom_req_acct and we_flag for bootrom → write enable generation",
+      "state_conditions_to_check": [
+        "bootrom write enable logic (if any)",
+        "lock or access control for bootrom region",
+        "debug path to bootrom"
+      ],
+      "required_evidence_slots": [
+        "riscv_peripherals.sv: bootrom address decode and write protect logic",
+        "any we_flag for bootrom",
+        "presence of lock bits for bootrom"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Fabric/Address Map/DMA/PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Bootrom may be implemented as hard macros; writing may be impossible by design, but we need to verify the wrapper logic."
+    },
+    {
+      "obligation_id": "OBL-007",
+      "reason": "Random number generator (rng_wrapper) produces entropy that may be used for cryptographic purposes. If debug_mode_i allows reading the raw entropy or seed values, an attacker could predict future random numbers. The obligation is to check whether any debug visibility of RNG internal state bypasses the intended secrecy.",
+      "subject": "debug_mode_i (or JTAG debug)",
+      "operation": "read",
+      "object": "rng_top seed/entropy outputs (seed128_o, rand_num_o, etc.)",
+      "expected_guard": "Debug access should not be able to read raw entropy/seed registers when the RNG is locked or without authentication; if permitted, it should be limited to authenticated debug with special unlock.",
+      "candidate_path": "debug_mode_i → rng_wrapper internal multiplexer → output to debug bus or observable registers",
+      "state_conditions_to_check": [
+        "rng_wrapper debug path to seed/entropy registers",
+        "reglk_ctrl lock state for RNG",
+        "any read-enable gate that ignores lock in debug mode"
+      ],
+      "required_evidence_slots": [
+        "rng_wrapper.sv: debug read mux logic",
+        "rng_top.v: observable outputs",
+        "lock gating for debug reads"
+      ],
+      "files_or_modules_to_inspect": [
+        "rng_wrapper.sv",
+        "rng_top.v"
+      ],
+      "knowledge_used": [
+        "Crypto/Secret State Exposure",
+        "Debug/JTAG/Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "Raw entropy might be exposed only to specific debug registers; need to trace the full visibility."
+    },
+    {
+      "obligation_id": "OBL-008",
+      "reason": "The lock control (reglk_ctrl) for various peripherals must be sticky or one-way writeable to provide effective write protection. If the lock state can be cleared (e.g., by a reset of a subset of the chip, debug, or a software sequence) without proper authorization, the protection is lost. Check whether the lock bits can be illegally cleared.",
+      "subject": "any agent able to drive reset signals (rst_* in riscv_peripherals) or software",
+      "operation": "clear lock bit",
+      "object": "reglk_ctrl bits",
+      "expected_guard": "Lock bits must be cleared only under a global reset (rst_ni) that returns the system to a known secure state, or via a specific unlock sequence that requires authentication.",
+      "candidate_path": "rst_1..rst_13, rst_ni connections to lock state elements; software write to lock control register",
+      "state_conditions_to_check": [
+        "which resets affect lock bits",
+        "whether partial resets (rst_1..rst_13) bypass the lock",
+        "software writeability of lock registers without privilege"
+      ],
+      "required_evidence_slots": [
+        "riscv_peripherals.sv: lock state register declarations and reset logic",
+        "assignment of rst_* to lock elements",
+        "write access logic for reglk_ctrl"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Lock/Sticky Bit/Write Protection",
+        "Reset/Lifecycle/State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "The function of rst_1..rst_13 is not clear; they may be derived from a power-on-reset only."
+    }
+  ]
+}

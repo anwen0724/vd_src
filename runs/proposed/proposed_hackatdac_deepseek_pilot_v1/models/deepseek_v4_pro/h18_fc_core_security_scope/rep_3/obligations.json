@@ -1,0 +1,300 @@
+{
+  "scope_id": "Zero-Riscy_SoC_Permission_Analysis",
+  "obligations": [
+    {
+      "obligation_id": "OBL01",
+      "reason": "The debug unit may provide a path to read/write CSRs that bypasses normal privilege-level protections. Need to verify that debug accesses are gated by proper authentication/authorization and that they cannot modify or observe protected state when the core is in a secure/privileged mode.",
+      "subject": "Debug unit (zeroriscy_debug_unit) as requester",
+      "operation": "read/write CSR registers",
+      "object": "CSRs (particularly those containing privilege state, interrupt enables, or security-related configuration) in zeroriscy_cs_registers",
+      "expected_guard": "Debug access must be disabled when the core is not in debug mode, or must require authentication before allowing CSR access; CSR write/read must respect the same privilege levels as software access, or be blocked entirely.",
+      "candidate_path": "debug_req_i → zeroriscy_debug_unit internal FSM → csr_access outputs → zeroriscy_cs_registers csr_waddr/csr_wdata/csr_raddr",
+      "state_conditions_to_check": [
+        "debug_mode_q (debug unit state)",
+        "dcsr[31:28] (debug cause)",
+        "csr_op (read/write intent)",
+        "mstatus.mpp / mstatus.mprv",
+        "CSR privilege level field (bits 9:8)"
+      ],
+      "required_evidence_slots": [
+        "RTL code in zeroriscy_debug_unit showing how debug CSR accesses are generated",
+        "RTL code in zeroriscy_cs_registers showing the debug access port and any privilege checks",
+        "Check whether any lock/privilege signal is used to block debug CSR writes"
+      ],
+      "files_or_modules_to_inspect": [
+        "zeroriscy_debug_unit",
+        "zeroriscy_cs_registers"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Must confirm whether the debug unit can initiate CSR transactions without explicit authentication, and whether the CSR module has a dedicated debug bypass path."
+    },
+    {
+      "obligation_id": "OBL02",
+      "reason": "The APB interrupt controller contains event FIFO, interrupt enables, and secure interrupt routing. Configuration registers are accessible via APB. Need to verify that lock bits (if any) actually prevent modification after being set, and that debug/test modes cannot bypass lock protections to alter critical interrupt settings.",
+      "subject": "APB master (could be debug, test, or software)",
+      "operation": "write to interrupt controller registers (e.g., interrupt enables, security configuration)",
+      "object": "apb_interrupt_cntrl registers, particularly those influencing secure interrupt handling (core_irq_sec_o generation)",
+      "expected_guard": "Some registers should be write-protected after a lock is set; that lock must be sticky and cover all write paths. Debug/test access should not override the lock.",
+      "candidate_path": "APB write transfer → apb_interrupt_cntrl input decoding → register update logic → lock checking logic",
+      "state_conditions_to_check": [
+        "Any lock bit signal (e.g., lock_en, irq_lock)",
+        "test_mode_i signal reaching the write condition",
+        "APB write address decode for lock registers"
+      ],
+      "required_evidence_slots": [
+        "RTL for register write enable generation in apb_interrupt_cntrl",
+        "RTL for lock bit implementation (set, clear, use) and its effect on other registers",
+        "Check whether test_mode_i provides an alternative write path that ignores the lock"
+      ],
+      "files_or_modules_to_inspect": [
+        "apb_interrupt_cntrl"
+      ],
+      "knowledge_used": [
+        "Lock/Sticky Bit/Write Protection",
+        "Debug/JTAG/Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "The existence of lock bits is not confirmed; the fact layer only shows ports and basic structure. If no lock exists, this obligation is satisfied; but we must check."
+    },
+    {
+      "obligation_id": "OBL03",
+      "reason": "CSRs control privilege transitions, interrupt enables, and machine mode configurations. The CSR module must enforce per-CSR access rules (read/write allowed only in certain privilege modes). Need to verify that all CSR write and read paths (including potential debug backdoor) check the current privilege level correctly.",
+      "subject": "CPU (in different privilege modes) or debug unit",
+      "operation": "read/write to individual CSRs",
+      "object": "CSRs in zeroriscy_cs_registers (e.g., mstatus, mie, mepc, pmpcfg*, etc.)",
+      "expected_guard": "Privilege-level decode (e.g., csr[9:8]) combined with current mode (mstatus.MPP / prv) must gate access; debug access should either be blocked or require debug mode and verified privilege.",
+      "candidate_path": "CPU instruction decode → csr_op → zeroriscy_cs_registers csr access logic → privilege check",
+      "state_conditions_to_check": [
+        "prv (privilege level: Machine/User)",
+        "mstatus.mprv for load/store data privilege",
+        "csr_waddr and csr_raddr decode",
+        "csr_op (read, write, set, clear)"
+      ],
+      "required_evidence_slots": [
+        "RTL for CSR address decode and privilege check in zeroriscy_cs_registers",
+        "RTL for the generation of 'illegal_csr' or 'csr_write_en' signals",
+        "Verification that no implicit access path exists for debug/TAP"
+      ],
+      "files_or_modules_to_inspect": [
+        "zeroriscy_cs_registers",
+        "zeroriscy_controller (for privilege level)",
+        "zeroriscy_debug_unit (if it issues CSR ops)"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Debug/JTAG/Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "Actual privilege check implementation may be hidden in decoder or controller; need to trace."
+    },
+    {
+      "obligation_id": "OBL04",
+      "reason": "After reset, the processor privilege mode should be in a secure state (e.g., machine mode). Check that the reset value of the privilege state registers forces a safe default and that no leftover state (e.g., from a warm reset) can leave the core in user mode with access to protected CSRs.",
+      "subject": "Core after reset deassertion",
+      "operation": "initialization of privilege state",
+      "object": "privilege mode state (mstatus.MP, mstatus.MPRV, possibly mcause)",
+      "expected_guard": "Reset must force default values: M-mode, interrupts disabled, etc. If a soft reset does not fully clear the state, a subsequent context could inherit dangerous privileges.",
+      "candidate_path": "reset logic in zeroriscy_cs_registers and zeroriscy_controller",
+      "state_conditions_to_check": [
+        "Reset value of mstatus (especially MPP, MPIE, MPRV)",
+        "Reset value of mie, mip",
+        "Behavior after soft reset (if any) vs. hard reset"
+      ],
+      "required_evidence_slots": [
+        "Reset assignment for every CSR in zeroriscy_cs_registers",
+        "Any conditional reset logic (e.g., rst_ni qualifier)",
+        "Controller FSM reset state"
+      ],
+      "files_or_modules_to_inspect": [
+        "zeroriscy_cs_registers",
+        "zeroriscy_controller"
+      ],
+      "knowledge_used": [
+        "Reset/Lifecycle/State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer shows only module names and interfaces; we need to inspect the actual reset assignments."
+    },
+    {
+      "obligation_id": "OBL05",
+      "reason": "The test_mode_i signal in apb_interrupt_cntrl could bypass normal functional access controls. Need to verify that test mode does not enable arbitrary write to security-critical registers (e.g., interrupt enables, secure interrupt routing) without proper authorization.",
+      "subject": "Test interface (test_mode_i = 1)",
+      "operation": "write/read to any register in apb_interrupt_cntrl",
+      "object": "Interrupt controller configuration registers, especially those that set core_irq_sec_o or enable interrupts",
+      "expected_guard": "Test mode should only be active during manufacturing test and should not allow modification of registers that affect security; if test mode must access these, it should require an additional unlock or be disabled after boot.",
+      "candidate_path": "test_mode_i → internal muxes that bypass APB decode or lock logic",
+      "state_conditions_to_check": [
+        "test_mode_i sampled at any point in the module",
+        "Whether test_mode_i overrides write-enable conditions",
+        "If test_mode_i is tied to 0 in normal operation",
+        "Any register file write logic gated by test_mode_i"
+      ],
+      "required_evidence_slots": [
+        "RTL for apb_interrupt_cntrl showing how test_mode_i is used",
+        "All write-enable expressions involving test_mode_i",
+        "If test_mode_i is used to force outputs, this could be a security risk"
+      ],
+      "files_or_modules_to_inspect": [
+        "apb_interrupt_cntrl"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "Lock/Sticky Bit/Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "It is unknown if test_mode_i affects security registers; high priority if so."
+    },
+    {
+      "obligation_id": "OBL06",
+      "reason": "The interrupt controller handles secure/non-secure differentiation via core_secure_mode_i and outputs core_irq_sec_o. Need to verify that a non-secure software or debug master cannot configure secure interrupts (e.g., by writing to secure interrupt enable registers or injection paths).",
+      "subject": "Non-secure APB master (or debug in non-secure context)",
+      "operation": "write to secure interrupt configuration registers",
+      "object": "Secure interrupt enables, secure interrupt routing bits in apb_interrupt_cntrl",
+      "expected_guard": "core_secure_mode_i must be 1 to write secure-related registers; a lock or privilege check must separate secure and non-secure access.",
+      "candidate_path": "APB write decode → address compare → secure bit check → write enable",
+      "state_conditions_to_check": [
+        "core_secure_mode_i signal toggling",
+        "Register address space partitioning for secure vs. non-secure",
+        "Debug access mode (non-secure by default?)"
+      ],
+      "required_evidence_slots": [
+        "RTL for secure access gating in apb_interrupt_cntrl",
+        "Definition of secure interrupt registers",
+        "How debug/test access is classified (secure/non-secure)"
+      ],
+      "files_or_modules_to_inspect": [
+        "apb_interrupt_cntrl"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Debug/JTAG/Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "The secure partitioning logic may be incomplete or missing; must be checked against the fact layer's signals."
+    },
+    {
+      "obligation_id": "OBL07",
+      "reason": "The load-store unit (LSU) performs memory accesses. If PMP (Physical Memory Protection) is implemented, it must correctly check the privilege level of the requester (user vs machine mode) for each load/store. Need to verify that all LSU paths (including misaligned access handler) apply PMP checks and that no PMP bypass exists for debug-initiated memory accesses.",
+      "subject": "LSU (zeroriscy_load_store_unit) handling load/store requests from CPU or debug",
+      "operation": "load/store to memory",
+      "object": "Physical memory addresses, particularly protected regions (e.g., MMIO, secret data)",
+      "expected_guard": "PMP configuration registers configured in CSRs, and PMP check applied before the transaction is issued; debug memory access should be gated by PMP as well.",
+      "candidate_path": "lsu_ctrl → pmp_allow signal → data_req to bus interface",
+      "state_conditions_to_check": [
+        "Presence of PMP configuration registers (pmpcfg0–pmpcfg15, pmpaddr*)",
+        "PMP privilege check logic in LSU (prv, mstatus.mprv)",
+        "Whether debug memory accesses go through same PMP path"
+      ],
+      "required_evidence_slots": [
+        "RTL for PMP implementation in zeroriscy_load_store_unit (if any)",
+        "Whether the core uses a PMP (check config defines in zeroriscy_config.sv)",
+        "Debug unit memory access interface connection to LSU and PMP logic"
+      ],
+      "files_or_modules_to_inspect": [
+        "zeroriscy_load_store_unit",
+        "zeroriscy_cs_registers (for PMP registers)",
+        "zeroriscy_debug_unit",
+        "zeroriscy_config.sv (or defines)"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP",
+        "Debug/JTAG/Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "The presence of PMP is optional; if not implemented, this obligation is inapplicable, but we must check."
+    },
+    {
+      "obligation_id": "OBL08",
+      "reason": "The fc_demux module routes bus transactions to different peripherals/memories based on address decode. Address range overlaps or decoding bugs could allow one master (e.g., a non-secure CPU) to access a peripheral intended for another bus segment (e.g., debug or secure memory). Need to verify that the address decode is precise and that no overlapping regions allow unauthorized access.",
+      "subject": "Any bus master whose transactions are routed by fc_demux",
+      "operation": "read/write to a target region via fc_demux address decode",
+      "object": "Protected address regions (e.g., debug memory, secure RAM, APB peripherals)",
+      "expected_guard": "Address decode must be mutually exclusive and correctly map the entire address space without gaps or overlaps that could be exploited.",
+      "candidate_path": "master request addr → fc_demux case/if decode → output select",
+      "state_conditions_to_check": [
+        "Address comparator ranges (constants or config parameters)",
+        "Whether any ranges overlap or are missing (default case)",
+        "If address decode depends on security information (e.g., wstrb, priv) not present on bus"
+      ],
+      "required_evidence_slots": [
+        "RTL for address decode in fc_demux (unique case statements)",
+        "Memory map definition in pulp_soc_defines.sv or soc_bus_defines.sv",
+        "Check if any address range is routed to multiple targets"
+      ],
+      "files_or_modules_to_inspect": [
+        "fc_demux",
+        "rtl/includes/pulp_soc_defines.sv",
+        "rtl/includes/soc_bus_defines.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Overlap detection requires reviewing address map constants; potential but not a common vulnerability."
+    },
+    {
+      "obligation_id": "OBL09",
+      "reason": "The register file may be accessible by the debug unit for inspection without proper authorization. Need to verify that the debug unit cannot read/write the register file when the core is in a secure state or when debug authentication is not provided. If the debug unit can read all registers, it may leak sensitive state (e.g., cryptographic keys, return addresses).",
+      "subject": "Debug unit (zeroriscy_debug_unit)",
+      "operation": "read/write register file entries",
+      "object": "Register file (zeroriscy_register_file or zeroriscy_register_file_ff)",
+      "expected_guard": "Debug access to register file should be disabled unless debug mode is entered through an authenticated mechanism, and should respect privilege mode (e.g., not read user registers when core is in machine mode).",
+      "candidate_path": "debug unit → register file read/write ports (rf_wdata, rf_waddr, rf_we, etc.)",
+      "state_conditions_to_check": [
+        "Whether the register file has dedicated debug ports",
+        "Whether debug_mode_q enables the debug access signals",
+        "If any selective blocking based on privilege exists"
+      ],
+      "required_evidence_slots": [
+        "RTL for register file connectivity between zeroriscy_debug_unit and zeroriscy_register_file/ff",
+        "RTL for debug unit generating register file access signals",
+        "Any signal that disables debug regfile access (e.g., debug_halt)"
+      ],
+      "files_or_modules_to_inspect": [
+        "zeroriscy_debug_unit",
+        "zeroriscy_register_file",
+        "zeroriscy_register_file_ff",
+        "zeroriscy_core (for top-level connections)"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "Crypto/Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Not all cores allow debug register file access; need to check implementation."
+    },
+    {
+      "obligation_id": "OBL10",
+      "reason": "The debug unit might be able to initiate CSR writes while the core is not halted or in a non-debug state, which could lead to unauthorized privilege escalation or disable security features. Need to verify that CSR writes from debug are only allowed when the core is in debug mode and that debug mode entry is properly controlled.",
+      "subject": "Debug unit (zeroriscy_debug_unit)",
+      "operation": "CSR write (including machine mode CSRs)",
+      "object": "CSRs controlling security (e.g., mstatus.MPP, mepc, pmpcfg*, debug_mode exit)",
+      "expected_guard": "Debug CSR writes must be disabled unless the core is halted and in debug mode, and debug mode entry must require an external trigger that is properly authenticated (e.g., physical access, internal logic).",
+      "candidate_path": "external trigger (debug_req_i) → debug unit FSM → debug_mode_q → csr_write_en → zeroriscy_cs_registers",
+      "state_conditions_to_check": [
+        "debug_mode_q rising edge condition (is it tied directly to debug_req_i?)",
+        "Whether debug_req_i can be asserted by software or requires an external pin",
+        "Any locking or sticky bit that prevents debug mode after boot"
+      ],
+      "required_evidence_slots": [
+        "RTL for debug mode entry in zeroriscy_debug_unit",
+        "How debug_req_i is connected at top level (zeroriscy_core)",
+        "Any security fuses or straps that disable debug after production"
+      ],
+      "files_or_modules_to_inspect": [
+        "zeroriscy_debug_unit",
+        "zeroriscy_core (top-level)",
+        "zeroriscy_cs_registers (for csr write acceptance during debug)"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "Debug mechanisms often are non-secure by default; this is a common weakness but needs verification of actual implementation."
+    }
+  ]
+}

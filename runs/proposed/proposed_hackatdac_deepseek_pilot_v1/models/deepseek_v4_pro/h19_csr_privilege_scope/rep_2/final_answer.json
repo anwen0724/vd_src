@@ -1,0 +1,367 @@
+{
+  "analysis_summary": "The proposed method produced 7 finding(s) from 8 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "Privilege check generally implemented but an explicit bypass for MEPC creates a vulnerability allowing unprivileged access to a machine-mode CSR.",
+      "vulnerability_category": "write / privileged CSRs (MSTATUS, MIE, MEPC, SATP, etc.) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: CPU pipeline (commit stage after issue and execute) Operation: write Object: privileged CSRs (MSTATUS, MIE, MEPC, SATP, etc.) Expected guard: current privilege level must be >= required privilege (M-mode for M*; S-mode for S*; U-mode for U-accessible CSRs) Observed behavior: A privilege check exists in src/csr_regfile.sv lines 852-856, comparing priv_lvl_o (current privilege) with csr_addr.csr_decode.priv_lvl (decoded required privilege from CSR address). However, the check is skipped for csr_addr==CSR_MEPC via condition && !(csr_addr.address==riscv::CSR_MEPC). This allows any privilege mode to read/write MEPC without checking required M-mode privilege, violating the expected guard. Path: commit stage -> csr_op_i/csr_addr_i -> csr_regfile csr_op_logic sets csr_we/csr_read -> exception_ctrl block privilege check; the bypass for MEPC circumvents the guard. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthorized access to MEPC may allow lower-privilege code to corrupt machine-mode exception return address, potentially enabling privilege escalation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Intentional bypass of MEPC privilege check may be a hardware bug or a deliberate design choice; specification review needed.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Debug entry elevates privilege unconditionally and no further access control is applied to CSR writes, effectively bypassing all CSR protections.",
+      "vulnerability_category": "write / override / any CSR (including mstatus, mie, dcsr, dpc) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: debug interface (debug_req_i) Operation: write / override Object: any CSR (including mstatus, mie, dcsr, dpc) Expected guard: authentication or debug state machine must ensure only authorized external access, and must not bypass privilege locks (TSR, TW, TVM) Observed behavior: debug_req_i does not directly assert csr_we. Instead, entering debug mode (via debug_req_i and commit_instr_i[0].valid) sets debug_mode_q. In debug mode, priv_lvl_o is forced to M-mode (line 938). As a result, any CSR write request arriving via the normal path (csr_op_i) will pass the privilege check because the current privilege is elevated to M. There is no authentication or lock-bit enforcement before entering debug mode, and no restriction on CSR accesses during debug mode. Path: debug_req_i -> debug_mode_d assertion -> debug_mode_q -> priv_lvl_o forced to PRIV_LVL_M -> privilege check in csr_regfile always passes for any CSR, allowing full arbitrary writes. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker controlling the debug request pin can escalate to M-mode and arbitrarily modify any CSR, bypassing all privilege and lock-bit protections.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No authentication mechanism visible; security depends on trust in external debug interface. RISC-V spec may allow this behavior if debug is trusted, but from a security perspective it is a bypass.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "potential_warning",
+      "summary": "csr_regfile does not enforce TSR/TW/TVM; reliance on external ID stage is unverified within this scope.",
+      "vulnerability_category": "write / read / CSRs protected by TSR (e.g., sstatus?), TW (timeout), TVM (virtual memory) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: supervisor-mode CSR instruction (through commit stage) Operation: write / read Object: CSRs protected by TSR (e.g., sstatus?), TW (timeout), TVM (virtual memory) Expected guard: when TSR=1, supervisor writes to sstatus.SPP or related bits should be blocked; similarly for TW/TVM Observed behavior: The csr_regfile outputs tvm_o, tw_o, tsr_o (lines 70-72, assignments 952-954) but does not internally use these signals to gate any CSR writes. The write-enable logic for supervisor CSRs (e.g., SSTATUS, STVEC, SSCRATCH, etc.) does not check these bits. The ID stage receives these signals (ariane.sv lines 287-289), so enforcement may occur there, but from the scope of csr_regfile, no lock-bit enforcement is present. Path: CSR write to protected register -> csr_regfile write case does not consult tvm_o/tw_o/tsr_o -> write proceeds unconditionally within csr_regfile; potential gating only in downstream ID stage. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If ID stage also lacks enforcement, supervisor-mode code could bypass protections like trapping S-mode SRET (TSR) or modifying time CSRs (TW), leading to privilege escalation or DoS.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Enforcement may exist in the ID stage (which uses tvm_i, tw_i, tsr_i) but that module is not analyzed.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "Debug CSRs are accessible independent of debug mode, violating expected debug isolation.",
+      "vulnerability_category": "read/write / DCSR, DPC, DSCRATCH0/1 / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: CPU (non-debug mode) attempting to access debug CSRs Operation: read/write Object: DCSR, DPC, DSCRATCH0/1 Expected guard: access only allowed when debug_mode_q is asserted; otherwise raise illegal instruction exception or ignore Observed behavior: The read process (lines 188-191) and write process (lines 377-384) for debug CSRs (DCSR, DPC, DSCRATCH0/1) do not check debug_mode_q. They unconditionally return or accept data based solely on the address match. The privilege check (line 852-856) may catch illegal access based on required privilege level decoded from the CSR address, but debug CSRs likely require M-mode privilege; however, the obligation expects a specific debug_mode_gating, not just privilege. Path: csr_addr_i matches debug CSR -> csr_read_process / csr_update process allows access without debug_mode_q verification. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Non-debug code can read/write debug CSRs, leaking or corrupting debug state and potentially enabling debug mode takeover.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Privilege-based check may partially protect, but no explicit debug-mode gate as required by spec.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "SATP reset value not explicitly defined, risking insecure post-reset state.",
+      "vulnerability_category": "reset / mstatus, mie, satp, pmpcfg, etc. / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: reset logic Operation: reset Object: mstatus, mie, satp, pmpcfg, etc. Expected guard: upon reset, machine-mode CSRs must be initialized to a known-secure state (MIE=0, MPRV=0, SATP.MODE=0, PMP entries disabled) Observed behavior: Reset assignment block (lines 964-1004) initializes mstatus_q to 64'b0 (so MIE=0, MPRV=0, FS=Off), mie_q to 0, etc., but does not explicitly initialize satp_q. The satp_q flip-flop is not assigned a reset value, meaning it may contain X after reset. SATP.MODE should be 0 (bare) to disable address translation; an uninitialized SATP could enable translation and cause undefined behavior. Path: Reset deassertion -> satp_q remains uninitialized (X) -> satp_q outputs (satp_ppn_o, etc.) used to drive MMU, potentially enabling translation. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Uninitialized SATP could allow software to use stale address translation settings before explicit configuration, leading to information disclosure or privilege escalation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Simulation/synthesis may treat satp_q as 0 if uninitialized in RTL but not guaranteed; formal verification needed.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "Performance counters are readable without any mcounteren-based privilege filtering, exposing potentially sensitive side-channel information.",
+      "vulnerability_category": "read / hardware performance counters (cycles, instret, cache misses) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software (U-mode or S-mode) reading performance counters Operation: read Object: hardware performance counters (cycles, instret, cache misses) Expected guard: mcounteren bits should gate read access based on current privilege; the CSR access path should enforce this before returning csr_rdata_o Observed behavior: The read process for CSR_CYCLE, CSR_INSTRET, and other performance counter CSRs (lines 234-247) directly returns cycle_q, instret_q, or perf_data_i without checking mcounteren. The MCOUNTEREN CSR itself is declared but implemented as hardwired zero (line 218: CSR_MCOUNTEREN: csr_rdata = 64'b0; // not implemented). Thus, mcounteren provides no gating, and any privilege level can read performance counters. Path: CSR read request to performance counter address -> csr_read_process returns data unconditionally. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Lower privilege modes can observe micro-architectural metrics that may leak sensitive information (e.g., cache hit patterns), violating security partitioning.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Whether U-mode access to counters is intended by design; default RISC-V spec allows mcounteren to be 0, but lack of gating is a vulnerability if mcounteren is intended to be writeable. Here it is hardwired zero, so no access control.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F7",
+      "status": "confirmed_finding",
+      "summary": "Separate fflags update path via csr_write_fflags_i lacks FS check, violating floating-point access control.",
+      "vulnerability_category": "write / fflags, frm, fcsr / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any CSR write targeting ffLags/FCSR Operation: write Object: fflags, frm, fcsr Expected guard: write only allowed if FS != Off; additionally, privilege level restrictions Observed behavior: The formal CSR write cases for FFLAGS, FRM, FCSR, FTRAN (lines 336-375) correctly check mstatus_q.fs == Off and raise update_access_exception. However, a separate path csr_write_fflags_i (line 41, used in line 524) updates fcsr_d.fflags with csr_wdata_i[4:0] | fcsr_q.fflags unconditionally, without any FS check. This path bypasses the FS-based protection, allowing fflags to be written even when FS=Off. Path: csr_write_fflags_i asserted -> directly modifies fcsr_d.fflags, circumventing the FFLAGS write case FS check. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Floating-point state can be corrupted even when the floating-point unit is disabled, potentially leading to incorrect program behavior or covert state leakage.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The csr_write_fflags_i signal source is not inspected; it may be qualified with FS elsewhere, but in csr_regfile it is unprotected.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

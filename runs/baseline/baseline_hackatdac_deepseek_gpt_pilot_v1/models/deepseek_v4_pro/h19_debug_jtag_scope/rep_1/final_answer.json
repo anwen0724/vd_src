@@ -1,148 +1,15 @@
 {
-  "analysis_summary": "The RTL contains multiple permission-related security vulnerabilities. The most critical finding is a privilege escalation path that allows an attacker who authenticates via JTAG to force the CPU into Machine mode (the highest privilege level), bypassing all RISC-V privilege protections. This is compounded by: (1) a permanently unlockable JTAG authentication state that can never be cleared, (2) a 'fuse' ROM (ROM2) whose supposedly secure keys are fully writable at runtime via the AXI bus, (3) a trivially weak 32-bit hardcoded JTAG key visible in public source code, (4) a DMI debug path that bypasses JTAG authentication entirely, and (5) missing access control enforcement on the ROM2 write path itself. Overall, the debug authentication and secure storage mechanisms are fundamentally broken.",
+  "analysis_summary": "The RTL code under analysis (Hack@DAC 2019 'debug_jtag_scope') contains multiple critical permission-related security vulnerabilities spanning secure key storage, JTAG debug authentication, and processor privilege management. The ROM2 module intended as immutable fuse storage is unconditionally writable via the AXI bus, allowing an attacker to overwrite cryptographic keys and access-control policy. The JTAG authentication password is stored in writable ROM2, making it trivially bypassable. Successful JTAG authentication forces the CPU into Machine mode (highest privilege) via the umode signal chain, granting full system control. The ROM2 module also lacks any self-protecting access-control gating and has no write-once/lock mechanism, leaving it perpetually vulnerable. Five confirmed findings are identified forming a complete privilege escalation chain from AXI bus write access to Machine-mode takeover.",
   "findings": [
     {
       "finding_id": "F-001",
       "status": "confirmed_finding",
-      "summary": "Privilege escalation to Machine mode via JTAG umode_o signal — any authenticated JTAG user forces CPU to Machine mode",
-      "vulnerability_category": "Privilege Escalation",
-      "affected_locations": [
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 41,
-          "line_end": 41,
-          "module": "dmi_jtag",
-          "signal_or_register": "umode_o"
-        },
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 177,
-          "line_end": 182,
-          "module": "dmi_jtag",
-          "signal_or_register": "umode_o"
-        },
-        {
-          "file": "src/csr_regfile.sv",
-          "line_start": 938,
-          "line_end": 938,
-          "module": "csr_regfile",
-          "signal_or_register": "priv_lvl_o"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 41,
-          "line_end": 41,
-          "module": "dmi_jtag",
-          "object": "umode_o port declaration",
-          "evidence_type": "source_code",
-          "description": "output logic umode_o // Sets the processor to machine mode",
-          "supports_claim": "The port is explicitly commented as setting the processor to machine mode."
-        },
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 177,
-          "line_end": 182,
-          "module": "dmi_jtag",
-          "object": "umode_o assignment",
-          "evidence_type": "source_code",
-          "description": "if (pass_chk == 1'b1) begin umode_o = 1'b1; end else begin umode_o = 1'b0; end",
-          "supports_claim": "umode_o is asserted whenever JTAG password check (pass_chk) is passed."
-        },
-        {
-          "file": "src/csr_regfile.sv",
-          "line_start": 938,
-          "line_end": 938,
-          "module": "csr_regfile",
-          "object": "priv_lvl_o assignment",
-          "evidence_type": "source_code",
-          "description": "assign priv_lvl_o = (debug_mode_q || umode_i) ? riscv::PRIV_LVL_M : priv_lvl_q;",
-          "supports_claim": "umode_i input overrides the CPU's actual privilege level to Machine mode (PRIV_LVL_M), the highest privilege."
-        }
-      ],
-      "reasoning_summary": "The dmi_jtag module outputs umode_o=1 when pass_chk is set. This signal propagates through ariane_testharness as ariane_umode into csr_regfile.umode_i. In csr_regfile, the assignment `priv_lvl_o = (debug_mode_q || umode_i) ? riscv::PRIV_LVL_M : priv_lvl_q` unconditionally forces Machine mode when umode_i is high, completely bypassing RISC-V's User/Supervisor/Machine privilege hierarchy. An authenticated JTAG user gains unrestricted access to all CSRs, memory, and peripherals.",
-      "security_impact": "Complete compromise of the SoC's privilege model. An attacker with JTAG access can escalate to Machine mode, gaining control over all system resources including secure boot configuration, memory protection, cryptographic keys, and all peripherals.",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "No uncertainty — the complete signal path from dmi_jtag.umode_o through ariane_testharness to csr_regfile.umode_i is fully visible in the provided source files.",
-      "recommended_follow_up": [
-        "Remove the umode_o privilege escalation mechanism or restrict it behind hardware-level authentication that cannot be bypassed.",
-        "Implement proper RISC-V debug-mode privilege separation per the debug specification."
-      ]
-    },
-    {
-      "finding_id": "F-002",
-      "status": "confirmed_finding",
-      "summary": "Permanent and irreversible JTAG authentication state — once unlocked, pass_chk can never be cleared",
-      "vulnerability_category": "Improper Access Control State Management",
-      "affected_locations": [
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 79,
-          "line_end": 79,
-          "module": "dmi_jtag",
-          "signal_or_register": "pass_chk"
-        },
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 110,
-          "line_end": 118,
-          "module": "dmi_jtag",
-          "signal_or_register": "pass_chk"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 79,
-          "line_end": 79,
-          "module": "dmi_jtag",
-          "object": "pass_chk declaration",
-          "evidence_type": "source_code",
-          "description": "logic pass_chk; — declared as a simple logic signal with no reset or clear path",
-          "supports_claim": "pass_chk is a combinational/sequential signal with no initialization to 0 after power-up beyond default."
-        },
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 110,
-          "line_end": 118,
-          "module": "dmi_jtag",
-          "object": "DTM_PASS password checking logic",
-          "evidence_type": "source_code",
-          "description": "} else if (dm::dtm_op_t'(dmi.op) == dm::DTM_PASS) begin state_d = Read; if (data_d == pass) begin pass_chk = 1'b1; end state_d = Idle; end",
-          "supports_claim": "pass_chk is set to 1 on successful password match but there is no mechanism anywhere to clear it back to 0."
-        },
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 220,
-          "line_end": 232,
-          "module": "dmi_jtag",
-          "object": "Sequential and reset logic",
-          "evidence_type": "source_code",
-          "description": "always_ff blocks for state_q, address_q, data_q, error_q and pass have reset conditions. pass_chk is NOT in any always_ff block and has NO reset.",
-          "supports_claim": "pass_chk has no reset logic, no timeout, and no logout mechanism — it is permanent once set."
-        }
-      ],
-      "reasoning_summary": "pass_chk is a logic signal that gates all JTAG read operations and the umode_o privilege escalation. It is set to 1 once when the correct password is provided via the DTM_PASS operation. The signal is not inside any always_ff block with a reset condition, is not cleared by dmi_reset (which only clears error_q), and has no timeout or lock mechanism. This means a one-time successful authentication permanently unlocks the JTAG interface for all subsequent accesses until a full power-cycle.",
-      "security_impact": "Once an attacker authenticates once (or a legitimate debug session ends), the debug interface remains permanently unlocked. There is no way to re-secure the system via software or hardware without a full power-cycle, which may not even clear the state in always-on designs.",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "The pass_chk signal is not in any always_ff block, so its reset behavior depends on the simulator/synthesizer default. In real hardware this would be an uninitialized state that becomes permanently set. No uncertainty in the design flaw.",
-      "recommended_follow_up": [
-        "Add a reset condition for pass_chk.",
-        "Implement a lockout mechanism after a configurable number of failed attempts.",
-        "Add a logout/re-lock operation that clears pass_chk.",
-        "Implement a session-based timeout that automatically clears pass_chk."
-      ]
-    },
-    {
-      "finding_id": "F-003",
-      "status": "confirmed_finding",
-      "summary": "Writable 'fuse' ROM2 — secure keys (JTAG key, AES key, access control config) are modifiable at runtime via AXI bus",
-      "vulnerability_category": "Insufficient Write Protection on Secure Storage",
+      "summary": "ROM2 secure key storage is unconditionally writable via the AXI bus, allowing any bus master to overwrite all cryptographic keys and access-control policy stored in the 'fuse' registers.",
+      "vulnerability_category": "Insufficient Access Control / Missing Write Protection on Secure Storage",
       "affected_locations": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 32,
+          "line_start": 35,
           "line_end": 42,
           "module": "rom2",
           "signal_or_register": "secure_reg"
@@ -151,58 +18,65 @@
       "evidence": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 16,
-          "line_end": 22,
+          "line_start": 35,
+          "line_end": 42,
           "module": "rom2",
-          "object": "mem constant (fuse values)",
+          "object": "secure_reg write logic",
           "evidence_type": "source_code",
-          "description": "const logic [RomSize-1:0][191:0] mem = { 192'h... // JTAG, 192'h... // AES, ... }; // Store key values here. Replication of fuse.",
-          "supports_claim": "The design attempts to emulate fuse-based key storage with hardcoded constants."
+          "description": "The always_ff block on posedge clk_i unconditionally writes wdata_i to secure_reg[addr_i[...]] whenever req_i && we_i are asserted. No write-protect bit, lock flag, or privilege check is present.",
+          "supports_claim": "secure_reg is intended as fused-key storage (comment: 'Replication of fuse.') but is freely writable."
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": 34,
+          "line_end": 34,
+          "module": "ariane_soc",
+          "object": "ROM2Base",
+          "evidence_type": "source_code",
+          "description": "ROM2 is mapped at AXI address 0x0021_0000 with length 0x10000, making it accessible as a regular bus slave.",
+          "supports_claim": "ROM2 is exposed on the shared AXI bus with no address-space isolation."
         },
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 32,
-          "line_end": 42,
+          "line_start": 18,
+          "line_end": 24,
           "module": "rom2",
-          "object": "always_ff write logic",
+          "object": "mem constant",
           "evidence_type": "source_code",
-          "description": "always_ff @ (posedge clk_i) begin if (~rst_ni) begin secure_reg <= mem; end else begin if(req_i) begin if (!we_i) begin raddr_q <= addr_i[...]; end else begin secure_reg[addr_i[...]] <= wdata_i; end end end end",
-          "supports_claim": "Despite the 'fuse' comment, secure_reg is writable by any bus master via the AXI interface when we_i is asserted."
-        },
-        {
-          "file": "tb/ariane_peripherals.sv",
-          "line_start": 186,
-          "line_end": 212,
-          "module": "ariane_peripherals",
-          "object": "axi2mem and rom2 instantiation",
-          "evidence_type": "source_code",
-          "description": "axi2mem i_axi2rom2 ( ... .slave(rom2_fuse) ... ); rom2 i_rom2 ( .req_i(rom2_req), .we_i(rom2_we), ... ); assign jtag_key = key_reg_out[1][31:0];",
-          "supports_claim": "ROM2 is connected as a standard AXI slave at ROM2Base=0x0021_0000 with full read/write access."
+          "description": "Four 192-bit keys initialized as const: AES key (index 0), JTAG key (index 1), access control master 0 (index 2), access control master 1 (index 3). The const keyword only protects the initial value, not the register updates.",
+          "supports_claim": "Sensitive values are stored without hardware write-locking."
         }
       ],
-      "reasoning_summary": "ROM2 is documented as storing 'fuse' keys and its output is named 'secure_reg', implying hardware-level write protection. However, the RTL shows secure_reg is unconditionally writable via the AXI bus when req_i and we_i are asserted. Any bus master that can access the ROM2 memory region (0x0021_0000-0x0030_FFFF) can overwrite the JTAG key (index 1), AES key (index 0), and access control registers (indices 2 and 3). This completely defeats the purpose of fuse-based key storage.",
-      "security_impact": "An attacker who gains any level of bus access can: (1) overwrite the JTAG key to a known value, (2) extract or replace the AES encryption key, (3) modify access control permissions to grant themselves access to all peripherals. The 'fuse' concept provides no actual hardware security.",
+      "reasoning_summary": "The ROM2 module is documented as a fuse replication storage containing AES keys, JTAG keys, and access control policies. Despite the 'const' keyword on the initialization vector 'mem', the actual register array 'secure_reg' is implemented as standard writable registers with no write-protection mechanism. The we_i signal from the AXI-to-memory bridge is used directly without privilege-level gating, bus-master-ID filtering, or address-range restriction. Any entity capable of issuing AXI writes to the ROM2 address range (0x0021_0000) can overwrite all security-critical values.",
+      "security_impact": "CRITICAL: An attacker who can access the AXI bus (e.g., compromised software at any privilege level, or the debug module's System Bus Access) can overwrite AES encryption keys, JTAG authentication credentials, and the access-control policy for all peripherals. This completely undermines the hardware root of trust.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "It is unclear whether the AXI crossbar or address decoder enforces any write-protection on the ROM2 address range. The provided crossbar source is not included in the scope. However, no such protection is evident in the ROM2 module itself or in the peripheral instantiation.",
+      "uncertainty_or_missing_evidence": "The axi_xbar module source is not provided, so we cannot confirm whether it applies any access-control filtering on ROM2 transactions. However, ROM2 provides the access_ctrl values used by the crossbar for OTHER peripherals, strongly suggesting ROM2 itself is not self-protected. No bus-master-ID or privilege-level signals are present in the rom2 module interface.",
       "recommended_follow_up": [
-        "Implement hardware write-protection on ROM2 secure registers after initial boot configuration.",
-        "Add a lock bit that, once set, permanently disables writes to ROM2 until next power-cycle.",
-        "Consider using actual eFuse or one-time-programmable (OTP) memory for critical keys.",
-        "Implement access control on the ROM2 AXI slave that restricts writes to a trusted bus master only."
+        "Add a write-lock register that gates we_i after initial provisioning",
+        "Implement a lifecycle state machine (manufacturing → locked) preventing post-boot writes",
+        "Add bus-master-ID filtering to restrict ROM2 writes to trusted initiators only",
+        "Make ROM2 read-only after reset deassertion using a one-time programmable (OTP) emulation"
       ]
     },
     {
-      "finding_id": "F-004",
+      "finding_id": "F-002",
       "status": "confirmed_finding",
-      "summary": "Trivially weak 32-bit hardcoded JTAG key — publicly visible in source code, insufficient keyspace",
-      "vulnerability_category": "Hardcoded Credentials / Weak Authentication",
+      "summary": "JTAG authentication can be bypassed by overwriting the JTAG key in writable ROM2 storage, allowing an attacker to authenticate without knowing the original key.",
+      "vulnerability_category": "Authentication Bypass / CWE-287",
       "affected_locations": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 20,
-          "line_end": 20,
+          "line_start": 35,
+          "line_end": 42,
           "module": "rom2",
-          "signal_or_register": "mem[1] (JTAG key)"
+          "signal_or_register": "secure_reg[1] (JTAG key)"
+        },
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": 110,
+          "line_end": 119,
+          "module": "dmi_jtag",
+          "signal_or_register": "pass_chk, pass"
         },
         {
           "file": "tb/ariane_peripherals.sv",
@@ -215,144 +89,261 @@
       "evidence": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 18,
-          "line_end": 21,
+          "line_start": 35,
+          "line_end": 42,
           "module": "rom2",
-          "object": "192-bit ROM2 entries",
+          "object": "secure_reg write path",
           "evidence_type": "source_code",
-          "description": "192'h2b7e1516_28aed2a6_abf71588_09cf4f3c_2b7e1516_28aed2a6, // 1st location for JTAG",
-          "supports_claim": "The JTAG key is hardcoded as a literal constant in publicly visible source code."
+          "description": "secure_reg[1] holding the JTAG key is unconditionally writable via AXI.",
+          "supports_claim": "JTAG key storage is mutable."
         },
         {
           "file": "tb/ariane_peripherals.sv",
           "line_start": 215,
           "line_end": 215,
           "module": "ariane_peripherals",
-          "object": "jtag_key extraction",
+          "object": "jtag_key assignment",
           "evidence_type": "source_code",
-          "description": "assign jtag_key = key_reg_out[1][31:0];",
-          "supports_claim": "Only 32 bits (0x28aed2a6) of the 192-bit value are actually used for JTAG password comparison."
+          "description": "assign jtag_key = key_reg_out[1][31:0]; The lower 32 bits of ROM2 index 1 are passed as the JTAG key to dmi_jtag.",
+          "supports_claim": "JTAG key originates from writable ROM2."
+        },
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": 209,
+          "line_end": 213,
+          "module": "dmi_jtag",
+          "object": "pass register load",
+          "evidence_type": "source_code",
+          "description": "On reset, pass <= jtag_key; loads the key from the (writable) ROM2 into the dmi_jtag module.",
+          "supports_claim": "The authentication reference value comes from mutable storage."
+        },
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": 110,
+          "line_end": 119,
+          "module": "dmi_jtag",
+          "object": "DTM_PASS state handling",
+          "evidence_type": "source_code",
+          "description": "When DTM_PASS op is received, data_d is compared to pass. If equal, pass_chk = 1'b1. No rate limiting, no lockout on failure, no multi-factor check.",
+          "supports_claim": "Password check is the sole gate for JTAG debug access and has no brute-force protection."
         }
       ],
-      "reasoning_summary": "The JTAG password is: (1) hardcoded in open-source RTL visible to anyone, (2) reduced to only 32 bits despite being stored in a 192-bit register, (3) identical across all instances of the design. A 32-bit keyspace (approximately 4.3 billion combinations) is brute-forceable, and the lack of rate limiting or lockout makes brute-force attacks feasible. Additionally, since the key is in public source code, no brute-force is needed — the key is simply known.",
-      "security_impact": "The JTAG authentication provides effectively zero security. Anyone who has read the source code knows the password. Even without source access, a 32-bit keyspace with no rate limiting is trivial to brute-force.",
+      "reasoning_summary": "The JTAG authentication scheme relies on a 32-bit password stored at ROM2 index 1 bits [31:0]. Because ROM2 is writable (F-001), an attacker can: (1) write a known 32-bit value to secure_reg[1][31:0] via AXI, (2) present that same value through the JTAG DTM_PASS command, (3) set pass_chk = 1'b1, gaining authenticated status. No brute-force lockout, no attempt counter, and no secondary authentication factor exists. Additionally, the key comparison is a simple equality check on a 32-bit value with no constant-time comparison or side-channel hardening.",
+      "security_impact": "CRITICAL: The JTAG debug interface is the primary hardware security boundary for the SoC. Bypassing JTAG authentication grants an external attacker full debug capabilities including memory read/write, register access, and CPU control through the Debug Transport Module.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "The DTM_PASS comparison logic in dmi_jtag.sv compares data_d == pass where pass is 32 bits wide, matching the jtag_key width. No uncertainty.",
+      "uncertainty_or_missing_evidence": "No uncertainty. The signal chain from ROM2 write → jtag_key → pass register → pass_chk is fully traceable in the provided RTL.",
       "recommended_follow_up": [
-        "Use a cryptographically secure key length (at least 128 bits) for JTAG authentication.",
-        "Store the key in true non-volatile secure storage (eFuse/PUF), not in writable RTL registers.",
-        "Remove hardcoded keys from source code; provision them per-device during manufacturing.",
-        "Implement rate limiting and lockout after failed authentication attempts."
+        "Implement JTAG key in actual non-volatile fuse (eFuse) not writable via system bus",
+        "Add failed-attempt counter with lockout or increasing delays",
+        "Use a cryptographically strong authentication protocol (e.g., challenge-response) instead of static password comparison",
+        "Add constant-time comparison for the password check to prevent timing side-channels"
+      ]
+    },
+    {
+      "finding_id": "F-003",
+      "status": "confirmed_finding",
+      "summary": "Successful JTAG password authentication unconditionally forces the processor into Machine mode (highest RISC-V privilege level), bypassing all architectural privilege-level protections.",
+      "vulnerability_category": "Privilege Escalation / CWE-269",
+      "affected_locations": [
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": 177,
+          "line_end": 181,
+          "module": "dmi_jtag",
+          "signal_or_register": "umode_o"
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 938,
+          "line_end": 938,
+          "module": "csr_regfile",
+          "signal_or_register": "priv_lvl_o"
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 153,
+          "line_end": 153,
+          "module": "ariane_testharness",
+          "signal_or_register": "ariane_umode"
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 603,
+          "line_end": 603,
+          "module": "ariane_testharness",
+          "signal_or_register": "ariane_umode (umode_i)"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": 177,
+          "line_end": 181,
+          "module": "dmi_jtag",
+          "object": "umode_o drive logic",
+          "evidence_type": "source_code",
+          "description": "If pass_chk == 1'b1, umode_o = 1'b1; else umode_o = 1'b0. The signal is asserted immediately upon successful JTAG password check.",
+          "supports_claim": "umode_o is directly gated by pass_chk (the JTAG auth flag)."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 938,
+          "line_end": 938,
+          "module": "csr_regfile",
+          "object": "priv_lvl_o assignment",
+          "evidence_type": "source_code",
+          "description": "assign priv_lvl_o = (debug_mode_q || umode_i) ? riscv::PRIV_LVL_M : priv_lvl_q; When umode_i is asserted, the CPU privilege output is forced to Machine mode.",
+          "supports_claim": "umode_i forces Machine mode regardless of architectural privilege state."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 153,
+          "line_end": 153,
+          "module": "ariane_testharness",
+          "object": "umode connection dmi_jtag → ariane_umode",
+          "evidence_type": "source_code",
+          "description": ".umode_o ( ariane_umode ) — the dmi_jtag umode_o is connected to the ariane_umode net.",
+          "supports_claim": "Signal propagates from JTAG module to the core."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 603,
+          "line_end": 603,
+          "module": "ariane_testharness",
+          "object": "umode connection ariane_umode → csr_regfile",
+          "evidence_type": "source_code",
+          "description": ".umode_i ( ariane_umode ) — the ariane_umode net feeds csr_regfile.umode_i.",
+          "supports_claim": "JTAG auth flag reaches the CSR register file and forces privilege escalation."
+        }
+      ],
+      "reasoning_summary": "The signal chain is: JTAG DTM_PASS success → pass_chk=1 → umode_o=1 → ariane_umode=1 → umode_i=1 → priv_lvl_o=PRIV_LVL_M. The csr_regfile implementation overrides the architectural privilege level (priv_lvl_q, which tracks the RISC-V mstatus.MPP/MPIE state machine) with Machine mode whenever umode_i is high. Combined with the bypassable JTAG authentication (F-002), this creates a complete privilege escalation path from external JTAG access to Machine-mode code execution. The signal name 'umode' is misleading—it actually forces M-mode, not U-mode as the name suggests.",
+      "security_impact": "CRITICAL: An attacker who successfully authenticates via JTAG (or bypasses authentication via F-002) immediately gains Machine-mode privilege, the highest RISC-V privilege level. This enables arbitrary CSR access, physical memory access, modification of page tables, and complete system compromise.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No uncertainty. The signal chain is fully traceable across the provided files. The behavior is confirmed by the inline comment on umode_o: 'Sets the processor to machine mode'.",
+      "recommended_follow_up": [
+        "Do not tie privilege escalation directly to JTAG authentication",
+        "Require explicit debug-mode entry sequence per RISC-V Debug Spec (halt hart, write DCSR, etc.)",
+        "Implement privilege-level preservation such that debug mode exits restore the original privilege level",
+        "Rename umode signal to accurately reflect its function (e.g., force_m_mode)"
+      ]
+    },
+    {
+      "finding_id": "F-004",
+      "status": "confirmed_finding",
+      "summary": "ROM2 storage lacks self-protecting access control, creating a circular dependency where the access-control policy is stored in unprotected memory.",
+      "vulnerability_category": "Circular Protection Dependency / CWE-1262",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 49,
+          "module": "rom2",
+          "signal_or_register": "secure_reg"
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 442,
+          "line_end": 450,
+          "module": "ariane_testharness",
+          "signal_or_register": "access_ctrl"
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 216,
+          "line_end": 217,
+          "module": "ariane_peripherals",
+          "signal_or_register": "access_ctrl_reg"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 7,
+          "line_end": 16,
+          "module": "rom2",
+          "object": "module interface",
+          "evidence_type": "source_code",
+          "description": "rom2 module ports: clk_i, rst_ni, req_i, we_i, addr_i, wdata_i, rdata_o, secure_reg. No privilege-level input, no bus-master-ID, no access-control gating signal.",
+          "supports_claim": "ROM2 has no self-protection mechanism."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 442,
+          "line_end": 450,
+          "module": "ariane_testharness",
+          "object": "access_ctrl construction",
+          "evidence_type": "source_code",
+          "description": "access_ctrl[i][j] = access_ctrl_reg[i][4*j +: 4]. The access_ctrl_reg comes from ROM2 and is fed to axi_xbar to protect OTHER peripherals, but not ROM2 itself.",
+          "supports_claim": "ROM2 provides the access-control policy for the system but is not protected by it."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 216,
+          "line_end": 217,
+          "module": "ariane_peripherals",
+          "object": "access_ctrl_reg extraction",
+          "evidence_type": "source_code",
+          "description": "access_ctrl_reg[0] = key_reg_out[2][47:0]; access_ctrl_reg[1] = key_reg_out[3][47:0]. Access control bits are extracted from ROM2 indices 2 and 3.",
+          "supports_claim": "The access-control policy originates from writable ROM2."
+        }
+      ],
+      "reasoning_summary": "The SoC access-control policy is stored in ROM2 indices 2 and 3, extracted as access_ctrl_reg, and fed to the AXI crossbar to enforce peripheral access restrictions. However, ROM2 itself is connected as a standard AXI slave with no dedicated protection. The rom2 module interface has no inputs for privilege level, bus-master-ID, or access-enable that would allow it to self-protect. This creates a circular dependency: the access-control rules that should protect ROM2 are stored inside ROM2. An attacker who can write to ROM2 can disable all access controls.",
+      "security_impact": "HIGH: The entire SoC access-control framework is undermined because its policy storage is unprotected. Modifying ROM2 allows an attacker to grant themselves access to any peripheral (AES, UART, SPI, Ethernet, etc.) by rewriting the access_ctrl bits.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The axi_xbar module source is not provided, so we cannot verify how (or if) it applies access_ctrl to ROM2 transactions specifically. However, the structural evidence shows ROM2 feeds access_ctrl to the crossbar rather than receiving protection from it.",
+      "recommended_follow_up": [
+        "Implement ROM2 write protection as a hardwired or early-boot-locked policy independent of ROM2 contents",
+        "Move access-control policy to actual immutable storage (eFuse, hardcoded RTL constants)",
+        "Add a separate access-control enforcement point before ROM2 write transactions"
       ]
     },
     {
       "finding_id": "F-005",
       "status": "confirmed_finding",
-      "summary": "DMI (non-JTAG) debug path bypasses JTAG authentication entirely — direct debug access without password check",
-      "vulnerability_category": "Missing Authentication on Alternative Access Path",
-      "affected_locations": [
-        {
-          "file": "tb/ariane_testharness.sv",
-          "line_start": 98,
-          "line_end": 119,
-          "module": "ariane_testharness",
-          "signal_or_register": "debug_req_valid, debug_req, jtag_resp_valid, dmi_resp_valid"
-        },
-        {
-          "file": "tb/ariane_testharness.sv",
-          "line_start": 165,
-          "line_end": 179,
-          "module": "ariane_testharness",
-          "signal_or_register": "SimDTM / dmi_req"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "tb/ariane_testharness.sv",
-          "line_start": 108,
-          "line_end": 115,
-          "module": "ariane_testharness",
-          "object": "debug MUX logic",
-          "evidence_type": "source_code",
-          "description": "assign debug_req_valid = (jtag_enable[0]) ? jtag_req_valid : dmi_req_valid; assign debug_req = (jtag_enable[0]) ? jtag_dmi_req : dmi_req;",
-          "supports_claim": "When jtag_enable=0, the DMI path (dmi_req) connects directly to the debug module, bypassing the JTAG dmi_jtag module entirely."
-        },
-        {
-          "file": "tb/ariane_testharness.sv",
-          "line_start": 165,
-          "line_end": 179,
-          "module": "ariane_testharness",
-          "object": "SimDTM instantiation",
-          "evidence_type": "source_code",
-          "description": "SimDTM i_SimDTM ( .debug_req_valid(dmi_req_valid), ... ); — SimDTM connects directly to the debug module with no password check.",
-          "supports_claim": "The DTM path has no DTM_PASS operation, no password check, and no umode_o signal."
-        }
-      ],
-      "reasoning_summary": "The design supports two debug transport mechanisms: JTAG (via dmi_jtag with password authentication) and DTM/DMI (via SimDTM or a direct DMI interface). The MUX in ariane_testharness selects between them based on jtag_enable. The JTAG path includes password authentication (DTM_PASS) and the umode privilege mechanism. However, the DTM path connects directly to the debug module (dm_top) through SimDTM without any authentication whatsoever. While SimDTM is a simulation construct, the architectural pattern means any DMI-based debug transport bypasses the JTAG password gate entirely.",
-      "security_impact": "In configurations where the DTM path is enabled (or synthesized with a direct DMI interface), the JTAG password protection is entirely moot. An attacker can use the DMI interface for unauthenticated debug access to the entire SoC.",
-      "confidence": "medium",
-      "uncertainty_or_missing_evidence": "SimDTM is a simulation-only module (likely Verilog DPI-based), and InclSimDTM is a testbench parameter. It is unclear whether the DTM path would exist in a production synthesis configuration. The dm_csrs and dm_top modules were not fully visible — they may contain additional access controls not observed here.",
-      "recommended_follow_up": [
-        "Ensure that in production configurations, the DMI path is either disabled or protected by equivalent authentication to the JTAG path.",
-        "Implement authentication at the debug module (dm_top) level rather than only at the transport level.",
-        "Audit all debug transport paths for consistent authentication enforcement."
-      ]
-    },
-    {
-      "finding_id": "F-006",
-      "status": "confirmed_finding",
-      "summary": "Missing access control enforcement on ROM2 writes — no privilege-level or master-ID checking on fuse register writes",
-      "vulnerability_category": "Missing Authorization on Secure Resource",
+      "summary": "The ROM2 secure registers lack any write-once or lock mechanism, remaining perpetually mutable throughout the system lifetime.",
+      "vulnerability_category": "Missing Lock Mechanism on Security-Critical Registers / CWE-1231",
       "affected_locations": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 32,
-          "line_end": 42,
+          "line_start": 13,
+          "line_end": 46,
           "module": "rom2",
           "signal_or_register": "secure_reg"
-        },
-        {
-          "file": "tb/ariane_peripherals.sv",
-          "line_start": 186,
-          "line_end": 212,
-          "module": "ariane_peripherals",
-          "signal_or_register": "rom2_fuse AXI slave"
         }
       ],
       "evidence": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 32,
-          "line_end": 42,
+          "line_start": 13,
+          "line_end": 46,
           "module": "rom2",
-          "object": "Write logic",
+          "object": "full module implementation",
           "evidence_type": "source_code",
-          "description": "if(req_i) begin ... if (!we_i) begin ... end else begin secure_reg[addr_i[...]] <= wdata_i; end end",
-          "supports_claim": "ROM2 accepts writes unconditionally with no privilege-level check, no master-ID check, and no lock-bit check."
+          "description": "The entire rom2 module contains: a const initialization vector, secure_reg registers, and an always_ff block that loads mem on reset and writes wdata_i on (req_i && we_i). There is no lock register, lifecycle state machine, or write-counter.",
+          "supports_claim": "No hardware mechanism exists to transition ROM2 from writable to read-only."
         },
         {
-          "file": "tb/ariane_peripherals.sv",
-          "line_start": 186,
-          "line_end": 212,
-          "module": "ariane_peripherals",
-          "object": "ROM2 AXI connection",
+          "file": "src/rom2/rom2.sv",
+          "line_start": 18,
+          "line_end": 24,
+          "module": "rom2",
+          "object": "mem constant",
           "evidence_type": "source_code",
-          "description": "axi2mem i_axi2rom2 ( .slave(rom2_fuse) ... ) — ROM2 is connected purely as a data slave with no sideband access-control signals.",
-          "supports_claim": "The AXI bus interface to ROM2 provides no signals for checking the requestor's privilege level or master identity."
+          "description": "const logic [RomSize-1:0][191:0] mem = {...}. The 'const' keyword only makes the initial value array immutable in simulation/synthesis, not the runtime registers.",
+          "supports_claim": "The 'const' qualifier does not prevent runtime modification of secure_reg."
         }
       ],
-      "reasoning_summary": "While the design extracts access_ctrl_reg from ROM2 (indices 2 and 3) and passes them to the AXI crossbar for peripheral access control enforcement, ROM2 itself has no access controls on its own write path. Any bus master with access to the ROM2 memory region can modify the secure registers, regardless of its privilege level. This creates a circular dependency: the access control configuration is stored in ROM2, but ROM2 is not protected by those controls. There is no check of the requestor's privilege level (user/supervisor/machine), no master ID verification, and no lock bit to prevent modification.",
-      "security_impact": "The access control mechanism can be subverted by modifying the access_ctrl values in ROM2. An attacker who gains access to the ROM2 address range can grant themselves access to all peripherals by writing to the access control registers. This undermines the entire SoC access control scheme.",
-      "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The downstream access control enforcement logic in the AXI crossbar/address decoder is not included in the provided source scope. It is possible (though unlikely given the ROM2 module design) that the crossbar enforces write-protection on the ROM2 address range. Additionally, the full dm_csrs.sv file was truncated and may contain related access control logic.",
+      "reasoning_summary": "Secure fuse storage in hardware security modules typically implements a state machine that transitions from a provisioning state (where fuses can be programmed) to a locked state (where they become read-only). Common approaches include: a write-once register, a monotonic lock counter, a lifecycle controller, or a physical eFuse controller with blown-fuse detection. The ROM2 module has none of these. The secure_reg registers remain writable on every clock cycle where req_i and we_i are asserted, from reset deassertion until power-down, with no mechanism to disable writes.",
+      "security_impact": "MEDIUM: While the primary impact is covered by F-001 (writability), the lack of any lock mechanism means there is no architectural path to ever secure the system. Even with a correct boot sequence that provisions secure_reg, a later compromise (e.g., software vulnerability) can overwrite the keys because no lock transition exists.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No uncertainty. The complete rom2 module source is provided and shows no locking mechanism.",
       "recommended_follow_up": [
-        "Implement privilege-level checking in the ROM2 write path: only Machine-mode accesses should be allowed to modify secure registers.",
-        "Add a hardware lock bit in ROM2 that, once set, permanently disables all writes until the next power-on reset.",
-        "Consider making ROM2 truly read-only after boot configuration by gating the we_i signal in hardware based on a boot-complete flag.",
-        "Move access control configuration to a separate, properly protected module rather than storing it alongside cryptographic keys."
+        "Add a one-time writable lock bit that, once set, gates we_i to 0 for all subsequent cycles",
+        "Implement a lifecycle state machine (e.g., PROVISIONING → LOCKED) with an irreversible state transition",
+        "Use physical eFuse macros with built-in write-once semantics instead of register-based storage"
       ]
     }
   ],
   "no_finding_reason": "",
-  "global_uncertainty": "1) The AXI crossbar/address decoder source code is not included in the provided scope, so enforcement of access_ctrl on peripheral accesses and possible write-protection on the ROM2 address range could not be verified. 2) The dm_csrs.sv and dm_top.sv files were partially truncated during reading; there may be additional access-control logic in the unread portions of these modules. 3) SimJTAG and SimDTM are simulation-only DPI modules whose internal source is not provided. 4) It is unclear whether the current design is intended for production use or is a test/development configuration with debug features that would be removed for tape-out."
+  "global_uncertainty": "Two areas of uncertainty exist: (1) The axi_xbar module source is not included, so its exact access-control enforcement on ROM2 transactions cannot be verified. However, the structural evidence (ROM2 producing access_ctrl for the crossbar) strongly suggests ROM2 is not self-protected. (2) The SimDTM module provides a parallel debug interface without any JTAG password check. When InclSimDTM=1 (the default), the DMI interface is completely unprotected, rendering all JTAG authentication irrelevant. This is visible in ariane_testharness.sv lines 170-192 but is treated as an architectural design choice rather than a separate finding since the SimDTM module source is outside scope."
 }

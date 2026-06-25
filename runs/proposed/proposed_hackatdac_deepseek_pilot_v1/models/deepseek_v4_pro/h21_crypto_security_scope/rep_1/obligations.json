@@ -1,0 +1,229 @@
+{
+  "scope_id": "riscv_peripherals",
+  "obligations": [
+    {
+      "obligation_id": "OBL-DEBUG-BUS-ACCESS",
+      "reason": "Debug paths (SimDTM, dmi_jtag, SimJTAG) may bypass normal access control and allow reads/writes to protected crypto key/state registers. Must verify that debug-initiated bus transactions are gated by jtag_unlock and/or peripheral lock controls, or that debug cannot reach the cryptographic wrapper address ranges.",
+      "subject": "Debug master (i_SimDTM, i_dmi_jtag, i_SimJTAG) via debug bus interface",
+      "operation": "read/write",
+      "object": "Key registers (key0, key1, key2 in aes0/aes2; key_reg0, key_reg1, key_reg2 in aes1; data, key0, ikey_hash_bytes, okey_hash_bytes in hmac; internal state in sha256) and other security-sensitive registers",
+      "expected_guard": "Authentication/authorization (e.g., jtag_unlock) and the same lock mechanism (reglk_ctrl, acct_ctrl) applied to non-debug paths",
+      "candidate_path": "debug_req_valid/bits_op -> dm_slave_req -> bus interconnect (buf_ariane_debug_noc2) -> peripheral AXI interface -> bypassing local lock or access-control logic",
+      "state_conditions_to_check": [
+        "jtag_unlock assertion logic (hard-coded vs. hash-based)",
+        "debug_mode_i signal effect in each wrapper",
+        "whether debug bus can target memory-mapped regions of crypto accelerators",
+        "presence of any bypass mux that routes debug transactions directly to internal registers"
+      ],
+      "required_evidence_slots": [
+        "RTL evidence showing debug bus transaction path from dm_slave_req to peripheral wrapers",
+        "Comparison of debug vs. normal transaction handling inside aes0/aes1/aes2/hmac/sha256 wrappers",
+        "Effect of jtag_unlock on write/read enables in those wrappers or in the bus-level access mediation (acct_wrapper/reglk_wrapper)"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/aes0/aes0_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes1/aes1_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes2/aes2_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/sha256/sha256_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm whether debug bus transactions reach crypto peripherals directly or through access-control mediators (acct/reglk)."
+    },
+    {
+      "obligation_id": "OBL-LOCK-WRITE-PROTECTION",
+      "reason": "The reglk (register lock) mechanism should protect all write paths to cryptographic key and configuration registers. If some write enables ignore reglk_ctrl, a locked peripheral may still be modified.",
+      "subject": "Any bus master (CPU, DMA, debug)",
+      "operation": "write",
+      "object": "Key registers (aes0: key0/key1/key2, aes1: key_reg0/key_reg1/key_reg2, aes2: key0/key1/key2, hmac: data/key0/*_hash_bytes, sha256: internal state registers), control registers that initiate operations",
+      "expected_guard": "Each write enable signal (e.g., block_we, key_we0, start triggers) must be logically ANDed with the corresponding reglk_ctrl bit (possibly via acct_ctrl) when the peripheral is locked",
+      "candidate_path": "Write data from AXI interface -> address decode -> conditional assignment of we flags -> missing reglk_ctrl condition for certain registers or under specific modes (debug_mode_i, we_flag inputs)",
+      "state_conditions_to_check": [
+        "Default reset value of reglk_ctrl (locked or unlocked)",
+        "Whether write enables derive from signals that already include reglk_ctrl or acct_ctrl gating",
+        "Effect of we_flag_x signals on write enables independent of lock state",
+        "Behavior when debug_mode_i is asserted—does it override lock checks?"
+      ],
+      "required_evidence_slots": [
+        "RTL code for write enable generation in each crypto wrapper",
+        "RTL code for reglk_ctrl distribution from reglk_wrapper to wrappers",
+        "RTL code for acct_ctrl generation in acct_wrapper and its integration with reglk_ctrl"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes0/aes0_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes1/aes1_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes2/aes2_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/sha256/sha256_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "The exact mapping of reglk_ctrl bits to individual peripheral registers is unclear from the fact layer alone, must be verified in RTL."
+    },
+    {
+      "obligation_id": "OBL-RESET-LOCK-DEFAULT",
+      "reason": "If the reset default of reglk is unlocked, an attacker could write keys immediately after reset before software configures the lock. Security-critical registers must be locked by default.",
+      "subject": "reglk_wrapper reset circuitry",
+      "operation": "clear/set initial state",
+      "object": "reglk_ctrl output (8*NB_PERIPHERALS bits)",
+      "expected_guard": "The reset value of all reglk_ctrl bits should be the locked state (normally all zeros or a defined secure value) so that peripherals are write-protected by default.",
+      "candidate_path": "rst_ni or rst_9 -> reglk_wrapper -> reglk_ctrl uninitialized or reset to unlocked pattern; if unlocked, any bus master can write key material without authentication.",
+      "state_conditions_to_check": [
+        "Reset value of reglk_ctrl registers in reglk_wrapper (explicit assignment in reset block)",
+        "Are there any 'rst_9' or other reset inputs that leave reglk_ctrl in an unsafe state?",
+        "Is reglk_ctrl broadcast before software has time to program locks?"
+      ],
+      "required_evidence_slots": [
+        "RTL of reglk_wrapper reset logic",
+        "Reset signal connections in riscv_peripherals.sv that drive rst_9",
+        "Checking that no default-value 'assign' overrides the reset flop behavior"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Unknown whether reset default is locked; requires RTL inspection."
+    },
+    {
+      "obligation_id": "OBL-DEBUG-MODE-BYPASS",
+      "reason": "The debug_mode_i input to cryptographic wrappers could be used to bypass write protection or allow reading of secret state. Must verify that debug mode does not override the lock or expose internal state.",
+      "subject": "debug_mode_i signal",
+      "operation": "override or expose",
+      "object": "Write enables for key/control registers, read paths for ciphertext/internal state",
+      "expected_guard": "debug_mode_i should not grant access to security-sensitive registers; if debug access is allowed, it must still be gated by jtag_unlock and lock controls, and should not leak raw key material.",
+      "candidate_path": "debug_mode_i used in conditional logic for write enable (e.g., we = (normal_we | debug_mode_i)) or to mux internal state onto read data bus",
+      "state_conditions_to_check": [
+        "How debug_mode_i is connected to each wrapper (is it tied low? driven by a debug control register?)",
+        "Any combinational paths from debug_mode_i to key_reg, start, ct, or core_result registers",
+        "Does debug_mode_i affect the lock logic (e.g., mask reglk_ctrl)?"
+      ],
+      "required_evidence_slots": [
+        "RTL of the write/read logic inside each wrapper that references debug_mode_i",
+        "Evidence that debug_mode_i can be asserted without jtag_unlock or regardless of lock state"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/aes0/aes0_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes1/aes1_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes2/aes2_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/sha256/sha256_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "high",
+      "uncertainty": "debug_mode_i is present as an input port, but its actual usage is unknown from the fact layer."
+    },
+    {
+      "obligation_id": "OBL-DMA-ACCESS-CONTROL",
+      "reason": "DMA engines may access the same bus interconnect that leads to cryptographic registers. If DMA transactions do not undergo the same lock/permission checks, a DMA-enabled attacker could read/write secrets.",
+      "subject": "DMA engine (buf_ariane_dma_noc2 interface)",
+      "operation": "read/write",
+      "object": "Memory-mapped registers in crypto accelerators (keys, data, control)",
+      "expected_guard": "DMA transactions should be subject to the same access-control mediation (acct_ctrl/reglk_ctrl) as CPU-initiated transactions, or the DMA should be restricted from accessing the address ranges of security peripherals.",
+      "candidate_path": "dma_req -> buf_ariane_dma_noc2_valid_i -> bus routing that bypasses acct_wrapper or address-range checks, reaching aes0/... wrappers directly",
+      "state_conditions_to_check": [
+        "Whether the DMA bus segment connects to the same crossbar that leads to crypto peripherals",
+        "Presence of any address filter or PMP-like check on DMA accesses",
+        "Whether acct_wrapper inspects DMA transaction attributes differently from CPU attributes"
+      ],
+      "required_evidence_slots": [
+        "RTL showing DMA bus connection to peripheral bus in riscv_peripherals.sv",
+        "Address decode logic for DMA vs. CPU paths",
+        "If a separate bus bridge exists, proof that no lock check is duplicated"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Fact layer shows DMA interface exists, but not how it is routed to peripheral wrappers. Need to confirm connectivity."
+    },
+    {
+      "obligation_id": "OBL-SECRET-EXPOSURE-READ-MUX",
+      "reason": "Internal cryptographic state (plaintext, intermediate results, ciphertext) could be exposed through read data muxes if not properly cleared or gated. Even when operations are complete, stale data may be readable.",
+      "subject": "Any bus master reading crypto peripheral output registers",
+      "operation": "read",
+      "object": "ciphertext (ct, core_result), hash output (sha256 result), intermediate state (state_big, dii_data, block registers)",
+      "expected_guard": "Read paths must be gated so that sensitive internal state is not exposed to the bus; output registers should be cleared after read or only accessible under authorized conditions (e.g., after operation complete and with appropriate privileges).",
+      "candidate_path": "Memory-mapped read addresses decode to internal state signals directly, without qualification, allowing an attacker to read current or stale secret material.",
+      "state_conditions_to_check": [
+        "Read data mux in each wrapper: does it directly expose state_big, ct, key registers?",
+        "Are output registers (ct, core_result) cleared after a read?",
+        "Is there a state machine that blocks reads during operation or requires a fresh read-trigger?"
+      ],
+      "required_evidence_slots": [
+        "RTL of read-data assignment (rdata logic) in each wrapper",
+        "RTL of state clearing after read (if any)",
+        "Cross-check that read from secret registers does not simply return internal nets without lock check"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/aes0/aes0_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes1/aes1_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes2/aes2_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/sha256/sha256_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "No direct evidence from fact layer that read paths are unprotected; this is a common vulnerability."
+    },
+    {
+      "obligation_id": "OBL-JTAG-UNLOCK-AUTH",
+      "reason": "The jtag_unlock signal presumably enables debug access to protected peripherals. If its generation is weak (e.g., constant true, trivial hash, or bypassable), the lock mechanism can be circumvented via JTAG.",
+      "subject": "jtag_unlock logic (jtag_hash comparison or state machine)",
+      "operation": "set jtag_unlock",
+      "object": "jtag_unlock signal used by reglk_wrapper (and possibly acct_wrapper) to allow writes",
+      "expected_guard": "jtag_unlock should be asserted only after a strong authentication sequence, such as sending a known secret hash, and must not be hardwired or skipped by any test/disable input.",
+      "candidate_path": "Hardcoded jtag_hash constant compared to JTAG input, or jtag_unlock directly tied to '1' via parameter or test mode (testmode_i). Alternatively, jtag_unlock may be asserted before full authentication completes.",
+      "state_conditions_to_check": [
+        "Value of jtag_hash (hardcoded vs. computed)",
+        "How jtag_unlock is driven – is it an output of a comparison, or always high?",
+        "Effect of testmode_i on jtag_unlock",
+        "Existence of any bypass path (e.g., SimJTAG driving jtag_unlock directly)"
+      ],
+      "required_evidence_slots": [
+        "RTL of jtag_unlock generation in riscv_peripherals.sv (near jtag_hash and jtag_unlock signals)",
+        "RTL of reglk_wrapper's use of jtag_unlock"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "jtag_hash and jtag_unlock signals exist but their connection is not visible; must check RTL."
+    }
+  ]
+}

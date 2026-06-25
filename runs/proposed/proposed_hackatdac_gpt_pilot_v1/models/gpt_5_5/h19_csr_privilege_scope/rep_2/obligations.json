@@ -1,0 +1,420 @@
+{
+  "scope_id": "ariane_csr_regfile_permission_scope",
+  "obligations": [
+    {
+      "obligation_id": "PERM-DBG-ENTRY-001",
+      "reason": "The visible scope exposes debug_req_i, debug_mode_o, set_debug_pc_o, dpc_q, DCSR/DPC CSRs, and top-level debug_req gating. Check whether an external debug subject can force privileged debug behavior without an authorization guard.",
+      "subject": "external debug requester via debug_req_i",
+      "operation": "enter debug / redirect PC",
+      "object": "debug mode state and PC control path",
+      "expected_guard": "Debug entry and debug PC redirection should be mediated by a debug authorization/lifecycle guard or equivalent platform policy, not only by request assertion and pipeline state.",
+      "candidate_path": "debug_req_i -> debug_req -> csr_regfile.debug_req_i -> debug_mode_q/debug_mode_o/set_debug_pc_o -> controller/front-end PC control",
+      "state_conditions_to_check": [
+        "reset state of debug_mode_q",
+        "debug_req_i assertion while not in debug mode",
+        "interaction with amo_valid_commit gating",
+        "exception/eret/dret transitions"
+      ],
+      "required_evidence_slots": [
+        "subject signal/source",
+        "operation trigger",
+        "protected object/state",
+        "expected guard",
+        "observed RTL guard expression",
+        "path/reachability",
+        "state conditions",
+        "impact",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/ariane.sv",
+        "src/csr_regfile.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer is truncated, so exact write/read case logic and debug FSM conditions must be inspected in source."
+    },
+    {
+      "obligation_id": "PERM-CSR-MODE-002",
+      "reason": "csr_regfile contains many machine-level protected registers and software CSR access inputs. Verify decode logic applies privilege checks based on CSR address privilege bits/current privilege before read/write enables update protected state.",
+      "subject": "software CSR instruction path",
+      "operation": "read/write CSR",
+      "object": "machine CSRs: mstatus, mtvec, medeleg, mideleg, mie, mip, mscratch, mepc, mcause, mtval, mcycle/minstret and machine trap/interrupt policy",
+      "expected_guard": "Writes and reads of machine-mode CSRs should be blocked or trap when current privilege is below M-mode; writes should additionally honor CSR read-only encoding.",
+      "candidate_path": "CSR instruction path csr_addr_i/csr_wdata_i/fu_op/commit_ack_i -> csr_we/csr_wdata -> machine CSR registers and outputs",
+      "state_conditions_to_check": [
+        "current privilege in normal execution",
+        "debug_mode_q active/inactive",
+        "CSR op variants CSRRW/CSRRS/CSRRC/immediate",
+        "commit_ack_i timing"
+      ],
+      "required_evidence_slots": [
+        "CSR requester/current privilege source",
+        "address decode",
+        "write enable formation",
+        "read exception formation",
+        "target register update cases",
+        "expected privilege guard",
+        "trap/exception behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "include/riscv_pkg.sv",
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Current privilege signal name is not fully visible in fact layer; inspect csr_regfile privilege tracking and read_access_exception/csr_we generation."
+    },
+    {
+      "obligation_id": "PERM-CSR-SMODE-003",
+      "reason": "Signals satp_ppn_o, asid_o, en_translation_o, sum_o, mxr_o, tvm_o, tw_o, tsr_o indicate supervisor-visible memory-permission policy. Check U-mode cannot configure/read protected S-mode state and that machine restriction bits are enforced.",
+      "subject": "software CSR instruction path from U/S execution",
+      "operation": "read/write/configure",
+      "object": "supervisor trap and translation state including SATP, SSTATUS fields, STVEC, SEPC, SIE/SIP",
+      "expected_guard": "Supervisor CSRs should be inaccessible from U-mode; S-mode writes to sensitive supervisor controls should be subject to privilege and relevant machine control bits such as TVM/TSR/TW where applicable.",
+      "candidate_path": "CSR instruction path -> supervisor CSR cases -> stvec/sscratch/sepc/scause/stval/satp/sstatus/sie/sip updates -> translation/trap outputs",
+      "state_conditions_to_check": [
+        "umode_i asserted",
+        "current privilege S vs U",
+        "tvm/tw/tsr set",
+        "sfence_vma/sret/wfi decode interactions",
+        "reset/default SATP and SSTATUS"
+      ],
+      "required_evidence_slots": [
+        "current privilege/umode_i relation",
+        "CSR decode for S CSRs",
+        "write enable conditions",
+        "read exception conditions",
+        "SATP/SSTATUS output use",
+        "expected guard",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Reset / Lifecycle / State Residue",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Need source inspection to determine how umode_i and privilege state are used."
+    },
+    {
+      "obligation_id": "PERM-DBG-CSR-004",
+      "reason": "The package defines debug CSR addresses and csr_regfile has dpc_q, dscratch0_q, dscratch1_q, debug_mode_q, single_step_o. Verify normal CSR access cannot expose or alter debug state unless appropriate debug-mode guard is present.",
+      "subject": "software CSR instruction path and/or debug requester",
+      "operation": "read/write debug CSR",
+      "object": "debug CSRs DCSR, DPC, DSCRATCH0, DSCRATCH1 and debug control bits including single_step_o",
+      "expected_guard": "Debug CSRs should be readable/writable only when debug_mode_q is active or by an authorized debug module path; normal M/S/U CSR instructions should not access them outside debug mode.",
+      "candidate_path": "CSR address CSR_DCSR/CSR_DPC/CSR_DSCRATCH0/CSR_DSCRATCH1 -> dcsr/dpc_q/dscratch*_q read/write cases -> csr_rdata_o/csr_wdata updates",
+      "state_conditions_to_check": [
+        "debug_mode_q=0",
+        "debug_mode_q=1",
+        "dret execution",
+        "debug_req_i entry/exit"
+      ],
+      "required_evidence_slots": [
+        "CSR address decode",
+        "debug_mode_q guard at read path",
+        "debug_mode_q guard at write path",
+        "csr_rdata_o mux behavior",
+        "register update behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "DCSR register signal may be typed/packed rather than listed as *_q; inspect cases around debug CSR addresses."
+    },
+    {
+      "obligation_id": "PERM-CSR-READ-005",
+      "reason": "The read mux is a common exposure point. The visible scope includes read_access_exception and many protected CSR registers; check if csr_rdata_o is suppressed/exceptioned for unauthorized addresses rather than leaking values.",
+      "subject": "software CSR read path",
+      "operation": "read/expose",
+      "object": "CSR read mux outputs csr_rdata_o for protected machine/supervisor/debug/performance state",
+      "expected_guard": "Read access should enforce CSR privilege and counter-enable policy; sensitive trap scratch/PC or translation configuration should not be exposed to lower privilege.",
+      "candidate_path": "CSR read path csr_addr_i -> csr_rdata_o including m/s scratch, epc, cause, tval, satp, counter/perf values",
+      "state_conditions_to_check": [
+        "unauthorized privilege level",
+        "read_access_exception asserted",
+        "debug_mode_q inactive",
+        "counter enable disabled if implemented"
+      ],
+      "required_evidence_slots": [
+        "read address decode",
+        "read_access_exception logic",
+        "csr_rdata_o default and selected values",
+        "privilege/counter-enable guard",
+        "downstream exception handling",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need full read case logic; fact layer only lists case line anchors."
+    },
+    {
+      "obligation_id": "PERM-MMU-CSR-006",
+      "reason": "CSR outputs directly influence load/store and instruction translation. Verify lower privilege cannot alter translation policy and that policy changes do not leave stale or inconsistent permission state.",
+      "subject": "software CSR write path",
+      "operation": "configure memory access policy",
+      "object": "virtual memory permission controls: SATP mode/PPN/ASID, SUM, MXR, MPRV, translation enable outputs",
+      "expected_guard": "Translation and memory access policy updates must require sufficient privilege, and changes to SATP or relevant status bits should be synchronized with required flush/TLB invalidation behavior or explicit architectural mediation.",
+      "candidate_path": "CSR write path -> satp_q/mstatus fields -> en_translation_o/en_ld_st_translation_o/satp_ppn_o/asid_o/sum_o/mxr_o",
+      "state_conditions_to_check": [
+        "SATP write in S-mode with TVM set",
+        "U-mode CSR attempt",
+        "mret/sret transitions affecting MPRV/SUM/MXR",
+        "flush_tlb_ctrl_ex behavior on policy update"
+      ],
+      "required_evidence_slots": [
+        "SATP/SSTATUS write decode",
+        "privilege guard",
+        "tvm guard for S-mode SATP/SFENCE if applicable",
+        "output assignments",
+        "flush_tlb/sfence connection",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer shows outputs but not complete update logic; inspect write cases and ariane connections."
+    },
+    {
+      "obligation_id": "PERM-RET-007",
+      "reason": "Signals mret, sret, dret, debug_mode_q, eret_o, epc_o, tsr_o indicate mode transition controls. Check illegal lower-privilege returns cannot change privilege or PC without required guards.",
+      "subject": "software instruction stream / debug return path",
+      "operation": "mode transition / return",
+      "object": "privilege mode, debug mode, exception PC and return control",
+      "expected_guard": "Exception return operations must only be permitted from appropriate privilege/debug state: MRET in M-mode, SRET in S-mode when not forbidden by TSR, DRET only in debug mode.",
+      "candidate_path": "csr_regfile exception/return path mret/sret/dret -> privilege/status/debug state updates -> eret_o/epc_o/trap_vector_base_o",
+      "state_conditions_to_check": [
+        "U-mode executing xRET",
+        "S-mode executing SRET with TSR set",
+        "DRET when debug_mode_q=0",
+        "debug exit restoring PC"
+      ],
+      "required_evidence_slots": [
+        "decode of mret/sret/dret",
+        "current privilege/debug state guard",
+        "TSR check",
+        "state update logic",
+        "eret_o/epc_o selection",
+        "exception behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Instruction decode may be partly outside scope; inspect csr_regfile input fu_op and exception interactions."
+    },
+    {
+      "obligation_id": "PERM-PMP-008",
+      "reason": "The package defines CSR_PMPCFG0 and CSR_PMPADDR0. Even if implementation is minimal, verify whether accesses are trapped/ignored or correctly guarded and whether any PMP state affects memory permission checks.",
+      "subject": "software CSR write path",
+      "operation": "configure/change access policy",
+      "object": "PMP configuration/address registers and memory access-control policy",
+      "expected_guard": "PMP configuration/address CSRs should be writable only by M-mode and locked PMP entries should prevent subsequent writes until reset; LSU/fetch use sites should consume PMP permissions consistently.",
+      "candidate_path": "CSR write path -> PMPCFG0/PMPADDR0 decode if implemented -> memory access permission outputs/LSU checks",
+      "state_conditions_to_check": [
+        "M-mode write",
+        "S/U-mode write attempt",
+        "PMP lock bit set then rewrite attempt",
+        "reset state of PMP entries"
+      ],
+      "required_evidence_slots": [
+        "PMP CSR decode",
+        "presence/absence of PMP state registers",
+        "write privilege guard",
+        "lock bit behavior if present",
+        "LSU/fetch permission use site",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "include/riscv_pkg.sv",
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "No PMP state signals appear in provided signal list; obligation includes checking whether defined addresses are unsupported safely or implemented elsewhere."
+    },
+    {
+      "obligation_id": "PERM-PERF-009",
+      "reason": "csr_regfile exposes perf_addr_o, perf_data_o, perf_we_o and receives perf_data_i; package defines user counter addresses and machine counters. Check counter access is not globally exposed without counter-enable mediation.",
+      "subject": "software CSR and perf counter path",
+      "operation": "read/write/expose performance state",
+      "object": "cycle/instret/performance counters and perf counter external interface",
+      "expected_guard": "Performance counter reads/writes should respect privilege/counter-enable policy (mcounteren/scounteren if implemented) and machine-only counter CSRs should not be writable/readable by lower modes unless delegated/enabled.",
+      "candidate_path": "CSR/performance path csr_addr_i -> perf_addr_o/perf_data_o/perf_we_o and perf_data_i/cycle_q/instret_q -> csr_rdata_o",
+      "state_conditions_to_check": [
+        "U-mode counter read",
+        "S-mode counter read with/without enable",
+        "machine counter write attempts",
+        "debug_mode_q active"
+      ],
+      "required_evidence_slots": [
+        "counter CSR decode",
+        "counter-enable CSR implementation",
+        "privilege guard",
+        "perf_we_o generation",
+        "csr_rdata_o counter path",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Counter-enable registers are defined but corresponding q signals are not listed; inspect if omitted or unsupported."
+    },
+    {
+      "obligation_id": "PERM-CACHE-CSR-010",
+      "reason": "Custom CSRs at 0x700/0x701 drive cache enable outputs. Check they are not accessible from U/S mode unless explicitly intended and that reset defaults/flush interactions are safe.",
+      "subject": "software CSR write path",
+      "operation": "configure cache controls",
+      "object": "custom cache-control CSRs CSR_ICACHE/CSR_DCACHE and icache_en_o/dcache_en_o",
+      "expected_guard": "Cache enable/disable/configuration CSRs should require machine privilege or platform-authorized mode and should not be writable by lower privilege to alter system behavior or bypass expected cache/TLB maintenance.",
+      "candidate_path": "CSR write path -> icache_q/dcache_q -> icache_en_o/dcache_en_o and flush controls",
+      "state_conditions_to_check": [
+        "U/S-mode CSR write",
+        "reset deassertion",
+        "cache disable/enable while pending memory operations",
+        "debug_mode_q active"
+      ],
+      "required_evidence_slots": [
+        "custom CSR address decode",
+        "write/read privilege guard",
+        "reset values of icache_q/dcache_q",
+        "output assignments",
+        "flush interaction",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Custom CSR privilege expectations may be platform-specific; use CSR address range and downstream impact to judge expected guard."
+    },
+    {
+      "obligation_id": "PERM-TRACE-011",
+      "reason": "The top module instantiates instruction tracer interfaces and has PC/cycle signals near line 668+. Verify whether this is simulation-only or gated and whether any trace-visible PC/timing information can escape in synthesis without authorization.",
+      "subject": "debug/trace infrastructure",
+      "operation": "expose execution trace",
+      "object": "committed/fetched PC trace and cycle/timing state",
+      "expected_guard": "Trace outputs or tracer programs should be disabled, synthesized out, or gated by debug/trace authorization before exposing PCs or execution timing outside the core.",
+      "candidate_path": "debug/instruction tracer path tracer_if/instr_tracer_i/program instr_tracer -> piton_pc_vld/piton_pc/pc_queue/cycles",
+      "state_conditions_to_check": [
+        "synthesis vs simulation defines",
+        "debug_mode active/inactive",
+        "reset state of trace buffers"
+      ],
+      "required_evidence_slots": [
+        "tracer instantiation guards/preprocessor conditions",
+        "trace signal sources",
+        "external output or program side effects",
+        "debug authorization guard if synthesized",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Program instances may be non-synthesizable; inspect compilation guards before treating as hardware path."
+    },
+    {
+      "obligation_id": "PERM-RESET-012",
+      "reason": "Multiple protected CSR registers and debug state are reset-controlled. Check asynchronous/synchronous reset branches and first-cycle mtvec load behavior do not create an unsafe debug/privilege or exposure state.",
+      "subject": "reset/lifecycle logic",
+      "operation": "reset/initialize",
+      "object": "security-relevant CSR state after reset",
+      "expected_guard": "Reset defaults should place protected state in a safe privilege/permission configuration: debug inactive, translation/cache controls intentional, trap vectors initialized, no stale debug/scratch PC exposure.",
+      "candidate_path": "reset rst_ni -> csr_regfile state registers debug_mode_q, mstatus-like fields, mtvec_rst_load_q, dpc_q/dscratch, trap vectors, cache controls, translation controls",
+      "state_conditions_to_check": [
+        "rst_ni asserted/deasserted",
+        "mtvec_rst_load_q first-cycle behavior",
+        "debug_req_i during reset release",
+        "boot_addr_i influence"
+      ],
+      "required_evidence_slots": [
+        "reset branch assignments",
+        "post-reset load conditions",
+        "default outputs before first write",
+        "debug_mode_o/set_debug_pc_o state",
+        "translation/cache outputs",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need source inspection of sequential blocks; fact layer provides signal names but not reset assignments."
+    }
+  ]
+}

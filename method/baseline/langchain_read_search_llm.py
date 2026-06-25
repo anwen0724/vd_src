@@ -49,7 +49,7 @@ class LangChainReadSearchLLMBaseline:
         self.tools_by_name = {tool.name: tool for tool in self.langchain_tools}
         self.base_model = chat_model
         self.model = chat_model.bind_tools(self.langchain_tools)
-        self.structured_model = chat_model.with_structured_output(AgentOutput)
+        self.structured_model = chat_model.with_structured_output(AgentOutput, method="function_calling")
         self.max_steps = max_steps
         self.max_tool_result_chars = max_tool_result_chars
 

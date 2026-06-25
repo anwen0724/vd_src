@@ -1,0 +1,378 @@
+{
+  "scope_id": "rtl_permission_scope_ariane_debug_csr_peripherals",
+  "obligations": [
+    {
+      "obligation_id": "PERM-RTL-001",
+      "reason": "The scope exposes JTAG ports and a dmi_jtag module with a jtag_key input feeding DMI requests; visible RTL should show whether external JTAG access is authorized before it can drive debug state.",
+      "subject": "External JTAG interface",
+      "operation": "read/write/trigger debug module operations",
+      "object": "DMI-accessible debug module registers and controls",
+      "expected_guard": "JTAG/DMI operations should be mediated by a debug authorization/authentication condition such as jtag_key match, lifecycle/debug-enable strap, or equivalent before enabling DMI register access.",
+      "candidate_path": "External JTAG pins -> dmi_jtag/dmi_jtag_tap -> dmi_cdc -> dm_top/dm_csrs DMI request interface",
+      "state_conditions_to_check": [
+        "reset state of DMI/TAP access",
+        "testmode_i effect on clock/TAP selection",
+        "whether jtag_key is checked before dmi_req_valid_o or dmi_access_o",
+        "whether DMI reset clears authorization state"
+      ],
+      "required_evidence_slots": [
+        "subject: external JTAG/TAP requester",
+        "operation: DMI read/write or control trigger",
+        "object: DM register/control reached",
+        "expected guard: jtag_key/lifecycle/debug-enable authorization",
+        "observed guard use at request-valid or access-select site",
+        "path/reachability through TAP/CDC/top",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dmi_cdc.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dm_csrs.sv",
+        "fpga/src/ariane_xilinx.sv",
+        "openpiton/serpent_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "CSR/MMIO Access Control",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer identifies jtag_key and JTAG path but not the assignment logic; inspect RTL to determine whether the key is used as an effective guard."
+    },
+    {
+      "obligation_id": "PERM-RTL-002",
+      "reason": "Debug module ports expose halt, resume, command, and debug request controls that can change CPU execution state; check that DMI writes cannot assert them without proper debug authorization and valid state.",
+      "subject": "DMI debug requester",
+      "operation": "halt/resume/execute debug command/enter debug mode",
+      "object": "Hart debug control signals haltreq_o, resumereq_o, cmd_valid_o, debug_req_o and debug mode entry state",
+      "expected_guard": "Halting, resuming, and command execution should require debug module active/authorized state and valid hart selection; unavailable harts should not receive unauthorized requests.",
+      "candidate_path": "DMI -> dm_csrs -> haltreq_o/resumereq_o/cmd_valid_o/debug_req_o",
+      "state_conditions_to_check": [
+        "dmactive_o reset and update",
+        "halted_i/resumeack_i/unavailable_i gating",
+        "hartsel_o bounds/selection",
+        "behavior when dmactive is deasserted",
+        "single-step/debug-mode transitions in csr_regfile"
+      ],
+      "required_evidence_slots": [
+        "subject: DMI/JTAG requester",
+        "operation: halt/resume/cmd/debug_req",
+        "object: hart control/debug entry",
+        "expected guard: dmactive plus authorization and hart availability checks",
+        "observed behavior for selected hart and unavailable_i",
+        "path from DM CSR write to core debug_req_i/debug_mode_o",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "openpiton/serpent_peripherals.sv",
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "state lifecycle",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Need RTL evidence for dm_csrs register decode and csr_regfile debug entry handling."
+    },
+    {
+      "obligation_id": "PERM-RTL-003",
+      "reason": "dm_csrs exposes sbaddress/sbdata and dm_top instantiates dm_sba connected to AXI; debug-initiated bus masters can bypass CPU privilege/PMP if not mediated.",
+      "subject": "Debug module system bus master",
+      "operation": "debug system-bus read/write",
+      "object": "AXI system memory/peripheral address space reachable via sbaddress/sbdata debug SBA",
+      "expected_guard": "System bus accesses initiated by the debug module should be constrained by debug authorization and, where applicable, address-range/PMP/firewall policy preventing access to protected memory or privileged peripherals.",
+      "candidate_path": "DMI system bus access controls in dm_csrs -> dm_top i_dm_sba -> AXI master/slave connections -> SoC memory/peripherals",
+      "state_conditions_to_check": [
+        "sbbusy/sberror handling",
+        "sbreadonaddr/sbreadondata/autoincrement behavior",
+        "sbaddress_write_valid_o and sbdata_write_valid_o gating",
+        "dmactive/reset effect on outstanding SBA",
+        "address width truncation or overlap"
+      ],
+      "required_evidence_slots": [
+        "subject: debug module SBA/DMI requester",
+        "operation: AXI read/write via sbaddress/sbdata",
+        "object: reachable address ranges/assets",
+        "expected guard: debug authorization and range/PMP/firewall checks",
+        "observed address decode/range gating",
+        "path to AXI master interconnect",
+        "impact if protected memory/peripheral is reachable",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "fpga/src/ariane_xilinx.sv",
+        "tb/ariane_testharness.sv",
+        "openpiton/serpent_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP",
+        "Debug/JTAG/Test Access",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "dm_sba implementation facts are not included; obligation is to inspect visible top-level connections and CSR-side gating, and identify missing module evidence if external."
+    },
+    {
+      "obligation_id": "PERM-RTL-004",
+      "reason": "csr_regfile exposes csr_addr_i, csr_wdata_i, csr_rdata_o, fu_op, umode_i, translation/cache/status outputs, and multiple decode cases; check that permission checks are applied at write and read/use sites.",
+      "subject": "CPU CSR requester",
+      "operation": "CSR read/write/configure",
+      "object": "Machine/supervisor/debug CSRs including mstatus-like fields, satp, trap vectors, debug CSRs, cache enables, performance CSRs",
+      "expected_guard": "CSR read/write access should be checked against current privilege/mode and CSR access class; user-mode requests must not modify machine/supervisor/debug CSRs or security-sensitive translation controls.",
+      "candidate_path": "csr_regfile csr_addr_i/fu_op/csr_wdata_i -> CSR decode/read/write cases -> privilege and status outputs",
+      "state_conditions_to_check": [
+        "umode_i handling",
+        "illegal CSR access exceptions",
+        "read-only CSR writes",
+        "reset defaults for control CSRs",
+        "write paths in all decode cases",
+        "debug_mode_o interaction with CSR accessibility"
+      ],
+      "required_evidence_slots": [
+        "subject: executing core CSR instruction and privilege mode",
+        "operation: CSR read/write",
+        "object: protected CSR or control field",
+        "expected guard: privilege/access-class check and write-enable gating",
+        "observed decode and exception behavior",
+        "state update and output use site",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Lock/Sticky Bit/Write Protection",
+        "state lifecycle"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer lists ports and case locations but not exact CSR names/guards; inspect decode logic and state update blocks."
+    },
+    {
+      "obligation_id": "PERM-RTL-005",
+      "reason": "Outputs controlling translation and memory permission behavior are visible; unsafe writes can alter memory isolation or bypass privilege restrictions.",
+      "subject": "CPU CSR requester",
+      "operation": "change memory access policy/configure translation",
+      "object": "Virtual memory and access-policy controls satp, ASID, SUM, MXR, TVM, TW, TSR, translation enables",
+      "expected_guard": "Only permitted privileged modes should change address-translation and memory-access policy fields; supervisor restrictions such as TVM/TSR/TW should be enforced when applicable.",
+      "candidate_path": "csr_regfile writes to satp/status fields -> en_translation_o/en_ld_st_translation_o/satp_ppn_o/asid_o/sum_o/mxr_o/tvm_o/tw_o/tsr_o",
+      "state_conditions_to_check": [
+        "reset defaults for translation controls",
+        "mode transitions after eret/exception",
+        "SATP mode/PPN/ASID update conditions",
+        "SUM/MXR update conditions",
+        "whether user mode can influence policy outputs"
+      ],
+      "required_evidence_slots": [
+        "subject: CSR instruction requester by mode",
+        "operation: write/configure translation policy",
+        "object: satp/status permission fields",
+        "expected guard: machine/supervisor privilege and TVM/TSR/TW constraints",
+        "observed write-enable and exception gating",
+        "effect on output control signals",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Fabric/Address Map/DMA/PMP",
+        "state lifecycle"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to inspect CSR decode and privilege mode state beyond exposed port names."
+    },
+    {
+      "obligation_id": "PERM-RTL-006",
+      "reason": "The peripheral wrapper contains APB-to-register bridges and a jtag_key output feeding debug authorization; if untrusted software can write key/crypto/debug configuration without protection, debug access or secrets may be affected.",
+      "subject": "APB/MMIO requester",
+      "operation": "MMIO/APB write/configure/read",
+      "object": "Software-visible peripheral registers including jtag_key output, packet/AES APB register banks, ROM2 interface registers",
+      "expected_guard": "Writes to security-sensitive registers such as jtag_key or peripheral control/key/config registers should be mediated by address decode, requester authorization, lock/sticky protection, or trusted boot/lifecycle conditions.",
+      "candidate_path": "External APB/register interfaces in ariane_peripherals/serpent_peripherals -> apb_to_reg instances -> jtag_key, ROM/peripheral config, packet/AES register paths",
+      "state_conditions_to_check": [
+        "reset value of jtag_key and protected registers",
+        "whether lock bits exist and protect all write paths",
+        "readback exposure of key/secret registers",
+        "APB address decode overlap between peripherals",
+        "testbench-only versus synthesizable scope"
+      ],
+      "required_evidence_slots": [
+        "subject: APB/MMIO bus requester",
+        "operation: read/write register",
+        "object: jtag_key or protected peripheral register",
+        "expected guard: address decode plus privilege/lock/lifecycle guard",
+        "observed write/read path and guard use",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_peripherals.sv",
+        "openpiton/serpent_peripherals.sv",
+        "src/rom2/rom2.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Lock/Sticky Bit/Write Protection",
+        "Crypto/Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Fact layer shows APB instances and jtag_key port, but not register contents or bus master identity; inspect wrapper decode and register assignments."
+    },
+    {
+      "obligation_id": "PERM-RTL-007",
+      "reason": "rom2 exposes req_i, we_i, addr_i, wdata_i, and rdata_o despite being a ROM; verify that write paths are disabled or permission-guarded and address decode is bounded.",
+      "subject": "Bus/MMIO requester",
+      "operation": "read/write boot ROM",
+      "object": "ROM/boot ROM contents and boot code/config data",
+      "expected_guard": "ROM/boot ROM contents should be read-only to untrusted requesters; any write-enable input should be ignored or restricted, and reads should be limited by correct address range/decode.",
+      "candidate_path": "rom2/bootrom bus request paths -> rdata_o/rom_rdata outputs and we_i handling",
+      "state_conditions_to_check": [
+        "reset initialization of ROM data",
+        "we_i effect during req_i",
+        "out-of-range address behavior",
+        "whether debug/SBA or external NoC can reach ROM write path"
+      ],
+      "required_evidence_slots": [
+        "subject: bus requester to ROM",
+        "operation: read/write",
+        "object: ROM contents",
+        "expected guard: read-only enforcement and address-range decode",
+        "observed handling of we_i/wdata_i",
+        "path from wrapper/interconnect to ROM",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "fpga/src/ariane_xilinx.sv",
+        "openpiton/serpent_peripherals.sv",
+        "tb/ariane_peripherals.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Lock/Sticky Bit/Write Protection",
+        "Fabric/Address Map/DMA/PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "rom2 logic must be inspected to see whether we_i is functionally used."
+    },
+    {
+      "obligation_id": "PERM-RTL-008",
+      "reason": "Several modules include testmode_i/test_en and TAP clock muxing; test controls can become bypass paths if they select clocks or disable checks without lifecycle mediation.",
+      "subject": "Test mode input/interface",
+      "operation": "test override/enable/route/reset",
+      "object": "Debug DMI access, TAP clock/reset control, debug module active/reset state, core debug request",
+      "expected_guard": "Test mode should not enable unauthorized debug access, bypass authentication, alter reset/clock mediation, or expose protected state in production unless gated by lifecycle/debug authorization.",
+      "candidate_path": "testmode_i/test_en inputs -> dmi_jtag_tap clock mux, dm_top/dm_csrs, reset generators and debug/test paths",
+      "state_conditions_to_check": [
+        "testmode_i reset/default source",
+        "clock mux select behavior",
+        "whether testmode bypasses jtag_key or DMI error handling",
+        "DMI/TAP reset behavior under test mode",
+        "production top-level tieoff or external pin exposure"
+      ],
+      "required_evidence_slots": [
+        "subject: test interface or testmode input",
+        "operation: override/enable debug path/reset/clock route",
+        "object: debug authorization or protected control path",
+        "expected guard: production lifecycle/test authorization",
+        "observed testmode effect on guard or path",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "fpga/src/ariane_xilinx.sv",
+        "openpiton/serpent_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access",
+        "Reset/Lifecycle/State Residue",
+        "Lock/Sticky Bit/Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need top-level assignment/tieoff evidence for testmode/test_en in each integration."
+    },
+    {
+      "obligation_id": "PERM-RTL-009",
+      "reason": "Debug module exposes reset and active outputs that can affect the whole system; improper guards or reset sequencing can permit denial/control or stale state retention across debug transitions.",
+      "subject": "Debug module requester",
+      "operation": "assert reset/activate-deactivate debug module",
+      "object": "System reset controls ndmreset_o, dmactive_o and security-relevant state after reset/debug transitions",
+      "expected_guard": "Non-debug-module reset and debug-active controls should be assertable only by authorized debug requests and should clear or preserve security state according to policy without leaving stale privileged/debug state observable.",
+      "candidate_path": "ndmreset_o/dmactive_o from dm_csrs/dm_top -> top-level reset generation and core/peripheral state",
+      "state_conditions_to_check": [
+        "reset defaults of dmactive and ndmreset",
+        "deassertion behavior when dmactive=0",
+        "which core/peripheral registers reset on ndmreset",
+        "whether debug registers persist across ndmreset",
+        "outstanding SBA/commands during reset"
+      ],
+      "required_evidence_slots": [
+        "subject: DMI/JTAG requester",
+        "operation: write dmcontrol-like reset/active bits",
+        "object: ndmreset/system state/dmactive",
+        "expected guard: debug authorization and reset sequencing policy",
+        "observed update logic and top-level use",
+        "state residue/clear behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "fpga/src/ariane_xilinx.sv",
+        "openpiton/serpent_peripherals.sv",
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Reset/Lifecycle/State Residue",
+        "Debug/JTAG/Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "Requires tracing reset wiring through integration modules."
+    },
+    {
+      "obligation_id": "PERM-RTL-010",
+      "reason": "The FPGA top instantiates xdma_0 and AXI clock/width converters; external PCIe access can bypass CPU privilege if fabric address permissions are absent or inconsistent.",
+      "subject": "External PCIe XDMA master",
+      "operation": "external DMA read/write",
+      "object": "DDR/system memory and memory-mapped peripherals reachable by XDMA AXI",
+      "expected_guard": "External PCIe/DMA masters should be constrained by address range/firewall/IOMMU/PMP-equivalent checks and should not access protected memory/peripheral regions beyond intended windows.",
+      "candidate_path": "FPGA PCIe XDMA AXI master -> width/clock converters -> AXI fabric/peripherals/DDR",
+      "state_conditions_to_check": [
+        "address mapping and width conversion truncation",
+        "reset/default enable of XDMA",
+        "overlap with debug/ROM/peripheral regions",
+        "active transfer during configuration/reset",
+        "read/write channel consistency"
+      ],
+      "required_evidence_slots": [
+        "subject: PCIe XDMA external bus master",
+        "operation: AXI read/write",
+        "object: DDR or peripheral address ranges",
+        "expected guard: address range/firewall/IOMMU access-control policy",
+        "observed interconnect decode and blocking behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "fpga/src/ariane_xilinx.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Only top-level instance facts are visible; inspect ariane_xilinx interconnect wiring and any address filtering present."
+    }
+  ]
+}

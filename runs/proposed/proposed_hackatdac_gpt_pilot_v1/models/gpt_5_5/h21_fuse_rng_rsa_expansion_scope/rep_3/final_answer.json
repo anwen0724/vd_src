@@ -1,0 +1,172 @@
+{
+  "analysis_summary": "The proposed method produced 11 finding(s) from 12 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "needs_more_evidence",
+      "summary": "riscv_peripherals instantiates dmi_jtag with jtag_hash_i/okey_hash_i/ikey_hash_i and jtag_unlock_o, and connects dmi_req_o/dmi_req_valid_o directly to debug_req/debug_req_valid. SimDTM is compiled under RISCV_FESVR_SIM and bypasses dmi_jtag. The provided observations do not include the debug module instantiation or dmi_jtag internals, so it is not proven whether DMI operations or debug outputs are gated by jtag_unlock.",
+      "vulnerability_category": "DMI debug request/response transactions that can reach the debug module and exported hart debug controls / debug_req_o, ndmreset_o, dmactive_o, debug module DMI request path / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: external JTAG/test/debug requester through tck_i/tms_i/trst_ni/td_i or simulation-only SimDTM/SimJTAG paths Operation: DMI debug request/response transactions that can reach the debug module and exported hart debug controls Object: debug_req_o, ndmreset_o, dmactive_o, debug module DMI request path Expected guard: JTAG/debug requests that can halt/reset/control harts or access debug module state should be gated by an authorization/unlock condition such as jtag_unlock derived from jtag_hash/lifecycle/test policy. Observed behavior: riscv_peripherals instantiates dmi_jtag with jtag_hash_i/okey_hash_i/ikey_hash_i and jtag_unlock_o, and connects dmi_req_o/dmi_req_valid_o directly to debug_req/debug_req_valid. SimDTM is compiled under RISCV_FESVR_SIM and bypasses dmi_jtag. The provided observations do not include the debug module instantiation or dmi_jtag internals, so it is not proven whether DMI operations or debug outputs are gated by jtag_unlock. Path: riscv_peripherals.sv lines 244-335 for SimDTM/dmi_jtag/SimJTAG; debug module signals declared around 337-351 Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "If DMI requests reach the debug module without authentication, an external or simulated debug subject could halt/reset/control harts or access debug module state.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Need dmi_jtag internals and debug module instantiation/use sites for debug_req_valid/debug_req/debug_req_o/ndmreset_o/dmactive_o to close whether jtag_unlock is enforced before protected debug effects. Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PERM-RISCVPERIPH-DBG-JTAG-AUTH-001."
+      ]
+    },
+    {
+      "finding_id": "F2",
+      "status": "needs_more_evidence",
+      "summary": "rng_wrapper uses debug_mode_i to bypass lock-based protection on sensitive RNG configuration/readback; no observed relationship ties debug_mode_i to authenticated jtag_unlock.",
+      "vulnerability_category": "read/write/configure crypto peripheral registers in debug mode / RNG polynomial registers, seed readback, random segments, cs_state; RSA wrapper registers also in scope but not fully closed by provided snippets / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: debug-mode requester through AXI/peripheral wrapper Operation: read/write/configure crypto peripheral registers in debug mode Object: RNG polynomial registers, seed readback, random segments, cs_state; RSA wrapper registers also in scope but not fully closed by provided snippets Expected guard: Debug-mode access to crypto/RNG wrapper registers should be covered by the same or stronger access-control/lock policy as normal software access, unless debug is explicitly authenticated by the top-level debug unlock. Observed behavior: Top level passes debug_mode_i directly into rng_wrapper at riscv_peripherals.sv lines 1105-1112 with acct_ctrl_i=acc_ctrl_c[priv_lvl_i][10]. In rng_wrapper, en=en_acct&&acct_ctrl_i, but read cases 15-25 return seed128/64/32/16, rand segments, and cs_state when debug_mode_i is asserted regardless of reglk_ctrl_i[7]. The write-side snippet shows poly128[3] is written as debug_mode_i ? wdata : (reglk_ctrl_i[5] ? old : wdata), bypassing reglk in debug mode. No observed top-level connection ties debug_mode_i to jtag_unlock. Path: riscv_peripherals.sv lines 1100-1112; rng_wrapper.sv lines 46-85, 123-128, 180-206 Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "A requester able to assert/use debug_mode_i can modify RNG polynomial configuration or read internal RNG seed/state despite lock bits, enabling predictable randomness or leakage of RNG internal state.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "RSA debug_mode_i use was not fully observed in the provided snippets; the candidate finding is supported by RNG evidence. Need top-level provenance/authorization of debug_mode_i to prove whether it is trusted. Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PERM-CRYPTO-DBG-BYPASS-002."
+      ]
+    },
+    {
+      "finding_id": "F3",
+      "status": "needs_more_evidence",
+      "summary": "Register-lock coverage is incomplete: PKT fuse request/address writes are not guarded by reglk_ctrl_i, and RNG debug mode bypasses reglk-protected read/write policy.",
+      "vulnerability_category": "write/configure/clear lock-protected registers / PKT fuse_req_o/fuse_addr_o and pkey/fuse read controls; RNG polynomial and internal-state readback controls; top-level reglk_ctrl array / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: software-visible AXI/NoC requester Operation: write/configure/clear lock-protected registers Object: PKT fuse_req_o/fuse_addr_o and pkey/fuse read controls; RNG polynomial and internal-state readback controls; top-level reglk_ctrl array Expected guard: Once a lock bit controlling a protected peripheral/register is set, all software-visible write paths to that protected register and to the lock bit itself should be blocked or sticky until reset, including debug/test paths. Observed behavior: pkt_wrapper gates bus access with acct_ctrl_i but writes fuse_req_o and fuse_addr_o on en&&we without checking reglk_ctrl_i. Its pkey/fuse reads are partially masked by reglk_ctrl_i[4:6]. rng_wrapper masks normal reads/writes with reglk bits but uses debug_mode_i to bypass reglk on seed/segment/cs_state reads and at least one polynomial write. reglk_wrapper receives jtag_unlock and outputs the global reglk_ctrl, but no provided reglk_wrapper internals prove lock stickiness or clear-only-on-reset. Path: pkt_wrapper.sv lines 68-88 and 91-108; rng_wrapper.sv lines 123-128 and 180-206; riscv_peripherals.sv lines 1808-1823 Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "Locked security configuration can still be modified or sensitive state selected/read through uncovered or debug-mode paths, undermining the intended lock/sticky protection.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Need reglk_wrapper internals to determine whether lock bits themselves are sticky and cannot be cleared except reset. Full wrapper coverage for RSA and other peripherals was not fully observed. Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PERM-REGLK-STICKY-COVERAGE-003."
+      ]
+    },
+    {
+      "finding_id": "F4",
+      "status": "needs_more_evidence",
+      "summary": "PKT can drive arbitrary fuse addresses and expose fuse data through its AXI read path with only acct_ctrl mediation and incomplete lock/range checks.",
+      "vulnerability_category": "read/expose fuse data or fuse-derived key metadata / fuse_mem contents including keys/hashes/access-control words; fuse_rdata_i; pkey_loc_o/fuse-derived key location / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: PKT peripheral requester / software via AXI Operation: read/expose fuse data or fuse-derived key metadata Object: fuse_mem contents including keys/hashes/access-control words; fuse_rdata_i; pkey_loc_o/fuse-derived key location Expected guard: Reads of fuse memory or fuse-derived key locations should require an authorized subject and address-range/index check; response data should not be exposed through PKT outputs or AXI read data without acct_ctrl/reglk/debug authorization. Observed behavior: pkt_wrapper writes fuse_req_o and fuse_addr_o under en&&we without reglk or range validation. Its read mux initializes rdata=fuse_rdata_i for any enabled access, explicitly returns fuse_rdata_i at address case 4 when reglk_ctrl_i[6] is clear, and default only zeroes rdata when fuse_addr_o<=110. The pkt submodule is instantiated with req_i tied to 1'b1 and maps fuse_addr_o to pkey_loc_o. fuse_mem contains secure data constants, including JTAG expected hash, HMAC/AES/SHA keys, RNG polynomials, and access-control words. Path: pkt_wrapper.sv lines 68, 80-88, 91-108, 115-123; pkt.sv lines 18-70; fuse_mem.sv lines 17-123; riscv_peripherals.sv lines 1618-1633 Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "Authorized-for-PKT but otherwise untrusted software can select and read fuse contents or fuse-derived key-location metadata, potentially exposing cryptographic keys, authentication hashes, and access-control configuration values.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Need exact fuse_mem top-level instantiation and full rdata behavior after line 127 to confirm timing, but the PKT read-return path and fuse contents are visible. Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PERM-FUSE-PKT-READ-AUTH-005."
+      ]
+    },
+    {
+      "finding_id": "F5",
+      "status": "needs_more_evidence",
+      "summary": "JTAG authentication hash material is present in fuse_mem and is also reachable through the PKT/fuse read mechanism under the observed broad fuse read path.",
+      "vulnerability_category": "expose/use authentication material and set unlock state / JTAG authentication hash and unlock state / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: external JTAG/debug requester or software-visible fuse reader Operation: expose/use authentication material and set unlock state Object: JTAG authentication hash and unlock state Expected guard: JTAG unlock comparison/authentication should use the intended fuse hash without exposing enough information for unauthorized unlock; jtag_hash_o should not be readable by unauthenticated software/debug paths. Observed behavior: fuse_mem declares jtag_hash_o/ikey_hash_o/okey_hash_o and stores JTAG expected HMAC hash words at the start of its mem constant. dmi_jtag receives jtag_hash, ikey_hash, and okey_hash and outputs jtag_unlock. Separately, PKT can write fuse_addr_o and read fuse_rdata_i; fuse_mem mem includes the JTAG hash values and other secrets. No observed PKT range check excludes the JTAG hash area. Path: fuse_mem.sv lines 8, 15-23; riscv_peripherals.sv lines 275-284; pkt_wrapper.sv lines 80-108 Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "Exposure of expected JTAG hash/auth material can aid unauthorized debug unlock attempts and undermines the confidentiality of debug authentication assets.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Need full top-level fuse_mem instantiation wiring to jtag_hash/ikey_hash/okey_hash and exact address indexing order to identify all readable hash words. Hash may be intended public by architecture, but the provided comments describe fuse_mem as secure data. Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PERM-JTAG-HASH-EXPOSURE-006."
+      ]
+    },
+    {
+      "finding_id": "F6",
+      "status": "needs_more_evidence",
+      "summary": "RNG wrapper exposes configuration and internal state readback; debug_mode_i bypasses lock masking for seeds, random segments, and control-state readback, and can bypass lock on polynomial writes.",
+      "vulnerability_category": "write seed/poly/load and read RNG/internal state / poly128/poly64/poly32/poly16 configuration, rand_num, rand_num_valid, seed128/64/32/16 outputs, rand segments, cs_state / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: software-visible RNG peripheral requester Operation: write seed/poly/load and read RNG/internal state Object: poly128/poly64/poly32/poly16 configuration, rand_num, rand_num_valid, seed128/64/32/16 outputs, rand segments, cs_state Expected guard: Configuration of RNG seed, polynomial, load, and any readback of internal seeds/segments should be mediated by access-control and lock bits; unprivileged or denied requesters should not force predictable RNG state or observe internal seed state. Observed behavior: rng_wrapper gates wrapper decode with en=en_acct&&acct_ctrl_i. It resets/load-generates deterministic seed values 2,3,3,2 when load & ~debug_mode_i. Write-side evidence shows polynomial writes can use debug_mode_i to ignore reglk_ctrl_i[5]. Read cases 15-25 return seed outputs, rand segments, and cs_state when debug_mode_i is asserted regardless of reglk_ctrl_i[7]; rand_num and rand_num_valid are also MMIO-readable under lock-dependent conditions. Top-level bridges response data to ariane_rng_buf_noc3_data_o. Path: riscv_peripherals.sv lines 1100-1150; rng_wrapper.sv lines 85-113, 123-128, 180-206, 217-241 Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "A requester can make RNG behavior predictable by changing RNG polynomials or observe internal RNG state/segments despite lock bits, weakening consumers that rely on unpredictable random output.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Need full write map lines 128-179 to enumerate every writable RNG register and confirm all seed/load write behavior. Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PERM-RNG-CONFIG-READBACK-007."
+      ]
+    },
+    {
+      "finding_id": "F7",
+      "status": "needs_more_evidence",
+      "summary": "rsa_wrapper gates decode with en=en_acct&&acct_ctrl_i. Write-side snippets show control, prime_i, prime1_i, and msg_in fields are written only when en&&we and use reglk_ctrl_i[3] to retain old values when locked. Reset clears inter_rst_ni, inter_rst1_ni, encry_decry_i, prime_i, prime1_i, and msg_in. The provided observations do not include the read mux, complete debug_mode_i use, msg_out readout policy, or operation-completion clearing behavior.",
+      "vulnerability_category": "configure/read cryptographic operation state / RSA prime/modulus inputs, msg_in, encrypt/decrypt control, msg_out, operation status and wrapper registers / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: software-visible RSA peripheral requester Operation: configure/read cryptographic operation state Object: RSA prime/modulus inputs, msg_in, encrypt/decrypt control, msg_out, operation status and wrapper registers Expected guard: RSA key/modulus/message/control registers and result readout should require authorized access and obey lock bits; debug or reset-specific paths should not clear locks or expose stale/plaintext/intermediate data. Observed behavior: rsa_wrapper gates decode with en=en_acct&&acct_ctrl_i. Write-side snippets show control, prime_i, prime1_i, and msg_in fields are written only when en&&we and use reglk_ctrl_i[3] to retain old values when locked. Reset clears inter_rst_ni, inter_rst1_ni, encry_decry_i, prime_i, prime1_i, and msg_in. The provided observations do not include the read mux, complete debug_mode_i use, msg_out readout policy, or operation-completion clearing behavior. Path: rsa_wrapper.sv lines 46-63, 66-88, 180-244; rsa_top.v ports from fact layer Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "If result or internal RSA registers are readable without proper lock/access/debug authorization or not cleared, cryptographic operands/results could be exposed; current evidence does not prove such behavior.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PERM-RSA-REG-AUTH-RESIDUE-008."
+      ]
+    },
+    {
+      "finding_id": "F8",
+      "status": "needs_more_evidence",
+      "summary": "Top-level instantiates rst_wrapper connected to a NoC AXI-lite bridge and passes reglk_ctrl[12] plus acct_ctrl_i=acc_ctrl_c[priv_lvl_i][12] and debug_mode_i. rst_wrapper outputs rst_1..rst_13, including rst_5 to PKT, rst_10 to RNG, and rst_13 to RSA. PKT/RNG/RSA wrappers use local reset conditions such as ~(rst_ni && ~rst_5/10/13). The internals of rst_wrapper and post-reset values of reglk/acct controls were not provided.",
+      "vulnerability_category": "trigger reset / clear state / peripheral reset lines rst_5/rst_10/rst_13 and protected wrapper state/locks/access controls / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: software-visible reset requester Operation: trigger reset / clear state Object: peripheral reset lines rst_5/rst_10/rst_13 and protected wrapper state/locks/access controls Expected guard: Software-controllable resets of security peripherals should require authorization and should not be usable to clear locks/access controls or leave protected outputs in unsafe residue states. Observed behavior: Top-level instantiates rst_wrapper connected to a NoC AXI-lite bridge and passes reglk_ctrl[12] plus acct_ctrl_i=acc_ctrl_c[priv_lvl_i][12] and debug_mode_i. rst_wrapper outputs rst_1..rst_13, including rst_5 to PKT, rst_10 to RNG, and rst_13 to RSA. PKT/RNG/RSA wrappers use local reset conditions such as ~(rst_ni && ~rst_5/10/13). The internals of rst_wrapper and post-reset values of reglk/acct controls were not provided. Path: riscv_peripherals.sv lines 901-942 and 944-983; pkt_wrapper.sv lines 75-79; rng_wrapper.sv lines 87-101, 217-220; rsa_wrapper.sv lines 63, 66-77 Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "If a software reset can clear protected state or defeat locks/access controls, software could bypass lock protections or leave cryptographic/debug state in unsafe values; current evidence does not prove the reset control policy.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PERM-SWRESET-AUTH-LOCKEFFECT-009."
+      ]
+    },
+    {
+      "finding_id": "F9",
+      "status": "needs_more_evidence",
+      "summary": "Top-level exposes a DMA NoC port and instantiates dma_wrapper with reglk_ctrl[8], acct_ctrl_i=acc_ctrl_c[priv_lvl_i][8], pmpcfg_i, pmpaddr_i, and we_flag_3. It is connected to a NoC AXI-lite bridge. The provided observations do not include dma_wrapper internals or any fabric routing showing whether DMA can target other protected peripheral regions.",
+      "vulnerability_category": "DMA read/write to peripheral MMIO/fabric endpoints / protected peripheral address spaces: debug, fuse/PKT, RNG, RSA, reglk/acct/reset, crypto peripherals / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: DMA engine / DMA NoC master Operation: DMA read/write to peripheral MMIO/fabric endpoints Object: protected peripheral address spaces: debug, fuse/PKT, RNG, RSA, reglk/acct/reset, crypto peripherals Expected guard: DMA-originated transactions should preserve requester identity/security attributes and be blocked from protected MMIO/fuse/crypto/debug regions unless explicitly authorized by access-control/range checks. Observed behavior: Top-level exposes a DMA NoC port and instantiates dma_wrapper with reglk_ctrl[8], acct_ctrl_i=acc_ctrl_c[priv_lvl_i][8], pmpcfg_i, pmpaddr_i, and we_flag_3. It is connected to a NoC AXI-lite bridge. The provided observations do not include dma_wrapper internals or any fabric routing showing whether DMA can target other protected peripheral regions. Path: riscv_peripherals.sv lines 1895-1912 and 1915-1954 Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "If DMA transactions can reach protected MMIO/fuse/crypto/debug regions without requester-aware range checks, DMA could bypass CPU privilege and wrapper access-control policy.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PERM-DMA-FABRIC-RANGE-010."
+      ]
+    },
+    {
+      "finding_id": "F10",
+      "status": "needs_more_evidence",
+      "summary": "Fact layer identifies priv_lvl_i at top level and axi_lite_interface producing address_o/en_o/we_o for CLINT. Provided observations do not include CLINT integration or axi_lite_interface logic beyond port facts, so privilege/range enforcement for CLINT cannot be determined.",
+      "vulnerability_category": "read/write timer/IPI MMIO state / CLINT timer interrupt and IPI control registers / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: software-visible AXI requester Operation: read/write timer/IPI MMIO state Object: CLINT timer interrupt and IPI control registers Expected guard: Writes to timer compare/software interrupt registers should be restricted to the intended privileged requester or protected address space; read/write enables from AXI should not be generated solely from valid handshakes without privilege/range mediation where required. Observed behavior: Fact layer identifies priv_lvl_i at top level and axi_lite_interface producing address_o/en_o/we_o for CLINT. Provided observations do not include CLINT integration or axi_lite_interface logic beyond port facts, so privilege/range enforcement for CLINT cannot be determined. Path: axi_lite_interface.sv ports lines 21-31 from fact layer; riscv_peripherals.sv CLINT NoC ports lines 96-101 from fact layer Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "If unprivileged or DMA-originated writes can update CLINT timer/IPI registers, software could spoof interrupts or disrupt timer behavior.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PERM-CLINT-MMIO-PRIV-011."
+      ]
+    },
+    {
+      "finding_id": "F11",
+      "status": "needs_more_evidence",
+      "summary": "Boot ROM selection signal ariane_boot_sel_i is ineffective: both mux arms select linux boot ROM data, so the intended baremetal/linux boot policy cannot be enforced by the selection input.",
+      "vulnerability_category": "select/read boot ROM contents / boot ROM selection, bootrom_bm/linux contents and boot response data / permission-related RTL security issue",
+      "affected_locations": [],
+      "evidence": [],
+      "reasoning_summary": "Subject: boot strap/software-readable requester Operation: select/read boot ROM contents Object: boot ROM selection, bootrom_bm/linux contents and boot response data Expected guard: Boot ROM selection and reads of boot code/configuration should be mediated by intended lifecycle/boot policy; software should not be able to change boot source or read restricted boot ROM contents through unintended routes after boot if policy forbids it. Observed behavior: Top-level instantiates bootrom and bootrom_linux and gates rom_req with acc_ctrl_c[priv_lvl_i][0]. However rom_rdata is assigned as (ariane_boot_sel_i) ? rom_rdata_linux : rom_rdata_linux, so ariane_boot_sel_i never selects rom_rdata_bm despite the comment that it selects BM or linux bootrom. Boot ROM read path is exposed through a NoC AXI-lite bridge and acc_ctrl gating. Path: riscv_peripherals.sv lines 516-535 and 536-575 Closure verdict: The candidate lacks source evidence or key evidence slots.",
+      "security_impact": "The system always returns linux boot ROM contents regardless of the boot selection input, which can violate boot policy if baremetal versus linux ROM selection is security- or lifecycle-relevant.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "Missing evidence slots: rtl_evidence.",
+      "recommended_follow_up": [
+        "Check source file, module, signal, or code block for obligation PERM-BOOTROM-SELECTION-012."
+      ]
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "12 evidence slot(s) remained incomplete after closure checking."
+}

@@ -1,32 +1,18 @@
 {
-  "analysis_summary": "The inspected RTL contains permission-related security issues. The strongest confirmed issue is in the AXI fabric connectivity mapping: access to peripheral index 6 is granted if the requester has permission for peripheral index 7. In the SoC package, index 6 is PLIC and index 7 is CLINT, so CLINT permission can bypass a denied PLIC permission. A second, medium-confidence issue is that rom2 is documented as containing keys and access-control values but exposes read/write behavior without any visible local privilege, requester, or write-authorization check; this may be mitigated externally, but no such enforcement is visible inside rom2.",
+  "analysis_summary": "Inspected the visible RTL/source evidence under the provided scope, focusing on permission and access-control logic around the AXI fabric, ROM2 key/fuse storage, JTAG key hookup, and access-control register propagation. The code contains at least one confirmed permission-related issue in the AXI fabric connectivity logic: the connectivity map grants access to manager/peripheral index 6 based not only on its own access-control bit but also on the access-control bit for index 7, creating an apparent privilege/permission alias. The ROM2 module also exposes key material and access-control words through a bus-readable and bus-writable storage interface with no local authorization checks visible in the module; however, because the complete peripheral wrapper implementation that instantiates `rom2` was not visible in the provided tool output, this is reported as a potential warning rather than a fully confirmed system-level bypass.",
   "findings": [
     {
       "finding_id": "FINDING-001",
       "status": "confirmed_finding",
-      "summary": "PLIC access-control bypass through CLINT permission bit.",
-      "vulnerability_category": "Permission bypass / improper authorization in access-control fabric",
+      "summary": "AXI fabric access-control logic grants index 6 access based on index 7 permissions.",
+      "vulnerability_category": "permission aliasing / incorrect access-control decision",
       "affected_locations": [
         {
           "file": "src/axi_node/src/axi_node_intf_wrap.sv",
           "line_start": 430,
           "line_end": 430,
-          "module": "connectivity_mapping",
-          "signal_or_register": "connectivity_map_o"
-        },
-        {
-          "file": "tb/ariane_soc_pkg.sv",
-          "line_start": 28,
-          "line_end": 29,
-          "module": "ariane_soc package",
-          "signal_or_register": "axi_slaves_t PLIC/CLINT indices"
-        },
-        {
-          "file": "tb/ariane_testharness.sv",
-          "line_start": 442,
-          "line_end": 472,
-          "module": "ariane_testharness",
-          "signal_or_register": "access_ctrl, priv_lvl"
+          "module": "axi_node_wrap",
+          "signal_or_register": "connectivity_map_o[i][j]"
         }
       ],
       "evidence": [
@@ -34,121 +20,112 @@
           "file": "src/axi_node/src/axi_node_intf_wrap.sv",
           "line_start": 430,
           "line_end": 430,
-          "module": "connectivity_mapping",
-          "object": "connectivity_map_o",
+          "module": "axi_node_wrap",
+          "object": "connectivity_map_o[i][j]",
           "evidence_type": "source_line",
-          "description": "Connectivity map grants target j when its own access-control bit is set, or when j==6 and target 7's access-control bit is set.",
-          "supports_claim": "Shows the explicit permission bypass condition: access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i])."
-        },
-        {
-          "file": "tb/ariane_soc_pkg.sv",
-          "line_start": 28,
-          "line_end": 29,
-          "module": "ariane_soc package",
-          "object": "axi_slaves_t",
-          "evidence_type": "source_line",
-          "description": "SoC peripheral enumeration maps index 6 to PLIC and index 7 to CLINT.",
-          "supports_claim": "Establishes that the hard-coded j==6 and index 7 check means PLIC access can be allowed by CLINT permission."
-        },
-        {
-          "file": "tb/ariane_testharness.sv",
-          "line_start": 442,
-          "line_end": 472,
-          "module": "ariane_testharness",
-          "object": "access_ctrl_i wiring",
-          "evidence_type": "source_lines",
-          "description": "The test harness builds access_ctrl from access_ctrl_reg per subordinate, peripheral, and privilege level, then passes access_ctrl and priv_lvl into axi_node_intf_wrap.",
-          "supports_claim": "Shows that the vulnerable connectivity mapping is driven by the SoC's intended permission table and current privilege level."
+          "description": "The access-control fabric computes each connectivity-map entry from `access_ctrl_i[i][j][priv_lvl_i]`, but adds an extra condition for manager/peripheral index `j==6`: access is also granted if `access_ctrl_i[i][7][priv_lvl_i]` is set.",
+          "supports_claim": "Shows a permission decision for index 6 can be satisfied by permissions assigned to index 7, not solely by index 6's own permission bit."
         },
         {
           "file": "src/axi_node/src/axi_node_intf_wrap.sv",
-          "line_start": 383,
-          "line_end": 383,
+          "line_start": 30,
+          "line_end": 31,
           "module": "axi_node_intf_wrap",
-          "object": "cfg_connectivity_map_i",
+          "object": "priv_lvl_i, access_ctrl_i",
           "evidence_type": "source_line",
-          "description": "The computed connectivity map is passed into the AXI node configuration.",
-          "supports_claim": "Shows that connectivity_map_o/s_connectivity_map affects AXI fabric routing permissions."
+          "description": "The wrapper takes a privilege level and a per-subordinate/per-manager/per-privilege access-control matrix as security inputs.",
+          "supports_claim": "Establishes that `access_ctrl_i` and `priv_lvl_i` are intended to drive permission-related routing decisions."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 472,
+          "line_end": 472,
+          "module": "ariane_testharness",
+          "object": "access_ctrl_i",
+          "evidence_type": "source_line",
+          "description": "The access-control matrix is connected into the AXI node wrapper instance in the test harness.",
+          "supports_claim": "Shows the top-level fabric is configured with the access-control matrix used by the connectivity-map logic."
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": 29,
+          "line_end": 30,
+          "module": "ariane_soc",
+          "object": "axi_slaves_t",
+          "evidence_type": "source_line",
+          "description": "The design defines peripheral/slave enumeration values including PLIC = 6 and CLINT = 7.",
+          "supports_claim": "Suggests the hard-coded `j==6` and index 7 alias likely couples permissions for PLIC and CLINT in the address/fabric map."
         }
       ],
-      "reasoning_summary": "The expected per-target permission check would use access_ctrl_i[i][j][priv_lvl_i]. The actual logic adds a special case for j==6 that also accepts access_ctrl_i[i][7][priv_lvl_i]. Since the SoC package defines 6 as PLIC and 7 as CLINT, any initiator and privilege level with CLINT permission can access PLIC even if its PLIC permission bit is clear. This is a direct authorization bypass in the permission fabric.",
-      "security_impact": "A requester that should only access CLINT may be able to access PLIC. Unauthorized PLIC access can allow interrupt-controller reconfiguration, interrupt masking or spoofing, priority manipulation, denial of service, or privilege-escalation paths through interrupt behavior.",
+      "reasoning_summary": "The connectivity map is a permission-enforcement structure for the AXI node. For each source `i`, manager/peripheral `j`, and current privilege level, the expected authorization condition should be the corresponding access-control bit `access_ctrl_i[i][j][priv_lvl_i]`. Instead, the code grants access to `j==6` when either the permission for `j==6` is set or the permission for `j==7` is set. Because the SoC package maps index 6 to PLIC and index 7 to CLINT, any privilege/source configuration that legitimately permits CLINT but denies PLIC may still gain access to PLIC. This is a permission-aliasing vulnerability in the fabric-level access-control decision.",
+      "security_impact": "A requester/source with permission to access peripheral index 7 can be granted access to peripheral index 6 even when access to index 6 is denied in the policy. If index 6 corresponds to PLIC and index 7 to CLINT as defined in the SoC package, this could allow unintended interrupt-controller access, potentially enabling interrupt manipulation, denial of service, privilege escalation paths, or bypass of intended privilege-level isolation.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "No major uncertainty for the bypass itself: the vulnerable expression and peripheral index mapping are visible in scope. The precise exploitability depends on configured access_ctrl_reg values and active privilege levels, but the logic permits the bypass whenever CLINT is allowed and PLIC is denied.",
+      "uncertainty_or_missing_evidence": "The exact downstream `axi_node_wrap` implementation and complete synthesized routing behavior were not visible in full due to truncated file output, but the visible source line directly computes the connectivity map used as a permission/routing input. The intended rationale for the `j==6` exception is not documented in the visible code.",
       "recommended_follow_up": [
-        "Remove the hard-coded j==6 exception or replace it with a documented, formally verified policy if PLIC/CLINT coupling is intentional.",
-        "Add assertions or tests proving that every target's connectivity bit depends only on the intended target's permission entry, unless explicitly whitelisted.",
-        "Review all hard-coded peripheral indices in the access-control fabric for similar cross-target permission aliasing."
+        "Remove the hard-coded permission alias unless there is a documented architectural requirement: `assign connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i];`.",
+        "If PLIC/CLINT permission coupling is intentional, document it and encode it through explicit policy configuration rather than hidden hard-coded logic.",
+        "Add assertions or tests that deny access independently to each peripheral index and verify no other index's permission bit grants access.",
+        "Review all generated `connectivity_map_o` entries for similar index coupling or off-by-one permission selection."
       ]
     },
     {
       "finding_id": "FINDING-002",
       "status": "potential_warning",
-      "summary": "ROM2 key/access-control storage is readable and writable without visible local permission enforcement.",
-      "vulnerability_category": "Missing local authorization for sensitive register storage",
+      "summary": "ROM2 key/access-control storage is bus-readable and bus-writable with no local authorization checks visible.",
+      "vulnerability_category": "missing authorization on security-sensitive register storage / key exposure",
       "affected_locations": [
         {
           "file": "src/rom2/rom2.sv",
           "line_start": 5,
           "line_end": 47,
           "module": "rom2",
-          "signal_or_register": "secure_reg"
+          "signal_or_register": "secure_reg, rdata_o"
         },
         {
-          "file": "tb/ariane_soc_pkg.sv",
-          "line_start": 31,
-          "line_end": 57,
-          "module": "ariane_soc package",
-          "signal_or_register": "ROM2, ROM2Base"
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 425,
+          "line_end": 432,
+          "module": "ariane_testharness",
+          "signal_or_register": "rom2 instance connections to req/we/addr/wdata/rdata"
         },
         {
           "file": "tb/ariane_testharness.sv",
           "line_start": 550,
-          "line_end": 550,
+          "line_end": 555,
           "module": "ariane_testharness",
-          "signal_or_register": "master[ariane_soc::ROM2]"
+          "signal_or_register": "master[ariane_soc::ROM2], jtag_key, access_ctrl_reg"
         }
       ],
       "evidence": [
         {
           "file": "src/rom2/rom2.sv",
           "line_start": 2,
-          "line_end": 2,
+          "line_end": 3,
           "module": "rom2",
           "object": "module comment",
-          "evidence_type": "source_comment",
-          "description": "ROM2 is described as holding all keys.",
-          "supports_claim": "Establishes that the storage is security-sensitive."
+          "evidence_type": "source_line",
+          "description": "The ROM2 module is described as containing all keys.",
+          "supports_claim": "Shows ROM2 stores security-sensitive material."
         },
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 18,
+          "line_start": 16,
           "line_end": 23,
           "module": "rom2",
           "object": "mem",
-          "evidence_type": "source_lines",
-          "description": "ROM2 contains constant values, with comments identifying entries as access-control values and keys.",
-          "supports_claim": "Shows sensitive key/access-control material is initialized into the module."
+          "evidence_type": "source_line",
+          "description": "ROM2's constant memory contains AES/JTAG key-like values and access-control words for masters.",
+          "supports_claim": "Identifies the stored data as key material and access-control configuration."
         },
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 34,
-          "line_end": 34,
+          "line_start": 33,
+          "line_end": 41,
           "module": "rom2",
           "object": "secure_reg",
           "evidence_type": "source_line",
-          "description": "On reset, mem is copied into secure_reg.",
-          "supports_claim": "Shows sensitive constants become mutable register state."
-        },
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 36,
-          "line_end": 40,
-          "module": "rom2",
-          "object": "secure_reg write path",
-          "evidence_type": "source_lines",
-          "description": "The module services requests using req_i/we_i and directly writes secure_reg based on addr_i on write requests.",
-          "supports_claim": "Shows write access to sensitive storage without a visible local privilege or authorization check."
+          "description": "On reset, the key/access-control values are copied into `secure_reg`. Later, if `req_i` and `we_i` are asserted, `secure_reg[...]` is overwritten from bus write data.",
+          "supports_claim": "Shows the supposedly secure registers are writable through the module interface without any local privilege or authorization check."
         },
         {
           "file": "src/rom2/rom2.sv",
@@ -157,41 +134,73 @@
           "module": "rom2",
           "object": "rdata_o",
           "evidence_type": "source_line",
-          "description": "Read data is assigned from secure_reg selected by raddr_q.",
-          "supports_claim": "Shows read exposure of sensitive storage without visible local authorization logic."
+          "description": "Read data is directly assigned from `secure_reg[raddr_q]` when the address is in range.",
+          "supports_claim": "Shows bus reads can expose secure register contents if the module is reachable."
         },
         {
           "file": "tb/ariane_soc_pkg.sv",
-          "line_start": 31,
+          "line_start": 40,
           "line_end": 57,
-          "module": "ariane_soc package",
-          "object": "ROM2, ROM2Base",
-          "evidence_type": "source_lines",
-          "description": "ROM2 is assigned a SoC peripheral index and base address.",
-          "supports_claim": "Shows ROM2 is part of the mapped SoC address space."
+          "module": "ariane_soc",
+          "object": "ROM2Base, ROM2Length",
+          "evidence_type": "source_line",
+          "description": "The SoC package assigns ROM2 a memory-mapped base and length.",
+          "supports_claim": "Shows ROM2 is intended to be memory-mapped in the SoC address space."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 476,
+          "line_end": 490,
+          "module": "ariane_testharness",
+          "object": "start_addr_i/end_addr_i",
+          "evidence_type": "source_line",
+          "description": "The top-level memory map includes ROM2 base and end addresses in the AXI fabric configuration.",
+          "supports_claim": "Shows ROM2 participates in the AXI fabric address map."
         },
         {
           "file": "tb/ariane_testharness.sv",
           "line_start": 550,
-          "line_end": 550,
+          "line_end": 555,
           "module": "ariane_testharness",
-          "object": "rom2_fuse",
+          "object": "i_ariane_peripherals",
           "evidence_type": "source_line",
-          "description": "The test harness connects ROM2 to the peripheral fabric slot.",
-          "supports_claim": "Shows ROM2 is connected through master[ariane_soc::ROM2]."
+          "description": "The peripherals instance connects `rom2_fuse` to `master[ariane_soc::ROM2]` and outputs `jtag_key` and `access_ctrl_reg`.",
+          "supports_claim": "Shows ROM2 is connected as a fabric peripheral and supplies security controls such as JTAG key and access-control registers."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 139,
+          "line_end": 139,
+          "module": "ariane_testharness",
+          "object": "jtag_key",
+          "evidence_type": "source_line",
+          "description": "The JTAG module receives `jtag_key` from the top-level.",
+          "supports_claim": "Shows ROM2-derived key material is used in debug/JTAG permission logic."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 450,
+          "line_end": 450,
+          "module": "ariane_testharness",
+          "object": "access_ctrl",
+          "evidence_type": "source_line",
+          "description": "The access-control matrix used by the AXI node is assigned from `access_ctrl_reg`.",
+          "supports_claim": "Shows ROM2-derived access-control data can influence fabric permissions."
         }
       ],
-      "reasoning_summary": "The rom2 module stores sensitive key and access-control data but has only req_i, we_i, addr_i, and wdata_i controls for access. It has no visible inputs for privilege level, requester identity, secure state, or write authorization. Therefore, any requester that reaches the module through the bus can read rdata_o or write secure_reg according to the local RTL. External fabric permissions may restrict access, but the module itself provides no local enforcement or write lockout.",
-      "security_impact": "If an unauthorized initiator can reach ROM2, it may read cryptographic keys, modify keys, alter access-control policy values, or weaken future permission enforcement until reset. This could compromise confidentiality and integrity of the SoC security policy.",
+      "reasoning_summary": "ROM2 stores sensitive material, including AES/JTAG key-like constants and access-control configuration words. The visible `rom2` module has a simple request/write/read interface: reads return `secure_reg`, and writes overwrite `secure_reg`, with no local check on privilege level, source identity, debug authentication, write-once lock, or address-specific restrictions. The SoC evidence shows ROM2 has a memory-mapped region and is connected to the peripheral fabric, and its outputs feed `jtag_key` and `access_ctrl_reg`. If a requester can reach this ROM2 interface through the fabric, it may read key material or modify the very registers controlling debug authentication and fabric permissions.",
+      "security_impact": "If reachable by unauthorized software or masters, ROM2 can leak AES/JTAG keys and permit modification of JTAG authentication material and AXI access-control policy. This could lead to debug unlock, bypass of fabric permissions, exposure of cryptographic secrets, or full system compromise.",
       "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The available scope does not include the full ariane_peripherals implementation or any ROM2 wrapper logic, so external access checks may exist outside the visible files. This finding is therefore a potential vulnerability/defense-in-depth weakness rather than a fully confirmed reachable exploit.",
+      "uncertainty_or_missing_evidence": "The visible top-level output was truncated around the ROM2/peripheral wrapper, and the source for `ariane_peripherals` was not present in the listed files. Therefore, there may be additional authorization logic outside `rom2` that was not visible. This finding is based on the local ROM2 module behavior plus visible evidence that ROM2 is memory-mapped and connected into the SoC fabric.",
       "recommended_follow_up": [
-        "Add local authorization or write-lock controls to rom2, especially for writes to secure_reg after reset or boot initialization.",
-        "Ensure ROM2 access policy is enforced independently of mutable access-control registers if ROM2 stores the policy itself.",
-        "Verify the missing ariane_peripherals wrapper to determine whether it adds any ROM2-specific access restrictions."
+        "Add local access control in `rom2`: disallow general reads of key material and block writes after reset unless performed by a trusted provisioning/debug entity.",
+        "Separate secret key storage from software-readable memory-mapped space; expose only derived/authenticated outputs needed by consumers.",
+        "Protect access-control registers with write-once locks or privilege/source checks, and prevent untrusted software from modifying them at runtime.",
+        "Audit the missing `ariane_peripherals` implementation to determine whether it enforces additional permission checks before `rom2` requests reach this module.",
+        "Add tests/assertions that user/supervisor-mode and untrusted masters cannot read ROM2 key locations or write `secure_reg`/`access_ctrl_reg`."
       ]
     }
   ],
   "no_finding_reason": "",
-  "global_uncertainty": "The full implementations of ariane_peripherals, the core ariane module, dmi_jtag, and the underlying AXI node are not visible in the provided scope. This limits certainty about ROM2 reachability and any external checks beyond the shown fabric wiring. The PLIC/CLINT permission bypass is visible and self-contained in the inspected files."
+  "global_uncertainty": "The analysis was limited to the visible files and tool outputs. Some files were truncated by the read tool, and implementation details for external modules such as `axi_node_wrap`, `ariane_peripherals`, `dmi_jtag`, and `axi2mem` were not available under the visible source evidence. Therefore, findings are based on directly visible source lines and may not capture mitigations or additional vulnerabilities in omitted modules."
 }

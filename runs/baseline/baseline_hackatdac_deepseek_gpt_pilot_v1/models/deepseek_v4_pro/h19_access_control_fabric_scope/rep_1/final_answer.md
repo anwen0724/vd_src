@@ -1,15 +1,15 @@
 {
-  "analysis_summary": "This analysis covers four RTL source files under the hackatdac19 access control fabric scope. The design implements an AXI-based SoC with an access control fabric (axi_node_intf_wrap), a ROM2 module for secure key/configuration storage, and a test harness. Three permission-related security vulnerabilities were identified: (1) ROM2 secure registers are writable at runtime via the bus interface, allowing overwrite of cryptographic keys and access control configuration; (2) a hardcoded connectivity mapping bypass grants PLIC (manager index 6) the access rights of CLINT (manager index 7); (3) the priv_lvl_i signal is used as an index into the access_ctrl array without bounds validation, posing a potential out-of-bounds access risk. The access control configuration itself is stored in ROM2 writable registers, meaning any vulnerability that allows writing to ROM2 can completely subvert the SoC access control policy.",
+  "analysis_summary": "The RTL code under INPUT_SCOPE was analyzed for permission-related security vulnerabilities. Two significant findings were identified: (1) The ROM2 module stores cryptographic keys and access control configuration in secure registers that can be overwritten via bus writes without any access control enforcement or privilege check, and (2) The AXI node connectivity mapping contains a hardcoded bypass at manager index j==6 that grants connectivity permissions based on a different manager's (index 7) access control entry, creating a privilege escalation path. The code partially implements an access control fabric but has critical gaps that undermine its security guarantees.",
   "findings": [
     {
-      "finding_id": "F-001",
+      "finding_id": "F-01",
       "status": "confirmed_finding",
-      "summary": "ROM2 secure registers are writable at runtime via bus interface, allowing overwrite of cryptographic keys and access control configuration",
-      "vulnerability_category": "Insufficient Access Control on Secure Storage",
+      "summary": "ROM2 secure registers are writable via the bus interface without any privilege-level or access-control enforcement, allowing any bus master to overwrite cryptographic keys and access control configuration.",
+      "vulnerability_category": "Insufficient Access Control / Missing Write Protection",
       "affected_locations": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 33,
+          "line_start": 1,
           "line_end": 42,
           "module": "rom2",
           "signal_or_register": "secure_reg"
@@ -18,55 +18,66 @@
       "evidence": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 18,
-          "line_end": 23,
+          "line_start": 4,
+          "line_end": 14,
           "module": "rom2",
-          "object": "mem",
+          "object": "rom2 module declaration",
           "evidence_type": "source_code",
-          "description": "ROM2 stores cryptographic key material including AES and JTAG keys, and access control master configuration values in const mem initialized as fuse replication.",
-          "supports_claim": "Confirms that secure_reg holds highly sensitive material (AES keys, JTAG keys, access control config)"
+          "description": "Module interface includes req_i, we_i, addr_i, wdata_i for bus access to secure registers without any privilege input.",
+          "supports_claim": "Shows that ROM2 exposes write access via a generic bus interface with no access control input."
         },
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 33,
-          "line_end": 42,
+          "line_start": 26,
+          "line_end": 36,
           "module": "rom2",
           "object": "always_ff block",
           "evidence_type": "source_code",
-          "description": "The always_ff block shows that on reset secure_reg is loaded from mem, but when req_i && we_i, secure_reg[addr_i[...]] <= wdata_i allows runtime writes to the secure registers.",
-          "supports_claim": "Directly proves that secure registers are writable via the bus interface at runtime"
+          "description": "On reset, secure_reg <= mem (fuse values). When req_i is asserted and we_i is 1, secure_reg at the addressed location is overwritten with wdata_i unconditionally. No privilege check, no access control gating, no authentication required.",
+          "supports_claim": "Demonstrates that any bus write can overwrite AES keys, JTAG keys, and access control master configuration stored in secure_reg."
         },
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 6,
-          "line_end": 13,
+          "line_start": 16,
+          "line_end": 23,
           "module": "rom2",
-          "object": "port declarations",
+          "object": "mem constant",
           "evidence_type": "source_code",
-          "description": "ROM2 has we_i (write enable), addr_i, and wdata_i inputs, confirming a write path exists from external requestors.",
-          "supports_claim": "Shows the write interface is exposed externally"
+          "description": "Hardcoded security-critical values: location 0 = AES key (0x55555555...), location 1 = JTAG key (0x2b7e1516...), locations 2-3 = access control for master 0 and master 1 (containing peripheral access permission bit-fields). These can all be overwritten at runtime.",
+          "supports_claim": "Confirms the stored values are highly sensitive cryptographic and access control material."
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": 63,
+          "line_end": 68,
+          "module": "ariane_soc",
+          "object": "AESKey address offsets",
+          "evidence_type": "source_code",
+          "description": "AES key IDs are public information mapped in the address space, confirming that AES cryptographic keys reside in ROM2 and are addressable via the bus.",
+          "supports_claim": "Corroborates that ROM2 holds cryptographic assets accessible through the SoC memory map."
         }
       ],
-      "reasoning_summary": "ROM2 is designed to hold keys and access control configuration (as noted in comments: '3rd location for Access control master 1', '2nd location for Access control master 0', '1st location for JTAG', '0th location for AES'). The module provides both read and write access to secure_reg via req_i/we_i/addr_i/wdata_i. Since ROM2 is mapped in the SoC memory map at ROM2Base (0x0021_0000, length 0x10000) as defined in ariane_soc_pkg.sv, any bus master with access to this address range can overwrite the cryptographic keys and access control configuration at runtime. This completely undermines the security model.",
-      "security_impact": "HIGH - An attacker who gains write access to ROM2 can overwrite AES keys, JTAG keys, and the access control configuration registers. The access control configuration determines which bus masters can access which peripherals at each privilege level, so overwriting it can grant unauthorized access to any peripheral. Overwriting AES keys compromises all encrypted data. Overwriting JTAG keys can enable unauthorized debug access.",
+      "reasoning_summary": "The rom2 module stores security-critical secrets (AES key, JTAG key, access control configuration) in secure_reg, which is initialized from constant fuse values on reset. However, the always_ff block unconditionally accepts writes (we_i=1 && req_i=1) to any address within secure_reg. There is no privilege-level input, no access control gating, and no authentication mechanism. Any bus initiator that can address ROM2 (base 0x0021_0000 per ariane_soc_pkg.sv) can arbitrarily overwrite the AES cryptographic key, the JTAG debug key, and the access control policy for master 0 and master 1. This effectively bypasses the entire SoC security model by allowing an attacker to replace keys with known values or disable access controls entirely.",
+      "security_impact": "CRITICAL. An attacker with bus access to ROM2 can: (1) overwrite the AES key to decrypt/encrypt arbitrary data, (2) overwrite the JTAG key to gain debug access, (3) overwrite the access control configuration to grant themselves access to any peripheral. This could lead to complete system compromise including data exfiltration, privilege escalation, and persistent backdoor insertion.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "The test harness and full SoC integration are not fully visible. It is unclear whether there are additional protection layers (e.g., bus-level access restrictions to ROM2 itself) that prevent untrusted masters from reaching ROM2. The access control fabric may restrict which masters can access ROM2, but if ROM2 is writable by any master (including software running on the processor), the vulnerability is exploitable.",
+      "uncertainty_or_missing_evidence": "The full testbench (ariane_testharness.sv) is truncated; we cannot confirm whether additional gating logic exists at the integration level that limits ROM2 write access. However, the rom2 module itself has no internal protection, so any reliance on external gating is fragile and not visible in the available source.",
       "recommended_follow_up": [
-        "Verify whether ROM2 write access is restricted by the access control fabric or if it is exposed to software running on the main processor",
-        "Consider making ROM2 secure_reg read-only after initial boot, or implementing a lock-once mechanism",
-        "Add a hardware write-protect mechanism for secure storage that cannot be bypassed by software"
+        "Add privilege-level input (e.g., priv_lvl_i or equivalent) to rom2 and gate writes based on a hardware-enforced security state machine or write-once fuse implementation.",
+        "Consider making secure_reg truly read-only after initialization (e.g., only allow writes when a lock bit is not set, or use one-time-programmable fuse semantics).",
+        "Add a hardware security wrapper around ROM2 that enforces access control at the interconnect level.",
+        "Integrate the rom2 access control with the AXI node connectivity_map to ensure that only privileged masters can write to secure_reg."
       ]
     },
     {
-      "finding_id": "F-002",
+      "finding_id": "F-02",
       "status": "confirmed_finding",
-      "summary": "Hardcoded connectivity mapping bypass grants PLIC (index 6) the access rights of CLINT (index 7)",
-      "vulnerability_category": "Access Control Policy Bypass (Hardcoded Exception)",
+      "summary": "The AXI node connectivity mapping contains a hardcoded privilege-escalation bypass at manager index j==6 that grants access based on manager index 7's access control bits, allowing a potentially less-privileged manager to gain unauthorized peripheral access.",
+      "vulnerability_category": "Access Control Bypass / Privilege Escalation",
       "affected_locations": [
         {
           "file": "src/axi_node/src/axi_node_intf_wrap.sv",
-          "line_start": 430,
-          "line_end": 430,
+          "line_start": 409,
+          "line_end": 436,
           "module": "connectivity_mapping",
           "signal_or_register": "connectivity_map_o"
         }
@@ -77,79 +88,54 @@
           "line_start": 430,
           "line_end": 430,
           "module": "connectivity_mapping",
-          "object": "assign connectivity_map_o",
+          "object": "connectivity_map_o assignment",
           "evidence_type": "source_code",
-          "description": "The connectivity mapping uses: access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]). This hardcodes manager index 6 (PLIC) to also use manager index 7's (CLINT) access control bits.",
-          "supports_claim": "Directly shows the hardcoded bypass logic"
-        },
-        {
-          "file": "tb/ariane_soc_pkg.sv",
-          "line_start": 30,
-          "line_end": 42,
-          "module": "ariane_soc",
-          "object": "axi_slaves_t enum",
-          "evidence_type": "source_code",
-          "description": "PLIC = 6 and CLINT = 7 in the peripheral enumeration, confirming indices 6 and 7 refer to PLIC and CLINT.",
-          "supports_claim": "Confirms the identity of manager indices 6 and 7"
-        }
-      ],
-      "reasoning_summary": "Line 430 of axi_node_intf_wrap.sv computes the connectivity map as: connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]). This means for subordinate 'i', manager 'j'=6 (PLIC) gets access if either: (a) PLIC's own access_ctrl bit for the current privilege level is set, OR (b) CLINT's (j=7) access_ctrl bit for the current privilege level is set. This effectively gives PLIC all the access rights of CLINT regardless of PLIC's own configuration. The PLIC is an interrupt controller and CLINT is a core-local interruptor/timer. There is no clear security justification for PLIC to inherit CLINT's access rights. This could allow the PLIC to access peripherals it should not have access to.",
-      "security_impact": "MEDIUM - The PLIC can access any peripheral that CLINT is authorized to access, potentially allowing an attacker who compromises or misconfigures PLIC to escalate access. The PLIC could be used to read/write to CLINT-accessible memory regions.",
-      "confidence": "medium",
-      "uncertainty_or_missing_evidence": "It is unclear whether this hardcoded bypass is intentional (e.g., PLIC and CLINT share security domains) or a leftover debug/development artifact. The full AXI node logic downstream is not visible, so the exact effect of connectivity_map on actual bus routing cannot be confirmed from the provided sources. Additionally, PLIC and CLINT are different peripherals, and PLIC inheriting CLINT's access may or may not be by design.",
-      "recommended_follow_up": [
-        "Review whether the PLIC-CLINT access sharing is intentional or a bug",
-        "If unintentional, remove the hardcoded bypass: change line 430 to connect access_ctrl_i[i][j][priv_lvl_i] without the OR condition",
-        "Review whether any other manager indices have similar hardcoded bypasses"
-      ]
-    },
-    {
-      "finding_id": "F-003",
-      "status": "potential_warning",
-      "summary": "priv_lvl_i signal used as array index without bounds validation in access control lookup",
-      "vulnerability_category": "Potential Out-of-Bounds Array Access / Privilege Escalation",
-      "affected_locations": [
-        {
-          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
-          "line_start": 430,
-          "line_end": 430,
-          "module": "connectivity_mapping",
-          "signal_or_register": "priv_lvl_i"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
-          "line_start": 412,
-          "line_end": 416,
-          "module": "connectivity_mapping",
-          "object": "module parameters and ports",
-          "evidence_type": "source_code",
-          "description": "NB_PRIV_LVL = 4 and PRIV_LVL_WIDTH = 4. access_ctrl_i is dimensioned [NB_SUBORDINATE-1:0][NB_MANAGER-1:0][NB_PRIV_LVL-1:0] = [NB_SUBORDINATE-1:0][NB_MANAGER-1:0][3:0]. priv_lvl_i is [PRIV_LVL_WIDTH-1:0] = [3:0], so it is 4 bits wide (0-15).",
-          "supports_claim": "Shows the parameters that define array dimensions and signal widths"
+          "description": "assign connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]); The term ((j==6) && access_ctrl_i[i][7][priv_lvl_i]) grants manager 6 connectivity to slave i if manager 7 has access to slave i, regardless of manager 6's own access_ctrl_i entry.",
+          "supports_claim": "Directly shows a hardcoded bypass where manager 6 piggybacks on manager 7's permissions."
         },
         {
           "file": "src/axi_node/src/axi_node_intf_wrap.sv",
-          "line_start": 430,
-          "line_end": 430,
-          "module": "connectivity_mapping",
-          "object": "assign connectivity_map_o",
+          "line_start": 31,
+          "line_end": 31,
+          "module": "axi_node_intf_wrap",
+          "object": "access_ctrl_i port",
           "evidence_type": "source_code",
-          "description": "access_ctrl_i[i][j][priv_lvl_i] uses priv_lvl_i as index. If priv_lvl_i >= 4, this would access out-of-bounds of the access_ctrl_i third dimension [3:0].",
-          "supports_claim": "Shows the direct use of priv_lvl_i as an index without validation"
+          "description": "access_ctrl_i is a 3D array [NB_SUBORDINATE-1:0][NB_MANAGER-1:0][NB_PRIV_LVL-1:0], where the second dimension is the manager index. Manager 6 and manager 7 are distinct entries.",
+          "supports_claim": "Confirms that manager 6 and manager 7 should have independent access control entries, making the coupling in the connectivity_map_o assignment a clear policy violation."
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 18,
+          "line_end": 19,
+          "module": "rom2",
+          "object": "mem[2] and mem[3]",
+          "evidence_type": "source_code",
+          "description": "ROM2 stores access control configuration for master 0 (mem[2]) and master 1 (mem[3]) with comments indicating 'First 4 bits for peripheral 0, next 4 for p1 and so on.' The access control values are 192-bit wide, and the connectivity mapping uses them as 4-bit per-privilege-level permission fields.",
+          "supports_claim": "Shows that the access control fabric is configurable via ROM2 and that the bypass could be exploited if ROM2 is compromised (F-01) or if the bypass itself is intentionally malicious."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 69,
+          "line_end": 69,
+          "module": "ariane_testharness",
+          "object": "access_ctrl_reg declaration",
+          "evidence_type": "source_code",
+          "description": "access_ctrl_reg is declared as logic [1:0][47:0] in the test harness, suggesting the access control table has 2 entries (masters) by 48 bits. The 48 bits correspond to 12 peripherals x 4 privilege levels. The manager indexing (j==6, j==7) in the connectivity mapping refers to manager IDs within the AXI node.",
+          "supports_claim": "Provides integration-level evidence that the access control configuration is used to gate peripheral access, making the j==6 bypass exploitable at the SoC level."
         }
       ],
-      "reasoning_summary": "The access_ctrl_i array has its third dimension sized [NB_PRIV_LVL-1:0] = [3:0] (size 4). However, priv_lvl_i is a 4-bit signal ([3:0]) that can hold values 0-15. If priv_lvl_i takes values 4-15 (which could happen through bit flips, processor bugs, or malicious privilege escalation), the access control lookup would read out-of-bounds, potentially returning 'x' or '0' depending on simulation vs. synthesis behavior. In simulation, this could yield 'x' propagation. In synthesis, it may be optimized to constant '0', which would deny access - or potentially optimized to read adjacent memory depending on tool behavior. In the ariane_testharness, priv_lvl is derived from ariane processor's priv_lvl_o which is of type riscv::priv_lvl_t (likely an enum with limited values), so normal operation would keep it within range. However, this is a safety- and security-relevant coding practice issue.",
-      "security_impact": "LOW - Under normal operation, the RISC-V privilege level is expected to remain within 0-3. However, if priv_lvl_i is ever corrupted, the out-of-bounds access could lead to unpredictable access control decisions. The severity is low because the processor's privilege level is typically well-constrained.",
-      "confidence": "low",
-      "uncertainty_or_missing_evidence": "The full riscv package defining priv_lvl_t and NB_PRIV_LVL is not available. If riscv::NB_PRIV_LVL matches the parameter's NB_PRIV_LVL=4 exactly and the processor guarantees priv_lvl stays within range, this is primarily a defensive coding concern rather than an exploitable vulnerability. The synthesis/simulation behavior of out-of-bounds reads is implementation-dependent.",
+      "reasoning_summary": "The connectivity_mapping module in axi_node_intf_wrap.sv computes the connectivity_map_o as: connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]). This means that for manager index j==6, connectivity to slave i is granted if EITHER manager 6 has the permission OR manager 7 has the permission for the current privilege level. This bypass breaks the principle of least privilege and allows manager 6 to access any peripheral that manager 7 can access, regardless of manager 6's own configured permissions. Manager 7 is described in the ROM2 comments as a debug/master access control entity, while manager 6 is the access control for another master. This could allow a less-trusted master to escalate to debug-level peripheral access. Combined with F-01 (writable ROM2), an attacker could configure manager 7's permissions broadly and then exploit this bypass from manager 6.",
+      "security_impact": "HIGH. The bypass allows privilege escalation where manager 6 inherits manager 7's peripheral access rights. If manager 7 is a high-privilege debug/master entity and manager 6 is a less-trusted master, this creates an unauthorized access path. An attacker controlling manager 6 could access sensitive peripherals (AES, UART, SPI, Ethernet, GPIO) that should be restricted.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The full context of what manager index 6 and 7 represent in the SoC is not fully visible. The parameter NB_MANAGER defaults to 4, so indices 6 and 7 would be out of bounds unless the parameter is overridden. This suggests the connectivity_mapping module may be instantiated with NB_MANAGER >= 8 in the actual SoC, but the parameterization in the test harness is not visible in the provided source. The actual mapping of manager indices to bus initiators in the full SoC is uncertain.",
       "recommended_follow_up": [
-        "Add an assertion or bounds check: assert(priv_lvl_i < NB_PRIV_LVL) else '0",
-        "Consider adding a default safe value if priv_lvl_i exceeds NB_PRIV_LVL-1",
-        "Verify in the riscv package that priv_lvl_t is an enum with exactly 4 values and no possibility of out-of-range"
+        "Remove the hardcoded bypass condition ((j==6) && access_ctrl_i[i][7][priv_lvl_i]) and rely solely on each manager's own access_ctrl_i entry.",
+        "If manager 6 legitimately needs the same permissions as manager 7, configure the access control table entries separately rather than coupling them in hardware logic.",
+        "Add assertions or formal verification to ensure the connectivity_map_o for each manager j depends only on access_ctrl_i[i][j][priv_lvl_i].",
+        "Review all manager index hardcoding to ensure no other bypasses exist."
       ]
     }
   ],
-  "no_finding_reason": "Three permission-related findings were identified, so this field is not applicable.",
-  "global_uncertainty": "The analysis is based on a limited subset of the full SoC design. Key modules such as the AXI node internal logic (axi_node), the processor core (ariane), the debug module (dm_top, dmi_jtag), and the full riscv package are not included. The exact access control enforcement mechanism inside the AXI node (whether it blocks or allows transactions based on connectivity_map) cannot be fully verified. Additionally, ROM2's address mapping and bus accessibility are defined in the test harness but the actual routing through the AXI node is not fully traceable. The hardcoded PLIC/CLINT bypass may be intentional system design rather than a vulnerability. A complete security review would require the full design hierarchy."
+  "no_finding_reason": "",
+  "global_uncertainty": "The provided source scope is a partial view of what appears to be a larger Ariane-based SoC. Key integration files (full test harness, top-level SoC wrapper, additional bus fabric modules) are missing or truncated. The parameters NB_MANAGER, NB_SUBORDINATE, NB_PRIV_LVL may be overridden at instantiation with values that affect the exploitability of F-02. The actual privilege-level derivation logic (how priv_lvl_i is computed from bus transaction attributes) is not visible. The externally-visible attack surface (how ROM2 is addressed over the AXI bus) is partially visible through the memory map in ariane_soc_pkg.sv but the full address decode logic is not included."
 }

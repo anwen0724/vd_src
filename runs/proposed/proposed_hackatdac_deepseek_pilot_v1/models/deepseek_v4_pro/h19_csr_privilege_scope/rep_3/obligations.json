@@ -1,0 +1,207 @@
+{
+  "scope_id": "Module 2 planning",
+  "obligations": [
+    {
+      "obligation_id": "OBL-1",
+      "reason": "The debug interface (debug_req_i) may allow a debugger to access security-critical CSRs (mstatus, satp, pmpcfg0, ...) bypassing normal privilege checks. We must verify that debug-mode CSR access is authorized and does not ignore access-control guards like TVM or PMP locks.",
+      "subject": "Debug agent (via debug_req_i)",
+      "operation": "Read/write security-critical CSRs",
+      "object": "CSRs: mstatus, satp, pmpcfg0, pmpaddr0, etc.",
+      "expected_guard": "Debug authorization (e.g., authentication state) and adherence to hardware access restrictions (TVM, PMP lock) during debug-mode CSR access.",
+      "candidate_path": "debug_req_i → debug_mode_q → csr_we/csr_rdata generation in debug mode, possibly bypassing privilege checks in csr_regfile.",
+      "state_conditions_to_check": [
+        "debug_mode_q = 1",
+        "csr_we assertion for protected CSR addresses without privilege check",
+        "read_access_exception suppression"
+      ],
+      "required_evidence_slots": [
+        "debug_mode_q signal",
+        "csr_we logic in csr_regfile",
+        "debug_req_i connectivity",
+        "write-enable signals for protected CSRs"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm whether debug mode unconditionally grants full CSR access."
+    },
+    {
+      "obligation_id": "OBL-2",
+      "reason": "Debug CSRs (DCSR, DPC, DSCRATCH0, DSCRATCH1) are intended for debug mode only. If user-mode code can read or write them via standard CSR instructions, it could leak or corrupt debug state. The presence of the umode_i input makes this a concrete check.",
+      "subject": "User-mode software (umode_i = 1)",
+      "operation": "CSR read/write to debug CSR addresses (0x7b0-0x7b3)",
+      "object": "DCSR, DPC, DSCRATCH0, DSCRATCH1 registers",
+      "expected_guard": "Privilege check: access must be denied with an illegal-instruction exception when umode_i is asserted. Only machine or debug mode should be allowed.",
+      "candidate_path": "umode_i, csr_addr_i decoding (0x7b0-0x7b3) → combinational logic that enables csr_we or drives csr_rdata without privilege check.",
+      "state_conditions_to_check": [
+        "umode_i = 1",
+        "csr_addr_i matches debug CSR addresses",
+        "csr_we or read-data path active without privilege compare"
+      ],
+      "required_evidence_slots": [
+        "read_access_exception signal generation",
+        "privilege-mode comparison logic",
+        "csr_addr_i decode for 0x7b0-0x7b3"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "DCSR access may already be restricted to debug mode, but the check must confirm that user-mode access raises an exception."
+    },
+    {
+      "obligation_id": "OBL-3",
+      "reason": "The MSTATUS.TVM bit (output as tvm_o) must cause an illegal-instruction exception on any attempt to write SATP from S-mode or U-mode. If this guard is missing or bypassed, a less-privileged domain can remap virtual memory.",
+      "subject": "Supervisor or user-mode CSR instruction",
+      "operation": "Write to SATP (CSR address 0x180)",
+      "object": "SATP register (satp_ppn_o, asid_o outputs)",
+      "expected_guard": "tvm_o signal must block the write and raise an exception when effective privilege ≤ S and TVM = 1.",
+      "candidate_path": "csr_addr_i = 0x180, csr_we, tvm_o signal, effective privilege mode (considering mprv) → read_access_exception generation.",
+      "state_conditions_to_check": [
+        "tvm_o = 1",
+        "effective privilege mode (S or U, or M with mprv pointing to lower mode)",
+        "csr_we for SATP address"
+      ],
+      "required_evidence_slots": [
+        "tvm_o signal",
+        "mprv and privilege mode signals",
+        "csr_we and exception generation logic involving TVM"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "TVM handling may be fully implemented; need to verify all privilege mode and mprv combinations."
+    },
+    {
+      "obligation_id": "OBL-4",
+      "reason": "PMP entries contain a lock bit (L). Once set, further writes to the corresponding PMP configuration and address registers should be ignored until the next reset. Debug mode may inadvertently override this lock, enabling an attacker to reprogram memory protections. The visible PMP CSR definitions (CSR_PMPCFG0, CSR_PMPADDR0) make this check necessary.",
+      "subject": "Debug mode (debug_mode_q) or any CSR instruction while L=1",
+      "operation": "Write to PMP CSRs (pmpcfg0, pmpaddr0) after lock bit is set",
+      "object": "PMP configuration and address registers",
+      "expected_guard": "PMPlock bit (L) must prevent any write, even in debug mode, unless an explicit secure debug unlock mechanism exists. Writes should be silently discarded or cause a fault.",
+      "candidate_path": "debug_mode_q, csr_we to PMP CSRs, lock-bit read from pmpcfg_q, write-enable condition combining lock and debug mode.",
+      "state_conditions_to_check": [
+        "Lock bit (L) asserted in pmpcfg0",
+        "debug_mode_q = 1 or 0",
+        "csr_we for PMP addresses",
+        "write-enable ignoring lock in debug mode"
+      ],
+      "required_evidence_slots": [
+        "pmpcfg_q lock-bit field",
+        "write-enable logic for PMP registers",
+        "debug_mode signal influence on PMP write path"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "PMP lock semantics may not be fully implemented; if debug mode overrides, it could be a serious hole."
+    },
+    {
+      "obligation_id": "OBL-5",
+      "reason": "After exiting debug mode (via dret), the debug CSRs DPC and DSCRATCH0/1 might retain their values and become readable by subsequent non-debug code, leading to information leakage or state contamination. The dret signal and debug_mode_q transition require analysis.",
+      "subject": "Processor after dret execution",
+      "operation": "Read debug CSRs (DPC, DSCRATCH0, DSCRATCH1) via CSR instructions in non-debug mode",
+      "object": "Debug registers DPC, DSCRATCH0, DSCRATCH1",
+      "expected_guard": "Debug CSRs must be readable only when debug_mode_q is asserted, and should return zero or raise an exception otherwise. They should be cleared on debug entry to avoid residue from a previous context.",
+      "candidate_path": "dret triggers debug_mode_q deassertion → subsequent CSR read with address in 0x7b1-0x7b3 → csr_rdata mux that may still present the old register contents.",
+      "state_conditions_to_check": [
+        "debug_mode_q = 0",
+        "csr_addr_i matched to debug CSR addresses",
+        "csr_rdata output value (zero / stale register / exception)"
+      ],
+      "required_evidence_slots": [
+        "debug_mode_q signal",
+        "csr_rdata multiplexer for debug CSRs",
+        "dret control logic",
+        "reset/clearing condition for dpc_q, dscratch0_q, dscratch1_q"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "The implementation may already gate reads on debug_mode_q; need to verify the exact logic and default read-back."
+    },
+    {
+      "obligation_id": "OBL-6",
+      "reason": "User-mode code should not be allowed to read performance counters (cycle, time, instret) unless the corresponding bits are set in mcounteren/scounteren. The csr_regfile includes CSR_SCOUNTEREN and CSR_MCOUNTEREN definitions and handles reads for CSR_CYCLE, etc. Missing permission checks could leak microarchitectural state to unprivileged software.",
+      "subject": "User-mode code (umode_i = 1)",
+      "operation": "Read CSR_CYCLE, CSR_TIME, CSR_INSTRET, or other performance counter CSRs",
+      "object": "Performance counter registers (cycle_q, instret_q, ...)",
+      "expected_guard": "Access must be gated by the appropriate bit in mcounteren/scounteren; if not granted, either return zero or raise an illegal-instruction exception.",
+      "candidate_path": "umode_i, csr_addr_i matching 0xC00-0xC02 (or extended perf counters), counter enable bits from mcounteren/scounteren registers, csr_rdata multiplexing.",
+      "state_conditions_to_check": [
+        "umode_i = 1",
+        "corresponding counter enable bit = 0",
+        "csr_rdata output (zero or stale counter value)"
+      ],
+      "required_evidence_slots": [
+        "mcounteren_q register (CSR 0x306)",
+        "scounteren_q register (CSR 0x106)",
+        "read data multiplexer for performance counters",
+        "exception generation for denied counter access"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "The core may always allow user-mode counter reads; must confirm whether privilege checks are implemented for all relevant counters."
+    },
+    {
+      "obligation_id": "OBL-7",
+      "reason": "Immediately after reset, the debug interface might accept debug_req_i and enter debug mode without any prior authentication. If the debug authorization state (if present) resets to an unlocked state, an external debugger could take control before any secure boot code runs, exposing all processor state.",
+      "subject": "External debugger asserting debug_req_i at reset release",
+      "operation": "Enter debug mode (set debug_mode_q)",
+      "object": "debug_mode_q (debug mode state)",
+      "expected_guard": "Debug mode entry must require a completed authentication sequence, and the authorization state must reset to a locked (unauthorized) value. debug_mode_q should not be set solely by debug_req_i high after rst_ni deassertion.",
+      "candidate_path": "rst_ni deassertion, debug_req_i sampled, logic that sets debug_mode_q (combinational or sequential), possible authorization state machine.",
+      "state_conditions_to_check": [
+        "Reset value of debug authorization state (if any)",
+        "debug_mode_q initial value after reset",
+        "Condition for debug_mode_q set: (debug_req_i AND authorization_state)",
+        "If no authorization state exists, debug entry is immediate."
+      ],
+      "required_evidence_slots": [
+        "debug_mode_q set condition",
+        "debug authorization signal or state machine",
+        "debug_req_i sampling logic",
+        "reset sequence description"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Ariane may not implement authentication; if debug is always open, this represents a fundamental design choice that may be acceptable depending on threat model."
+    }
+  ]
+}

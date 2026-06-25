@@ -1,0 +1,250 @@
+{
+  "scope_id": "pulp_soc_rtl",
+  "obligations": [
+    {
+      "obligation_id": "OBL-DEBUG-APB-SOCCTRL-001",
+      "reason": "The s_apb_debug_bus provides an alternate APB path that may reach security-sensitive registers in apb_soc_ctrl (fc_bootaddr_o, cluster_pow_o, cluster_rstn_o, cluster_boot_addr_o, soc_jtag_reg_o). An unres tricted debug path could bypass normal access control and alter boot address, cluster power/reset, or JTAG registers, leading to privilege escalation or system compromise. Verify that write operations from the debug APB master to these registers are guarded by an authentication or authorization check.",
+      "subject": "debug APB master via s_apb_debug_bus",
+      "operation": "write",
+      "object": "fc_bootaddr_o, cluster_pow_o, cluster_rstn_o, cluster_boot_addr_o, soc_jtag_reg_o registers in apb_soc_ctrl",
+      "expected_guard": "authentication state or lock bit that prevents unauthenticated debug writes",
+      "candidate_path": "s_apb_debug_bus -> periph_bus_wrap? -> apb_node -> s_soc_ctrl_bus -> apb_soc_ctrl",
+      "state_conditions_to_check": [
+        "debug authentication status",
+        "lock bit state",
+        "APB PSEL and PWRITE signals",
+        "any security firewalls or access control gates"
+      ],
+      "required_evidence_slots": [
+        "subj: debug APB master identity signal",
+        "op: PWRITE/PADDR/PWDATA transaction trace",
+        "obj: register write enable logic",
+        "guard: authentication check or lock signal",
+        "path: connectivity from s_apb_debug_bus to target register"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access bypass",
+        "CSR/MMIO Access Control",
+        "Lock/Sticky Bit/Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm exact routing of debug APB to soc_ctrl and presence of a guard"
+    },
+    {
+      "obligation_id": "OBL-DEBUG-APB-FLLIF-002",
+      "reason": "The apb_fll_if module contains FLL configuration registers (fll1_add, fll1_data, etc.) that control clock generators. Unauthorized writes through the debug APB path could destabilize clocks, induce faults, or force insecure clock configurations. Check whether debug-initiated writes to these registers are blocked by a lock or authentication mechanism.",
+      "subject": "debug APB master via s_apb_debug_bus",
+      "operation": "write",
+      "object": "FLL configuration registers in apb_fll_if (fll1_add/data, fll2_*, fll3_*)",
+      "expected_guard": "lock bit per FLL or system-level debug authentication",
+      "candidate_path": "s_apb_debug_bus -> ... -> s_fll_bus -> apb_fll_if",
+      "state_conditions_to_check": [
+        "FLL lock bit if any",
+        "PSEL for FLL address range on debug path",
+        "debug authentication status"
+      ],
+      "required_evidence_slots": [
+        "subj: debug bus requestor identity",
+        "op: write access via PWDATA/PWRITE",
+        "obj: FLL register update logic",
+        "guard: any lock or auth check in write path"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/apb/apb_fll_if/apb_fll_if.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access bypass",
+        "Crypto/Secret State Exposure (indirect via clock glitching)"
+      ],
+      "priority": "high",
+      "uncertainty": "Existence of FLL lock bits unknown; path may be routed differently"
+    },
+    {
+      "obligation_id": "OBL-DEBUG-APB-GPIO-003",
+      "reason": "GPIO direction and output registers in apb_gpio can drive external pins and potentially bypass system inputs. Write access from the debug APB bus could spoof external devices or reconfigure I/O protection. Check whether the debug path can write gpio_dir or gpio_out without authorization.",
+      "subject": "debug APB master via s_apb_debug_bus",
+      "operation": "write",
+      "object": "gpio_dir, gpio_out registers in apb_gpio",
+      "expected_guard": "debug authentication or a GPIO lock register",
+      "candidate_path": "s_apb_debug_bus -> ... -> s_gpio_bus -> apb_gpio",
+      "state_conditions_to_check": [
+        "PSEL and PWRITE for GPIO address on debug APB",
+        "any write-lock control for GPIO"
+      ],
+      "required_evidence_slots": [
+        "subj: debug requester",
+        "op: GPIO register write strobe",
+        "obj: gpio_dir/gpio_out update",
+        "guard: lock signal or auth gate"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/apb/apb_gpio/apb_gpio.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access bypass",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "GPIO may be considered non-critical, but still could impact security if misused"
+    },
+    {
+      "obligation_id": "OBL-JTAG-LINT-004",
+      "reason": "The i_lint_jtag instance connects a LINT JTAG wrapper to s_lint_jtag_bus. JTAG interfaces often provide low-level access that can bypass security checks. This obligation verifies whether the JTAG path can access any APB peripherals or SoC control signals without authentication, potentially overriding lock protections.",
+      "subject": "JTAG debugger via i_lint_jtag",
+      "operation": "read/write",
+      "object": "APB peripherals or SoC registers accessible via JTAG-TAP to internal bus",
+      "expected_guard": "JTAG authentication (e.g., challenge-response) before granting bus access",
+      "candidate_path": "i_lint_jtag -> s_lint_jtag_bus -> soc_interconnect -> apb_node -> peripherals",
+      "state_conditions_to_check": [
+        "JTAG authentication state",
+        "LOCK signal of the JTAG wrapper",
+        "any APB/SoC bridge that respects debug auth"
+      ],
+      "required_evidence_slots": [
+        "subj: JTAG TAP controller",
+        "op: bus transaction from JTAG",
+        "obj: target register or memory",
+        "guard: authentication check in lint_jtag_wrap"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+        "ips/pulp_soc/rtl/components/pulp_interfaces.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access bypass",
+        "Fabric/Address Map/DMA/PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "LINT JTAG wrapper external; we need to inspect connectivity to internal buses"
+    },
+    {
+      "obligation_id": "OBL-LOCK-STICKY-005",
+      "reason": "Modules like apb_soc_ctrl may contain lock bits to protect critical registers from unintended writes. If a lock bit can be cleared after being set (e.g., by reset or another write path), it defeats the protection. Check all write paths to lock bits in apb_soc_ctrl and ensure that locks, once set, cannot be reverted by an attacker with access to the target bus.",
+      "subject": "any APB master with write access",
+      "operation": "write to lock bit",
+      "object": "any lock register within apb_soc_ctrl (or other peripherals)",
+      "expected_guard": "lock must be sticky or only clearable by a privileged reset/operation",
+      "candidate_path": "various APB write paths",
+      "state_conditions_to_check": [
+        "lock bit set/clear conditions",
+        "reset state of lock bit",
+        "alternate write paths (debug vs normal)"
+      ],
+      "required_evidence_slots": [
+        "subj: requester capable of writing lock bit",
+        "op: write to lock address",
+        "obj: lock bit flip logic",
+        "guard: check if lock is one-way or protected"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+        "ips/pulp_soc/rtl/components/apb_clkdiv.sv",
+        "ips/apb/apb_adv_timer/apb_adv_timer.sv"
+      ],
+      "knowledge_used": [
+        "Lock/Sticky Bit/Write Protection",
+        "Reset/Lifecycle/State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "We need to locate the specific lock bits in the RTL"
+    },
+    {
+      "obligation_id": "OBL-RESET-LIFECYCLE-006",
+      "reason": "Security-critical state such as boot addresses (fc_bootaddr_o, cluster_boot_addr_o) and power/reset controls may have unsafe reset defaults (e.g., pointing to untrusted memory or enabling unauthenticated debug). Verify that reset defaults for these registers are safe and that they cannot be reverted to insecure values after secure boot.",
+      "subject": "reset controller or power-on default",
+      "operation": "reset (value set to default)",
+      "object": "fc_bootaddr_o, cluster_boot_addr_o, soc_jtag_reg_o, cluster_pow_o",
+      "expected_guard": "reset value must be secure; any change from secure value must be privileged",
+      "candidate_path": "reset sequence",
+      "state_conditions_to_check": [
+        "register reset values",
+        "any write-enable after reset",
+        "secure boot write-lock mechanism"
+      ],
+      "required_evidence_slots": [
+        "subj: reset signal",
+        "op: register initialization",
+        "obj: all sensitive control registers",
+        "guard: boot-time lockdown"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      ],
+      "knowledge_used": [
+        "Reset/Lifecycle/State Residue",
+        "Lock/Sticky Bit/Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to ascertain reset values from RTL"
+    },
+    {
+      "obligation_id": "OBL-ADDRESS-MAP-007",
+      "reason": "The APB node (apb_node/apb_node_wrap) performs address decoding to select among APB slaves. Incomplete or overlapping decoding could allow a master to access a different slave than intended, potentially bypassing per-slave access controls. Check whether the address decoder ensures that each master can only reach the slaves for which it is authorized.",
+      "subject": "any APB master on any APB bus",
+      "operation": "address decode and psel generation",
+      "object": "APB slave selection in apb_node",
+      "expected_guard": "address range comparison with no overlap; optionally, a per-master slave mask",
+      "candidate_path": "paddr_i -> address decode logic -> psel_o",
+      "state_conditions_to_check": [
+        "address ranges for each slave",
+        "any incomplete decoding leading to aliasing"
+      ],
+      "required_evidence_slots": [
+        "subj: APB master identifier",
+        "op: address compare",
+        "obj: psel_o bits",
+        "guard: address decode boundaries"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/apb/apb_node/apb_node.sv",
+        "ips/apb/apb_node/apb_node_wrap.sv",
+        "rtl/includes/periph_bus_defines.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "We don't have the actual address map; need to extract from defines"
+    },
+    {
+      "obligation_id": "OBL-UDMA-APB-ACCESS-008",
+      "reason": "The udma_subsystem module contains DMA engines that can autonomously generate APB transactions. If a DMA channel can be programmed by untrusted software to write to security-critical APB peripherals, it could bypass CPU privilege checks. Verify that DMA-initiated accesses to sensitive peripherals (like soc_ctrl, fll_if, gpio) are subject to the same access control as CPU accesses, or that the DMA cannot be programmed to target those addresses.",
+      "subject": "DMA engine in udma_subsystem",
+      "operation": "write",
+      "object": "security-sensitive APB registers (soc_ctrl, fll_if, etc.)",
+      "expected_guard": "address filtering or MPU on DMA to restrict target ranges",
+      "candidate_path": "udma_subsystem -> s_udma_bus -> apb_node -> target peripheral",
+      "state_conditions_to_check": [
+        "DMA channel descriptor source/target address",
+        "any address-range check inside DMA",
+        "ownership of DMA channel"
+      ],
+      "required_evidence_slots": [
+        "subj: DMA requester",
+        "op: APB write transaction from DMA",
+        "obj: target register",
+        "guard: address permission check in DMA or interconnect"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "DMA implementation details not visible; need to infer from udma_subsystem"
+    }
+  ]
+}

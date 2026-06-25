@@ -1,0 +1,301 @@
+{
+  "scope_id": "rtl_permission_scope_zero_riscy_fc_apb_interrupt",
+  "obligations": [
+    {
+      "obligation_id": "PERM-DBG-001",
+      "reason": "A visible zeroriscy_debug_unit and core debug/control modules indicate debug paths may reach protected CPU state; the check must determine whether authorization guards cover all debug operations rather than assuming debug logic is safe or unsafe.",
+      "subject": "debug interface / debug unit",
+      "operation": "read/write/override/trigger debug control of core state",
+      "object": "core architectural state, debug control state, register file, PC/control-flow state",
+      "expected_guard": "debug entry and debug operations should be mediated by explicit debug authorization/authentication or a trusted debug-mode state before protected core state is exposed or modified",
+      "candidate_path": "zeroriscy_core -> zeroriscy_debug_unit -> pipeline/control/register-file access signals",
+      "state_conditions_to_check": [
+        "reset debug state",
+        "entry into debug mode",
+        "resume/exit from debug mode",
+        "single-step or halt states",
+        "debug request while core is running"
+      ],
+      "required_evidence_slots": [
+        "debug subject/request inputs",
+        "operation enable/decode",
+        "target core state or control object",
+        "authorization/debug-mode guard at use site",
+        "reachable path from debug unit to object",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/zero-riscy/zeroriscy_debug_unit.sv",
+        "ips/zero-riscy/zeroriscy_core.sv",
+        "ips/zero-riscy/zeroriscy_controller.sv",
+        "ips/zero-riscy/zeroriscy_id_stage.sv",
+        "ips/zero-riscy/zeroriscy_register_file.sv",
+        "ips/zero-riscy/zeroriscy_register_file_ff.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "evidence closure: subject, operation, object, guard, path/reachability"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer is truncated and does not list all debug ports; inspect RTL port connections and signal names to identify exact debug request and authorization signals."
+    },
+    {
+      "obligation_id": "PERM-CSR-001",
+      "reason": "The scope contains a dedicated CSR register module with multiple decode cases; visible RTL should be checked for whether software CSR operations are permission-checked at decode and update sites.",
+      "subject": "CPU software executing CSR instructions",
+      "operation": "CSR read/write/configure",
+      "object": "control/status registers and security-relevant CPU state",
+      "expected_guard": "CSR reads and writes that affect privilege/security state, exception/interrupt state, or debug state should be gated by legal CSR address, access type, current privilege/debug mode, and read-only/write permissions",
+      "candidate_path": "zeroriscy_decoder/id_stage/cs_registers CSR decode and writeback path",
+      "state_conditions_to_check": [
+        "normal execution vs exception/interrupt/debug mode",
+        "CSR write enable asserted",
+        "read of protected CSR",
+        "reset values of permission-related CSRs"
+      ],
+      "required_evidence_slots": [
+        "CSR requester/instruction source",
+        "CSR address decode",
+        "read/write enable path",
+        "target CSR object",
+        "privilege/debug-mode/access-permission guard",
+        "illegal access handling",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/zero-riscy/zeroriscy_cs_registers.sv",
+        "ips/zero-riscy/zeroriscy_decoder.sv",
+        "ips/zero-riscy/zeroriscy_id_stage.sv",
+        "ips/zero-riscy/zeroriscy_controller.sv",
+        "ips/zero-riscy/include/zeroriscy_defines.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Zero-riscy may implement a limited privilege model; determine expected guard from implemented CSR access attributes and mode signals, not from names alone."
+    },
+    {
+      "obligation_id": "PERM-BUS-001",
+      "reason": "fc_demux instances route core instruction and data requests based on decode cases; permission analysis should ensure address routing preserves intended memory/peripheral access policy and does not create unguarded aliases.",
+      "subject": "fabric controller core instruction/data bus master",
+      "operation": "read/write/fetch route",
+      "object": "SoC address regions, TCDM/peripheral access paths, instruction/data bus targets",
+      "expected_guard": "address decode and security/privilege attributes should consistently restrict instruction and data accesses to protected regions or peripherals, with no alternate demux output bypassing the intended range or mode check",
+      "candidate_path": "fc_subsystem core data/instruction buses -> fc_demux -> external/peripheral/TCDM buses",
+      "state_conditions_to_check": [
+        "instruction fetch vs data load/store",
+        "write enable asserted",
+        "default decode case",
+        "invalid/out-of-range address",
+        "concurrent request/grant handshake"
+      ],
+      "required_evidence_slots": [
+        "bus requester",
+        "address and request signals",
+        "demux decode conditions",
+        "selected target object/region",
+        "expected range or security guard",
+        "read/write/fetch distinction",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/fc/fc_demux.sv",
+        "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+        "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+        "rtl/includes/soc_bus_defines.sv",
+        "rtl/includes/pulp_soc_defines.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Protected regions are inferred from address-map and security-mode signals; inspect include definitions for concrete ranges and security attributes."
+    },
+    {
+      "obligation_id": "PERM-LSU-001",
+      "reason": "A visible load/store unit generates data bus transactions; check whether it or downstream fabric enforces memory-region permissions for protected MMIO or memory regions.",
+      "subject": "CPU load/store unit",
+      "operation": "load/store read/write",
+      "object": "data memory and memory-mapped protected regions",
+      "expected_guard": "load and store requests to protected address regions should be mediated by address-range/PMP-like checks, privilege/security mode, and operation type before issuing bus requests",
+      "candidate_path": "zeroriscy_load_store_unit -> data bus -> fc_subsystem/fc_demux",
+      "state_conditions_to_check": [
+        "misaligned or split transaction",
+        "store vs load",
+        "outstanding transfer during mode change",
+        "reset/flush of pending request"
+      ],
+      "required_evidence_slots": [
+        "load/store requester",
+        "computed address",
+        "write enable/byte enables",
+        "bus request handshake",
+        "range/security guard",
+        "exception/error response on denied access",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/zero-riscy/zeroriscy_load_store_unit.sv",
+        "ips/zero-riscy/zeroriscy_core.sv",
+        "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+        "ips/pulp_soc/rtl/fc/fc_demux.sv",
+        "rtl/includes/soc_bus_defines.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "The presence of PMP is not established in the fact layer; if absent, document where protection is expected from SoC fabric rather than CPU."
+    },
+    {
+      "obligation_id": "PERM-APBINT-001",
+      "reason": "The interrupt controller exposes security-relevant outputs including core_irq_sec_o, fetch_en_o, and clock enable; visible RTL should show whether APB/configuration writes and event inputs are mediated by secure-mode or register protections.",
+      "subject": "APB/MMIO software or event source",
+      "operation": "MMIO write/configure/trigger",
+      "object": "interrupt controller configuration, secure interrupt indication, fetch enable, core clock enable",
+      "expected_guard": "writes or events that alter secure interrupt attribution, fetch enable, or core clocking should be gated by authorized APB access, secure mode/lifecycle state, or lock/protection bits",
+      "candidate_path": "apb_interrupt_cntrl APB/control registers -> core_irq_sec_o/core_secure_mode_i/fetch_en_o/core_clock_en_o",
+      "state_conditions_to_check": [
+        "reset defaults for fetch/clock/secure interrupt state",
+        "core_secure_mode_i asserted/deasserted",
+        "interrupt acknowledge",
+        "event FIFO valid/full states",
+        "APB write to control/status registers"
+      ],
+      "required_evidence_slots": [
+        "APB/software requester",
+        "address decode",
+        "write enable and data",
+        "target register/output",
+        "secure-mode or lock guard",
+        "reset/default state",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+        "ips/pulp_soc/rtl/fc/fc_subsystem.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Reset / Lifecycle / State Residue",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer ports include security-relevant signals but not all APB port details due truncation; inspect full module to identify register map and write paths."
+    },
+    {
+      "obligation_id": "PERM-TEST-001",
+      "reason": "Visible interfaces include test_mode_i, BIST, bypass, cache/private and clock-gating controls; these can be legitimate but require guards to prevent normal-mode access or state exposure through test paths.",
+      "subject": "test/BIST/bypass interface",
+      "operation": "test enable/bypass/flush/BIST configure or observe",
+      "object": "memory/test-visible state, cache/TCDM control state, core clock/fetch control",
+      "expected_guard": "test, BIST, bypass, and clock-gate controls should only affect protected memories or core operation under authorized test/lifecycle mode and should not expose or modify memory contents in normal operation",
+      "candidate_path": "test_mode_i/BIST/bypass/clkgate interfaces -> memories/cache/TCDM or core controls",
+      "state_conditions_to_check": [
+        "test_mode_i low vs high",
+        "BIST enable/result phases",
+        "bypass request/ack",
+        "flush operations",
+        "clock-gate selection changes"
+      ],
+      "required_evidence_slots": [
+        "test/bypass subject signal",
+        "operation control signal",
+        "target memory/control object",
+        "authorized test/lifecycle guard",
+        "normal-mode blocking behavior",
+        "observable output path for results",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv",
+        "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+        "ips/pulp_soc/rtl/fc/fc_subsystem.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Interfaces file defines signals but may not implement policy; inspect connected modules in this scope for actual mediation or note if policy is external."
+    },
+    {
+      "obligation_id": "PERM-LIFE-001",
+      "reason": "Controller and IF-stage FSMs plus debug and interrupt signals determine whether protected execution state is exposed or controlled across lifecycle transitions; check reset defaults and transitions for unsafe residual permissions.",
+      "subject": "core control FSM, interrupt controller, debug unit",
+      "operation": "reset/mode transition/trigger fetch or debug action",
+      "object": "PC/fetch state, debug state, interrupt/fetch enable state",
+      "expected_guard": "reset, halt, exception, interrupt, and debug mode transitions should clear or correctly gate stale protected state and should not leave debug/fetch controls enabled without authorization",
+      "candidate_path": "zeroriscy_controller/if_stage/debug_unit reset and mode-transition control -> PC/fetch/debug state",
+      "state_conditions_to_check": [
+        "reset deassertion",
+        "halt/debug entry and exit",
+        "interrupt acknowledge",
+        "fetch enable changes",
+        "exception/return transitions"
+      ],
+      "required_evidence_slots": [
+        "state register/FSM",
+        "reset assignment",
+        "transition condition",
+        "protected output or state affected",
+        "guard condition during transition",
+        "observable impact/path",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/zero-riscy/zeroriscy_controller.sv",
+        "ips/zero-riscy/zeroriscy_if_stage.sv",
+        "ips/zero-riscy/zeroriscy_debug_unit.sv",
+        "ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need RTL inspection to identify exact FSM states and whether any outputs are externally observable or security-sensitive."
+    },
+    {
+      "obligation_id": "PERM-HWPE-001",
+      "reason": "The scope includes an fc_hwpe module and HW accelerator-style interfaces; permission obligations should check whether accelerator-originated transactions are routed and constrained like other bus masters.",
+      "subject": "HWPE / hardware accelerator master",
+      "operation": "accelerator-triggered read/write/configure",
+      "object": "memory regions reachable through HWPE/fabric interfaces",
+      "expected_guard": "hardware accelerator requests should be constrained by address-range/security policy and should not gain broader memory access than the CPU or configured permissions allow",
+      "candidate_path": "fc_hwpe and hw accelerator interfaces -> core/fabric memory access",
+      "state_conditions_to_check": [
+        "accelerator enable/start",
+        "configuration update while transfer active",
+        "read vs write",
+        "default route",
+        "reset of outstanding transfer"
+      ],
+      "required_evidence_slots": [
+        "accelerator requester",
+        "configuration/control source",
+        "address/data/write signals",
+        "fabric routing target",
+        "range/security guard",
+        "active-transfer vs config-update behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/fc/fc_hwpe.sv",
+        "ips/pulp_soc/rtl/fc/fc_subsystem.sv",
+        "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+        "rtl/includes/soc_bus_defines.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Fact layer does not expose all fc_hwpe ports; inspect module to determine whether it is a bus master, wrapper, or control-only block."
+    }
+  ]
+}

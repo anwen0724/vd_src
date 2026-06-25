@@ -1,0 +1,1045 @@
+{
+  "scope_id": "module2_permission_obligations_current_scope",
+  "obligations": [
+    {
+      "obligation_id": "PERM-AXI-CONN-PRIV-001",
+      "reason": "The wrapper exposes priv_lvl_i and access_ctrl_i-derived connectivity_map_o. The visible RTL includes a special mapping expression that can allow target j==6 based on access_ctrl_i[i][7][priv_lvl_i], so analysis must verify this is intentional and cannot grant PLIC access via CLINT permission or other aliasing.",
+      "subject": "AXI managers/requesters connected through axi_node_intf_wrap",
+      "operation": "route/read/write AXI transactions to subordinate targets",
+      "object": "AXI subordinate access policy for DRAM/GPIO/Ethernet/SPI/AES/UART/PLIC/CLINT/PKT/ROM2/ROM/Debug",
+      "expected_guard": "Access from each manager to each subordinate must be mediated by the configured access_ctrl_i entry for the current priv_lvl_i, with no unintended aliases or privilege-index bypasses.",
+      "candidate_path": "connectivity_mapping.access_ctrl_i -> connectivity_map_o -> axi_node_intf_wrap routing/connectivity rules",
+      "state_conditions_to_check": [
+        "all privilege levels indexed by priv_lvl_i",
+        "j==6 and j==7 subordinate indices",
+        "reset/default values of access_ctrl_reg/access_ctrl_i if visible",
+        "whether access_ctrl_i width and priv_lvl_i encoding match"
+      ],
+      "required_evidence_slots": [
+        "subject manager index i and source of priv_lvl_i",
+        "operation read/write routing decision",
+        "object subordinate index j and SoC enum/base address",
+        "expected guard access_ctrl_i[i][j][priv_lvl_i] or documented alias",
+        "observed connectivity_map_o expression",
+        "path from connectivity_map_o into node routing",
+        "impact of unintended target access",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv:axi_node_intf_wrap",
+        "src/axi_node/src/axi_node_intf_wrap.sv:connectivity_mapping",
+        "tb/ariane_testharness.sv",
+        "tb/ariane_soc_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer shows connectivity mapping expression but not the internal axi_node use of connectivity_map_o or full access_ctrl_reg programming semantics."
+    },
+    {
+      "obligation_id": "PERM-AXI-RANGE-ROUTE-002",
+      "reason": "The wrapper forwards AXI address, prot, user, valid, and ready signals and assigns start_addr_i/end_addr_i into internal rule arrays. Analysis should verify that address ranges actually mediate routing and that s_valid_rule='1 does not disable or over-broaden range checks.",
+      "subject": "AXI slave-side requesters entering the interconnect",
+      "operation": "route AXI read/write requests by address",
+      "object": "MMIO/address-map protected regions including AES, ROM2, ROM, Debug, CLINT, PLIC and DRAM",
+      "expected_guard": "Protected subordinate address ranges must be checked against start_addr_i/end_addr_i and connectivity/access-control policy before aw_valid/ar_valid can reach a manager/subordinate endpoint.",
+      "candidate_path": "slave[j].aw/ar channels -> s_slave_* -> axi_node_intf_wrap -> master[i] channels",
+      "state_conditions_to_check": [
+        "boundary addresses at each Base from ariane_soc_pkg",
+        "overlap/gap among DebugBase, ROMBase, ROM2Base, PKTBase, CLINTBase, PLICBase, UARTBase, AESBase, SPIBase, EthernetBase, GPIOBase, DRAMBase",
+        "effect of s_valid_rule assigned all ones",
+        "read and write channels separately"
+      ],
+      "required_evidence_slots": [
+        "subject on slave AXI port",
+        "operation aw/ar transaction",
+        "object decoded target range",
+        "expected guard start/end address and connectivity_map/access_ctrl",
+        "observed aw/ar valid path",
+        "observed range comparison or rule use",
+        "response on invalid/out-of-range access",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv:axi_node_intf_wrap",
+        "tb/ariane_soc_pkg.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Internal routing module logic below the wrapper is not fully represented in facts."
+    },
+    {
+      "obligation_id": "PERM-DEBUG-AUTH-003",
+      "reason": "The harness includes SimJTAG, dmi_jtag, SimDTM, debug_req/debug_resp muxing, jtag_key, jtag_enable, and a Debug address region. Analysis should check whether debug requests are gated by authentication/enable state before reaching protected assets, not merely selected by jtag_enable.",
+      "subject": "JTAG/SimDTM/DMI debug requester",
+      "operation": "read/write/trigger debug DMI transactions and route debug accesses",
+      "object": "debug module access path and any reachable protected assets over AXI, including ROM2/AES/DRAM/MMIO",
+      "expected_guard": "Debug/DMI requests must be accepted only when debug is enabled and authorized, and must not expose or modify protected memory/registers unless debug authorization and lifecycle policy allow it.",
+      "candidate_path": "ariane_testharness debug selection: JTAG/DTM signals -> debug_req/debug_resp -> debug module/AXI debug master",
+      "state_conditions_to_check": [
+        "jtag_enable[0] true vs false",
+        "jtag_key value and where/if checked",
+        "reset state of debug enable/auth state",
+        "dmi_req_valid tied off path vs JTAG active path",
+        "debug_req_ready/debug_resp_valid handshake"
+      ],
+      "required_evidence_slots": [
+        "subject JTAG or DMI requester",
+        "operation debug request op/address/data",
+        "object reachable debug registers or AXI-accessible memory/MMIO",
+        "expected guard jtag_enable plus authentication/key/lifecycle/debug authorization",
+        "observed mux and handshake behavior",
+        "path from debug_req to debug module/core/AXI master",
+        "impact of unauthorized debug access",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "tb/ariane_soc_pkg.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "high",
+      "uncertainty": "The instantiated debug module internals and definition/use of jtag_enable and jtag_key are not fully visible in the provided facts."
+    },
+    {
+      "obligation_id": "PERM-DEBUG-RESET-004",
+      "reason": "Signals ndmreset, ndmreset_n, and debug_req_core are visible alongside debug request infrastructure. Analysis should ensure external debug/test subjects cannot reset or halt the core without an authorization guard.",
+      "subject": "JTAG/DMI debug interface",
+      "operation": "trigger reset/halt/debug request override",
+      "object": "core/system reset, halt/debug request state, and lifecycle-sensitive state affected by ndmreset/debug_req_core",
+      "expected_guard": "Debug-triggered reset/halt/control signals must require authorized debug state and must not bypass normal reset/lifecycle permission boundaries.",
+      "candidate_path": "debug reset/control: DMI/JTAG -> ndmreset/debug_req_core -> core/system reset and halt controls",
+      "state_conditions_to_check": [
+        "rst_ni and ndmreset interaction",
+        "reset default of debug control signals",
+        "jtag_enable/auth state during reset",
+        "whether test_en changes reset behavior"
+      ],
+      "required_evidence_slots": [
+        "subject debug/JTAG requester",
+        "operation reset/halt/debug request",
+        "object core/system reset or debug_req_core",
+        "expected guard debug authorization/lifecycle state",
+        "observed signal assignment or instance connection",
+        "reachability from JTAG/DMI",
+        "impact on protected state or privilege flow",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Assignments/connections for ndmreset and debug_req_core are only partially visible in facts."
+    },
+    {
+      "obligation_id": "PERM-ROM2-WRITE-005",
+      "reason": "The rom2 module has a we_i-controlled write path into secure_reg and a read path to rdata_o. Since the object is named as secure_reg and mapped as ROM2, analysis must check whether write access is properly guarded or whether a memory-mapped requester can alter protected ROM contents.",
+      "subject": "MMIO/AXI requester reaching rom2",
+      "operation": "write and read ROM2 secure_reg",
+      "object": "rom2 secure_reg/mem contents exposed via rdata_o",
+      "expected_guard": "ROM2 contents/secure_reg should be immutable or write-protected unless writes are explicitly allowed by a privileged loader/update state; read access should be mediated by address-map/access policy when contents are protected.",
+      "candidate_path": "rom2 req_i/we_i/addr_i/wdata_i -> secure_reg array -> rdata_o",
+      "state_conditions_to_check": [
+        "rst_ni loads secure_reg <= mem",
+        "req_i && we_i write condition",
+        "addr_i index bounds for writes",
+        "read after write persistence",
+        "ROM2Base address decode and access_ctrl entry"
+      ],
+      "required_evidence_slots": [
+        "subject driving req_i/we_i/addr_i",
+        "operation write to secure_reg and read from rdata_o",
+        "object secure_reg[index]",
+        "expected guard privilege/access_ctrl/lock/update-mode or absence of write capability for ROM",
+        "observed always_ff write behavior",
+        "path from SoC bus signals rom_req/rom_we or corresponding ROM2 wiring",
+        "impact of modifying or reading protected contents",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_testharness.sv",
+        "tb/ariane_soc_pkg.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer lists rom2 module and ROM/ROM2 address map but does not fully show the instance/wiring of rom2 in the harness."
+    },
+    {
+      "obligation_id": "PERM-ROM2-BOUNDS-006",
+      "reason": "The read output checks raddr_q < RomSize, but the write assignment shown indexes secure_reg directly with addr_i-derived bits. Analysis should verify whether writes are bounded or otherwise cannot target invalid/unintended storage.",
+      "subject": "Requester driving rom2 address/write inputs",
+      "operation": "address-indexed read/write to secure_reg",
+      "object": "rom2 secure_reg array indexed by addr_i",
+      "expected_guard": "Both reads and writes to ROM2 must enforce the same in-range bounds; out-of-range or malformed addresses must not corrupt protected state.",
+      "candidate_path": "rom2 addr_i -> raddr_q/read index and secure_reg write index",
+      "state_conditions_to_check": [
+        "req_i && we_i",
+        "addr_i values where extracted index >= RomSize",
+        "reset state after invalid writes",
+        "readback behavior after invalid/aliased writes"
+      ],
+      "required_evidence_slots": [
+        "subject providing addr_i/we_i",
+        "operation write/read index calculation",
+        "object secure_reg[index]",
+        "expected guard index < RomSize for any state update",
+        "observed read bounds and write behavior",
+        "reachability of out-of-range addr_i values",
+        "impact of invalid write or aliasing",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "SystemVerilog behavior for out-of-range array assignment depends on simulation/synthesis context; need source and tool semantics confirmation."
+    },
+    {
+      "obligation_id": "PERM-ACCESSCTRL-PROTECT-007",
+      "reason": "The harness derives access_ctrl[i][j] from access_ctrl_reg bit slices and the wrapper uses access_ctrl_i with priv_lvl_i to build connectivity. Analysis should check that the policy register cannot be modified by unprivileged or unauthorized paths.",
+      "subject": "software-visible register interface, CPU, or debug master",
+      "operation": "configure/change access policy",
+      "object": "access_ctrl_reg/access_ctrl policy controlling interconnect permissions",
+      "expected_guard": "Software-visible access-control registers must themselves be writable only by authorized privilege/debug subjects, and updates must not transiently open protected routes for active transfers.",
+      "candidate_path": "access_ctrl_reg -> access_ctrl[i][j] -> access_ctrl_i/connectivity_map_o",
+      "state_conditions_to_check": [
+        "reset/default value of access_ctrl_reg",
+        "write enable and address decode for access_ctrl_reg",
+        "priv_lvl at write time",
+        "active transfer while access_ctrl changes",
+        "whether debug path can write access_ctrl_reg"
+      ],
+      "required_evidence_slots": [
+        "subject writing access_ctrl_reg",
+        "operation policy register write",
+        "object access_ctrl_reg bits for manager/target/privilege",
+        "expected guard machine privilege/debug authorization/lock",
+        "observed write decode and update logic",
+        "path from register to connectivity_map_o",
+        "impact of policy modification",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "src/axi_node/src/axi_node_intf_wrap.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "The facts show slicing from access_ctrl_reg but not its declaration/reset/write logic."
+    },
+    {
+      "obligation_id": "PERM-PRIVLVL-BIND-008",
+      "reason": "The access-control lookup indexes access_ctrl_i by priv_lvl_i, while the harness assigns priv_lvl = priv_lvl_processor. Analysis should verify that this privilege value is bound to each requesting master/transaction, especially if debug/DMA/peripherals can initiate requests.",
+      "subject": "CPU/debug/DMA/AXI masters using interconnect",
+      "operation": "authorize read/write route using privilege level",
+      "object": "privilege-indexed access-control decision for AXI routing",
+      "expected_guard": "The privilege level used for access-control lookup must correspond to the requester that initiated each transaction and must not be globally stale, spoofable, or shared incorrectly across multiple masters.",
+      "candidate_path": "priv_lvl_processor -> priv_lvl -> connectivity_mapping priv_lvl_i index",
+      "state_conditions_to_check": [
+        "privilege transitions during in-flight AXI transactions",
+        "multiple masters active simultaneously",
+        "debug/DMA request privilege representation",
+        "reset/default priv_lvl"
+      ],
+      "required_evidence_slots": [
+        "subject/requesting master identity",
+        "operation AXI route authorization",
+        "object target access_ctrl entry",
+        "expected guard per-requester privilege or security attribute",
+        "observed source of priv_lvl_i",
+        "timing relation between request and priv_lvl value",
+        "impact of stale/wrong privilege selection",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "src/axi_node/src/axi_node_intf_wrap.sv:connectivity_mapping"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Only a single priv_lvl signal is visible in facts; full master set and timing are not fully shown."
+    },
+    {
+      "obligation_id": "PERM-AXI-ATTR-PRESERVE-009",
+      "reason": "The wrapper and harness forward aw_prot/ar_prot and user fields in several paths. Analysis should ensure permission-relevant attributes are neither dropped nor mismatched across channels, particularly at DRAM bridge assignments where some user fields appear taken directly from master while other fields pass through channel converters.",
+      "subject": "AXI masters whose attributes are consumed downstream",
+      "operation": "forward read/write transactions across wrapper/DRAM bridge",
+      "object": "AXI protection/user attributes used for downstream permission checks",
+      "expected_guard": "Security/privilege attributes in AXI prot/user fields must be preserved or intentionally recomputed at bridges; protected downstream logic must not receive downgraded/misattributed requests.",
+      "candidate_path": "AXI aw_prot/ar_prot/aw_user/ar_user signals through wrapper and DRAM bridge",
+      "state_conditions_to_check": [
+        "read vs write channels",
+        "DRAM target path",
+        "user/prot fields during reset or invalid cycles",
+        "multi-beat transactions and ID consistency"
+      ],
+      "required_evidence_slots": [
+        "subject originating AXI attributes",
+        "operation bridge/forward transaction",
+        "object downstream permission attribute on target interface",
+        "expected guard attribute preservation or validated recomputation",
+        "observed assignments for aw/ar/w user/prot",
+        "path through channel converter if present",
+        "impact of attribute mismatch",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Whether downstream targets actually use prot/user for permission is not shown."
+    },
+    {
+      "obligation_id": "PERM-TESTEN-GUARD-010",
+      "reason": "The wrapper has test_en_i and the harness assigns test_en = 1'b0. Analysis should verify all visible uses keep test mode inactive in this scope and that no alternate path can assert it to bypass protected routing or reset checks.",
+      "subject": "test interface or top-level harness driver",
+      "operation": "enable test/debug bypass or alter mediation",
+      "object": "test-mode mediated access controls and reset behavior",
+      "expected_guard": "Test enable must be tied inactive or protected by lifecycle/test authorization before it can relax reset, scan, interconnect, or debug mediation.",
+      "candidate_path": "test_en_i/test_en -> interconnect/debug/test-related instances",
+      "state_conditions_to_check": [
+        "reset value of test_en",
+        "constant tieoff vs external port in synthesized hierarchy",
+        "uses of test_en_i inside axi_node_intf_wrap or subinstances",
+        "interaction with JTAG/debug paths"
+      ],
+      "required_evidence_slots": [
+        "subject capable of driving test_en/test_en_i",
+        "operation enable test mode",
+        "object interconnect/debug/reset mediation affected by test mode",
+        "expected guard lifecycle/test authorization or constant inactive tieoff",
+        "observed assignments and instance connections",
+        "reachable bypass behavior if asserted",
+        "impact on protected assets",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "The fact layer shows port/tieoff but not all internal uses of test_en_i."
+    }
+  ],
+  "inspection_records": [
+    {
+      "obligation_id": "PERM-AXI-CONN-PRIV-001",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "AXI requesters on slave[0] Ariane core and slave[1] debug-module AXI master entering axi_node_intf_wrap",
+        "operation": "route/read/write AXI transactions to target manager/peripheral ports",
+        "object": "PLIC target access policy, with SoC enum PLIC=6 and CLINT=7",
+        "expected_guard": "connectivity_map_o[i][j] should be mediated by access_ctrl_i[i][j][priv_lvl_i] for each requester/target/privilege, unless a safe documented alias exists",
+        "observed_behavior": "connectivity_map_o[i][j] is assigned access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]), so CLINT permission grants PLIC connectivity for the same requester and privilege",
+        "path": "access_ctrl_reg -> access_ctrl[i][j] -> axi_node_intf_wrap.access_ctrl_i -> connectivity_mapping.connectivity_map_o -> axi_node cfg_connectivity_map_i",
+        "state_condition": "All privilege levels selected by priv_lvl_i; condition triggers when j==6 and access_ctrl_i[i][7][priv_lvl_i]==1",
+        "impact": "A requester authorized for CLINT may access PLIC even if its PLIC access-control bit is not set, allowing unintended interrupt-controller MMIO access",
+        "rtl_evidence": [
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "lines": "409-436",
+            "detail": "connectivity_mapping module generates connectivity_map_o"
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "line": 430,
+            "detail": "assign connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]);"
+          },
+          {
+            "file": "tb/ariane_soc_pkg.sv",
+            "lines": "28-29",
+            "detail": "PLIC=6, CLINT=7"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "450,471-472",
+            "detail": "access_ctrl comes from access_ctrl_reg slices and is connected with priv_lvl into i_axi_xbar"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "",
+      "candidate_finding": "CLINT permission aliases into PLIC permission in connectivity_mapping: target j==6 is granted when access_ctrl_i[i][7][priv_lvl_i] is set. In the SoC enum, j==6 is PLIC and j==7 is CLINT.",
+      "notes": "No documentation in the provided evidence establishes this PLIC/CLINT alias as intentional or safe."
+    },
+    {
+      "obligation_id": "PERM-AXI-RANGE-ROUTE-002",
+      "inspection_status": "inconclusive",
+      "evidence_slots": {
+        "subject": "AXI requesters on wrapper slave ports",
+        "operation": "route AW/AR transactions by address",
+        "object": "Debug, ROM, ROM2, PKT, CLINT, PLIC, UART, AES, SPI, Ethernet, GPIO, and DRAM address regions",
+        "expected_guard": "AW/AR addresses must match configured start_addr_i/end_addr_i ranges and the connectivity/access-control map before endpoint valid can reach a target",
+        "observed_behavior": "The wrapper forwards slave AW/AR channels into axi_node, passes start/end address arrays and connectivity map into axi_node, and assigns s_valid_rule='1. Range comparisons and invalid/out-of-range response behavior are not visible in the provided axi_node_intf_wrap facts.",
+        "path": "slave[j].aw/ar_* -> s_slave_aw/ar_* -> axi_node_i -> s_master_aw/ar_* -> master[i].aw/ar_*",
+        "state_condition": "start_addr_i/end_addr_i populated from ariane_soc_pkg base/length constants; s_valid_rule is all ones; read and write channels are both forwarded to axi_node",
+        "impact": "If axi_node treats all rules as valid without enforcing start/end bounds, address-based isolation could be broadened. If axi_node enforces cfg_START/END normally, the obligation may be satisfied.",
+        "rtl_evidence": [
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "lines": "282-321",
+            "detail": "slave AW/AR signals connected into axi_node_i"
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "lines": "331-383",
+            "detail": "master channels and cfg_START_ADDR_i/cfg_END_ADDR_i/cfg_valid_rule_i/cfg_connectivity_map_i connected to axi_node_i"
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "line": 387,
+            "detail": "assign s_valid_rule = '1"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "473-500",
+            "detail": "start_addr_i and end_addr_i assigned from SoC base and length constants"
+          },
+          {
+            "file": "tb/ariane_soc_pkg.sv",
+            "lines": "38-66",
+            "detail": "region lengths and bases"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Internal axi_node range comparison, rule-valid semantics, and invalid access response behavior are not included.",
+      "candidate_finding": "",
+      "notes": ""
+    },
+    {
+      "obligation_id": "PERM-DEBUG-AUTH-003",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "JTAG/SimDTM/DMI debug requester",
+        "operation": "issue DMI read/write/debug operations and route debug-module AXI master accesses",
+        "object": "dm_top debug module, Debug region, and AXI-reachable memory/MMIO through dm_axi_m_req",
+        "expected_guard": "Debug/DMI requests must require debug enable plus authentication/key/lifecycle authorization before reaching dm_top and protected assets",
+        "observed_behavior": "debug_req_valid, debug_resp_ready, and debug_req are muxed between JTAG and SimDTM paths based only on jtag_enable[0]. jtag_key is wired to dmi_jtag and ariane_peripherals, but no visible authorization gate blocks debug_req_valid or debug_req before dm_top.",
+        "path": "SimJTAG/dmi_jtag or SimDTM -> debug_req_valid/debug_req mux -> dm_top DMI interface -> dm_axi_m_req -> axi_master_connect -> slave[1] requester",
+        "state_condition": "jtag_enable[0]=1 selects JTAG; jtag_enable[0]=0 selects SimDTM/DMI. dmi_req_valid is tied off only in the non-InclSimDTM path; otherwise SimDTM can drive requests.",
+        "impact": "Unauthenticated debug transactions may control debug state or access/modify protected assets through the debug module's AXI master path",
+        "rtl_evidence": [
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "112-117",
+            "detail": "debug request/response mux controlled by jtag_enable[0]"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "135-154",
+            "detail": "dmi_jtag receives jtag_key and emits JTAG DMI request signals"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "161-175",
+            "detail": "SimDTM drives dmi_req_valid and DMI request fields"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "186-213",
+            "detail": "dm_top receives debug_req_valid/debug_req and returns debug_resp"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "line": 215,
+            "detail": "dm_axi_m_req connected through axi_master_connect to slave[1]"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "65,139,554",
+            "detail": "jtag_key declared and connected, but no visible gate on debug_req_valid"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "",
+      "candidate_finding": "Visible debug request path is gated by source selection jtag_enable[0], not by an explicit authorization/key/lifecycle check before dm_top accepts DMI requests.",
+      "notes": "The internals of dmi_jtag, dm_top, and ariane_peripherals are not visible; the candidate violation is based on absence of a visible top-level auth gate in the provided scope."
+    },
+    {
+      "obligation_id": "PERM-DEBUG-RESET-004",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "JTAG/DMI debug interface through dm_top",
+        "operation": "trigger non-debug-module reset and core debug/halt request",
+        "object": "system/core reset through ndmreset/ndmreset_n and core debug_req_i through debug_req_core",
+        "expected_guard": "Debug-triggered reset/halt/control signals must require authorized debug state and lifecycle permission",
+        "observed_behavior": "dm_top drives ndmreset_o and debug_req_o. ndmreset is combined into rstgen reset input as rst_ni & (~ndmreset); debug_req_core connects directly to Ariane debug_req_i. Visible harness does not gate these with authentication.",
+        "path": "DMI/JTAG request mux -> dm_top -> ndmreset_o/debug_req_o -> rstgen and Ariane core",
+        "state_condition": "When rst_ni is high, asserted ndmreset forces rstgen input low. debug_req_core reaches the core whenever dm_top asserts it. test_en is tied low but does not authenticate debug control.",
+        "impact": "A debug requester may reset or halt/debug the core without a visible authorization check, disrupting protected state or privilege flow",
+        "rtl_evidence": [
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "94-99",
+            "detail": "rstgen input rst_ni is rst_ni & (~ndmreset), output ndmreset_n"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "186-213",
+            "detail": "dm_top outputs ndmreset_o(ndmreset) and debug_req_o(debug_req_core)"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "592-600",
+            "detail": "Ariane core receives rst_ni(ndmreset_n) and debug_req_i(debug_req_core)"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "112-117",
+            "detail": "DMI request selection is controlled by jtag_enable[0]"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "dm_top internal authentication/authorization behavior is not shown.",
+      "candidate_finding": "dm_top outputs ndmreset and debug_req_core directly influence reset/core debug request, with no visible authorization gate between DMI/JTAG requests and these controls.",
+      "notes": ""
+    },
+    {
+      "obligation_id": "PERM-ROM2-WRITE-005",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "MMIO/AXI requester reaching the ROM2/peripheral path",
+        "operation": "write secure_reg and read rdata_o",
+        "object": "rom2 secure_reg array initialized from mem containing AES/JTAG/access-control values",
+        "expected_guard": "ROM2 contents should be immutable or writable only in a privileged loader/update state; read access to protected contents should be mediated by bus policy",
+        "observed_behavior": "On reset secure_reg <= mem. During normal operation, if req_i is asserted and we_i is high, secure_reg[addr_i[$clog2(RomSize)-1+3:3]] <= wdata_i. There is no local privilege, lock, or update-mode condition.",
+        "path": "ROM2Base address region/master[ariane_soc::ROM2] -> rom2_fuse/peripheral wiring -> rom2 req_i/we_i/addr_i/wdata_i -> secure_reg -> rdata_o",
+        "state_condition": "After reset loads secure_reg from mem; any req_i && we_i write can modify indexed secure_reg; readback returns secure_reg[raddr_q] when raddr_q < RomSize",
+        "impact": "A requester with ROM2 write reachability can alter key material or access-control configuration values, undermining secret integrity and permission policy",
+        "rtl_evidence": [
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "1-3",
+            "detail": "ROM2 comment says it has all the keys"
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "18-23",
+            "detail": "mem contains Access control, JTAG, and AES values"
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "32-41",
+            "detail": "reset loads secure_reg and req_i/we_i write updates secure_reg"
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "line": 47,
+            "detail": "rdata_o reads secure_reg[raddr_q] when in range"
+          },
+          {
+            "file": "tb/ariane_soc_pkg.sv",
+            "lines": "31,40,57",
+            "detail": "ROM2 enum, length, and base are defined"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "line": 550,
+            "detail": "ariane_peripherals connection includes .rom2_fuse(master[ariane_soc::ROM2])"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "The exact ariane_peripherals-to-rom2 wiring is not fully shown, but the module-local write path is unguarded.",
+      "candidate_finding": "rom2 secure_reg, described as holding keys/access-control values, has a req_i && we_i write path with no visible lock, privilege, update-mode, or bounds guard in the rom2 module.",
+      "notes": ""
+    },
+    {
+      "obligation_id": "PERM-ROM2-BOUNDS-006",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "Requester driving rom2 req_i/we_i/addr_i",
+        "operation": "address-indexed write/read to secure_reg",
+        "object": "rom2 secure_reg[addr_i[$clog2(RomSize)-1+3:3]]",
+        "expected_guard": "Both read and write state updates must enforce index < RomSize; malformed/out-of-range addresses must not corrupt protected state",
+        "observed_behavior": "raddr_q is assigned the extracted address index on reads, and rdata_o checks raddr_q < RomSize. On writes, secure_reg[extracted_index] <= wdata_i occurs without an explicit bounds condition.",
+        "path": "addr_i[$clog2(RomSize)-1+3:3] -> raddr_q/read or secure_reg write index",
+        "state_condition": "req_i && we_i; any addr_i value whose extracted index is used for write. RomSize=4 and raddr_q width is $clog2(RomSize), limiting represented indices to 0..3 in this implementation, but the asymmetry and lack of explicit write guard remain visible.",
+        "impact": "Depending on parameterization and synthesis/simulation semantics, unguarded writes could alias or corrupt protected storage; even with current RomSize=4, write protection relies on implicit truncation rather than a policy guard",
+        "rtl_evidence": [
+          {
+            "file": "src/rom2/rom2.sv",
+            "line": 15,
+            "detail": "localparam int RomSize = 4"
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "line": 28,
+            "detail": "raddr_q width is [$clog2(RomSize)-1:0]"
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "37-40",
+            "detail": "read captures extracted index; write directly indexes secure_reg with extracted address bits"
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "line": 47,
+            "detail": "read output guarded by (raddr_q < RomSize)"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "",
+      "candidate_finding": "ROM2 read path has an in-range guard in rdata_o, but the write path directly indexes secure_reg with addr_i-derived bits and has no explicit index < RomSize guard.",
+      "notes": "Current RomSize=4 makes the extracted two-bit index naturally 0..3, but the required explicit state-update bound is absent and the read/write guards are inconsistent."
+    },
+    {
+      "obligation_id": "PERM-ACCESSCTRL-PROTECT-007",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "software-visible peripheral path, CPU, or debug master capable of reaching ROM2/peripherals",
+        "operation": "configure/change access policy",
+        "object": "access_ctrl_reg bits sliced into access_ctrl[i][j] and used by connectivity_mapping",
+        "expected_guard": "Access-control registers must be writable only by authorized machine/debug subjects and preferably locked; updates must not transiently open protected routes",
+        "observed_behavior": "access_ctrl_reg is declared in the harness, connected to ariane_peripherals, and sliced into access_ctrl[i][j]. The provided facts do not show access_ctrl_reg reset/write decode guards. ROM2 mem comments identify access-control words and rom2 has an unguarded req_i&&we_i write path to secure_reg.",
+        "path": "ROM2/peripheral access_ctrl_reg source -> access_ctrl[i][j] -> axi_node_intf_wrap.access_ctrl_i -> connectivity_map_o",
+        "state_condition": "access_ctrl_reg reset/default and write authorization are not visible; active transfer behavior during updates is not visible",
+        "impact": "If an unprivileged CPU path or debug master can modify access_ctrl_reg or its ROM2 source, it can open otherwise protected interconnect routes",
+        "rtl_evidence": [
+          {
+            "file": "tb/ariane_testharness.sv",
+            "line": 66,
+            "detail": "logic [1:0][47:0] access_ctrl_reg"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "line": 450,
+            "detail": "assign access_ctrl[i][j] = access_ctrl_reg[i][4*j +: 4]"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "line": 555,
+            "detail": "ariane_peripherals connection includes .access_ctrl_reg(access_ctrl_reg)"
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "19-20",
+            "detail": "mem comments identify access control master words"
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "line": 40,
+            "detail": "secure_reg indexed write path"
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "line": 430,
+            "detail": "connectivity_map_o uses access_ctrl_i indexed by priv_lvl_i"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Declaration/reset/write logic for access_ctrl_reg inside ariane_peripherals is not visible.",
+      "candidate_finding": "access_ctrl_reg is sourced through ariane_peripherals/ROM2 fuse path, and ROM2 locally exposes a write path to values identified as access-control words. No visible privilege/lock guard protects access_ctrl_reg updates in the provided scope.",
+      "notes": ""
+    },
+    {
+      "obligation_id": "PERM-PRIVLVL-BIND-008",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "CPU and debug-module AXI master requesters",
+        "operation": "authorize AXI route using privilege-indexed access-control bits",
+        "object": "access_ctrl_i requester/target entry indexed by priv_lvl_i",
+        "expected_guard": "The privilege/security attribute used for authorization must correspond to the requester and transaction, and must not be globally stale or shared across unrelated masters",
+        "observed_behavior": "priv_lvl is assigned from priv_lvl_processor, which is an Ariane core output. That single priv_lvl is connected to axi_node_intf_wrap. The debug module AXI master is connected as slave[1], but no separate privilege representation for debug/DMA/requester identity is visible.",
+        "path": "ariane priv_lvl_o -> priv_lvl_processor -> priv_lvl -> axi_node_intf_wrap.priv_lvl_i -> connectivity_mapping access_ctrl_i[i][j][priv_lvl_i]",
+        "state_condition": "Multiple requesters exist: Ariane core on slave[0] and debug module AXI master on slave[1]. Privilege transitions during in-flight transactions and debug-master privilege attribution are not latched per request in visible RTL.",
+        "impact": "Debug or other non-core master requests may be authorized using the CPU's current/stale privilege level, causing over-permissive or misattributed access decisions",
+        "rtl_evidence": [
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "439-441",
+            "detail": "priv_lvl_processor declared and assigned to global priv_lvl"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "line": 471,
+            "detail": "i_axi_xbar .priv_lvl_i(priv_lvl)"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "line": 600,
+            "detail": "Ariane core outputs .priv_lvl_o(priv_lvl_processor)"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "215,606",
+            "detail": "debug module and Ariane core each connect as AXI requesters on slave[1] and slave[0]"
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "line": 430,
+            "detail": "connectivity_mapping indexes access_ctrl_i by priv_lvl_i"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "",
+      "candidate_finding": "A single global priv_lvl from the Ariane core is used for interconnect access-control lookup for all slave/requester ports, including the debug module AXI master on slave[1].",
+      "notes": "This is a binding/design issue in the visible wrapper/harness: no per-transaction privilege capture is shown."
+    },
+    {
+      "obligation_id": "PERM-AXI-ATTR-PRESERVE-009",
+      "inspection_status": "inconclusive",
+      "evidence_slots": {
+        "subject": "AXI masters whose prot/user attributes may be consumed downstream",
+        "operation": "forward read/write transactions through axi_node_intf_wrap and DRAM bridge",
+        "object": "AXI aw_prot/ar_prot and aw_user/ar_user/w_user attributes",
+        "expected_guard": "Security/privilege attributes must be preserved end-to-end or intentionally recomputed at bridges before downstream permission checks",
+        "observed_behavior": "axi_node_intf_wrap forwards slave aw_prot/ar_prot/user fields into internal signals and forwards master-side aw_prot/ar_prot/user outputs. DRAM bridge maps prot fields through channel converter outputs but assigns dram.aw_user/ar_user/w_user directly from master[DRAM].*_user rather than channel-converter outputs. Facts do not show whether the converter transforms user fields or whether downstream targets rely on user/prot.",
+        "path": "slave aw/ar/w prot/user -> axi_node_intf_wrap -> master[DRAM] -> channel converter/DRAM assignments",
+        "state_condition": "Read and write channels; DRAM target path; multi-beat and ID consistency not fully analyzed",
+        "impact": "If downstream permission logic relies on user/prot and bridge paths mismatch converted fields with direct user fields, requests could be misattributed. If downstream does not use these attributes or converter preserves them, the obligation may be satisfied.",
+        "rtl_evidence": [
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "lines": "222-246",
+            "detail": "slave aw_prot/ar_prot/aw_user/ar_user/w_user captured into s_slave_*"
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "lines": "164-188",
+            "detail": "master aw_prot/ar_prot/aw_user/ar_user/w_user assigned from s_master_*"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "328-353",
+            "detail": "DRAM converter input channels take prot and data fields from master[DRAM]"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "371-386",
+            "detail": "dram aw_prot/ar_prot from converter outputs; dram aw_user/ar_user direct from master[DRAM]"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "line": 391,
+            "detail": "dram.w_user direct from master[DRAM].w_user"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Downstream use of prot/user and channel converter user-field behavior are not shown.",
+      "candidate_finding": "",
+      "notes": ""
+    },
+    {
+      "obligation_id": "PERM-TESTEN-GUARD-010",
+      "inspection_status": "obligation_satisfied",
+      "evidence_slots": {
+        "subject": "top-level harness/test interface",
+        "operation": "enable test mode",
+        "object": "test-mode inputs to rstgen, dmi_jtag, dm_top, axi_node_intf_wrap, and CLINT/peripheral instances",
+        "expected_guard": "test_en must be tied inactive or protected by lifecycle/test authorization before it can relax mediation",
+        "observed_behavior": "In this harness scope, test_en is a local logic assigned constant 1'b0 and connected to visible testmode/test_en_i ports. No alternate driver is shown.",
+        "path": "assign test_en=1'b0 -> rstgen.test_mode_i, dmi_jtag.testmode_i, dm_top.testmode_i, axi_node_intf_wrap.test_en_i, other testmode_i ports",
+        "state_condition": "All visible uses in this scope receive the constant inactive test_en value",
+        "impact": "Visible test mode cannot be asserted by an external subject in this harness scope; no test-mode bypass is evident from provided facts",
+        "rtl_evidence": [
+          {
+            "file": "tb/ariane_testharness.sv",
+            "line": 74,
+            "detail": "assign test_en = 1'b0"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "94-99",
+            "detail": "rstgen test_mode_i connected to test_en"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "135-138",
+            "detail": "dmi_jtag testmode_i connected to test_en"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "186-197",
+            "detail": "dm_top testmode_i connected to test_en"
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "line": 468,
+            "detail": "i_axi_xbar test_en_i connected to test_en"
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "line": 280,
+            "detail": "axi_node_i test_en_i receives wrapper test_en_i"
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "",
+      "candidate_finding": "",
+      "notes": "Satisfied only for this harness scope; a different synthesized top-level with external test_en would require separate lifecycle authorization evidence."
+    }
+  ],
+  "tool_observations": [
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 500,
+        "offset": 0,
+        "path": "src/axi_node/src/axi_node_intf_wrap.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1:  // Copyright 2014-2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the “License”); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an “AS IS” BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: module axi_node_intf_wrap #(\\n12:     parameter NB_MANAGER      = 4,\\n13:     parameter NB_SUBORDINATE       = 4,\\n14:     parameter NB_PRIV_LVL    = 4, \\n15:     parameter PRIV_LVL_WIDTH = 4,\\n16:     parameter AXI_ADDR_WIDTH = 32,\\n17:     parameter AXI_DATA_WIDTH = 32,\\n18:     parameter AXI_ID_WIDTH   = 10,\\n19:     parameter AXI_USER_WIDTH = 0\\n20:   )(\\n21:     // Clock and Reset\\n22:     input logic clk,\\n23:     input logic rst_n,\\n24:     input logic test_en_i,\\n25: \\n26:     AXI_BUS.Slave slave[NB_SUBORDINATE-1:0],\\n27: \\n28:     AXI_BUS.Master master[NB_MANAGER-1:0],\\n29:     \\n30:     input logic [PRIV_LVL_WIDTH-1:0]      priv_lvl_i,\\n31:     input logic [NB_SUBORDINATE-1:0][NB_MANAGER-1:0][NB_PRIV_LVL-1:0] access_ctrl_i,\\n32: \\n33:     // Memory map\\n34:     input  logic [NB_MANAGER-1:0][AXI_ADDR_WIDTH-1:0]  start_addr_i,\\n35:     input  logic [NB_MANAGER-1:0][AXI_ADDR_WIDTH-1:0]  end_addr_i\\n36:   );\\n37: \\n38:   localparam AXI_STRB_WIDTH = AXI_DATA_WIDTH/8;\\n39:   localparam NB_REGION      = 1;\\n40: \\n41:   // AXI ID WIDTHs for master and slave IPS\\n42:   localparam AXI_ID_WIDTH_TARG =   AXI_ID_WIDTH;\\n43:   localparam AXI_ID_WIDTH_INIT =   AXI_ID_WIDTH_TARG + $clog2(NB_SUBORDINATE);\\n44: \\n45: \\n46:   // Signals to slave periperhals\\n47:   logic [NB_MANAGER-1:0][AXI_ID_WIDTH_INIT-1:0] s_master_aw_id;\\n48:   logic [NB_MANAGER-1:0][AXI_ADDR_WIDTH-1:0]    s_master_aw_addr;\\n49:   logic [NB_MANAGER-1:0][7:0]                   s_master_aw_len;\\n50:   logic [NB_MANAGER-1:0][2:0]                   s_master_aw_size;\\n51:   logic [NB_MANAGER-1:0][1:0]                   s_master_aw_burst;\\n52:   logic [NB_MANAGER-1:0]                        s_master_aw_lock;\\n53:   logic [NB_MANAGER-1:0][3:0]                   s_master_aw_cache;\\n54:   logic [NB_MANAGER-1:0][2:0]                   s_master_aw_prot;\\n55:   logic [NB_MANAGER-1:0][3:0]                   s_master_aw_region;\\n56:   logic [NB_MANAGER-1:0][AXI_USER_WIDTH-1:0]    s_master_aw_user;\\n57:   logic [NB_MANAGER-1:0][3:0]                   s_master_aw_qos;\\n58:   logic [NB_MANAGER-1:0]                        s_master_aw_valid;\\n59:   logic [NB_MANAGER-1:0]                        s_master_aw_ready;\\n60: \\n61:   logic [NB_MANAGER-1:0][AXI_ID_WIDTH_INIT-1:0] s_master_ar_id;\\n62:   logic [NB_MANAGER-1:0][AXI_ADDR_WIDTH-1:0]    s_master_ar_addr;\\n63:   logic [NB_MANAGER-1:0][7:0]                   s_master_ar_len;\\n64:   logic [NB_MANAGER-1:0][2:0]                   s_master_ar_size;\\n65:   logic [NB_MANAGER-1:0][1:0]                   s_master_ar_burst;\\n66:   logic [NB_MANAGER-1:0]                        s_master_ar_lock;\\n67:   logic [NB_MANAGER-1:0][3:0]                   s_master_ar_cache;\\n68:   logic [NB_MANAGER-1:0][2:0]                   s_master_ar_prot;\\n69:   logic [NB_MANAGER-1:0][3:0]                   s_master_ar_region;\\n70:   logic [NB_MANAGER-1:0][AXI_USER_WIDTH-1:0]    s_master_ar_user;\\n71:   logic [NB_MANAGER-1:0][3:0]                   s_master_ar_qos;\\n72:   logic [NB_MANAGER-1:0]                        s_master_ar_valid;\\n73:   logic [NB_MANAGER-1:0]                        s_master_ar_ready;\\n74: \\n75:   logic [NB_MANAGER-1:0][AXI_DATA_WIDTH-1:0]    s_master_w_data;\\n76:   logic [NB_MANAGER-1:0][\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 700,
+        "offset": 0,
+        "path": "tb/ariane_testharness.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: //\\n11: // Author: Florian Zaruba, ETH Zurich\\n12: // Date: 19.03.2017\\n13: // Description: Test-harness for Ariane\\n14: //              Instantiates an AXI-Bus and memories\\n15: \\n16: module ariane_testharness #(\\n17:     parameter int unsigned AXI_ID_WIDTH      = 4,\\n18:     parameter int unsigned AXI_USER_WIDTH    = 1,\\n19:     parameter int unsigned AXI_ADDRESS_WIDTH = 64,\\n20:     parameter int unsigned AXI_DATA_WIDTH    = 64,\\n21:     parameter bit          InclSimDTM        = 1'b1,\\n22:     parameter int unsigned NUM_WORDS         = 2**25,         // memory size\\n23:     parameter bit          StallRandomOutput = 1'b0,\\n24:     parameter bit          StallRandomInput  = 1'b0\\n25: ) (\\n26:     input  logic                           clk_i,\\n27:     input  logic                           rtc_i,\\n28:     input  logic                           rst_ni,\\n29:     output logic [31:0]                    exit_o\\n30: );\\n31: \\n32:     // disable test-enable\\n33:     logic        test_en;\\n34:     logic        ndmreset;\\n35:     logic        ndmreset_n;\\n36:     logic        debug_req_core;\\n37: \\n38:     int          jtag_enable;\\n39:     logic        init_done;\\n40:     logic [31:0] jtag_exit, dmi_exit;\\n41: \\n42:     logic        jtag_TCK;\\n43:     logic        jtag_TMS;\\n44:     logic        jtag_TDI;\\n45:     logic        jtag_TRSTn;\\n46:     logic        jtag_TDO_data;\\n47:     logic        jtag_TDO_driven;\\n48: \\n49:     logic        debug_req_valid;\\n50:     logic        debug_req_ready;\\n51:     logic        debug_resp_valid;\\n52:     logic        debug_resp_ready;\\n53: \\n54:     logic        jtag_req_valid;\\n55:     logic [6:0]  jtag_req_bits_addr;\\n56:     logic [1:0]  jtag_req_bits_op;\\n57:     logic [31:0] jtag_req_bits_data;\\n58:     logic        jtag_resp_ready;\\n59:     logic        jtag_resp_valid;\\n60: \\n61:     logic        dmi_req_valid;\\n62:     logic        dmi_resp_ready;\\n63:     logic        dmi_resp_valid;\\n64: \\n65:     logic [31:0] jtag_key; \\n66:     logic [1:0][47:0]   access_ctrl_reg;\\n67: \\n68:     dm::dmi_req_t  jtag_dmi_req;\\n69:     dm::dmi_req_t  dmi_req;\\n70: \\n71:     dm::dmi_req_t  debug_req;\\n72:     dm::dmi_resp_t debug_resp;\\n73: \\n74:     assign test_en = 1'b0;\\n75: \\n76:     localparam NB_SUBORDINATE = 2;\\n77: \\n78:     localparam AXI_ID_WIDTH_SLAVES = AXI_ID_WIDTH + $clog2(NB_SUBORDINATE);\\n79: \\n80:     AXI_BUS #(\\n81:         .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH ),\\n82:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH    ),\\n83:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH      ),\\n84:         .AXI_USER_WIDTH ( AXI_USER_WIDTH    )\\n85:     ) slave[NB_SUBORDINATE-1:0]();\\n86: \\n87:     AXI_BUS #(\\n88:         .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH   ),\\n89:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH      ),\\n90:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH_SLAVES ),\\n91:         .AXI_USER_WIDTH ( AXI_USER_WIDTH      )\\n92:     ) master[ariane_soc::NB_PERIPHERALS-1:0]();\\n93: \\n94:     rstgen i_rstgen_main (\\n95:         .clk_i        ( clk_i                ),\\n96:         .rst_ni       ( rst_ni & (~ndmreset) ),\\n97:         .test_mode_i  ( test_en              ),\\n98:         .rst_no       ( ndmreset_n           ),\\n99:         .init_no      (                      ) \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 120,
+        "offset": 0,
+        "path": "tb/ariane_soc_pkg.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_soc_pkg.sv",
+      "error": null,
+      "content": "1: // Copyright 2018 ETH Zurich and University of Bologna.\n2: // Copyright and related rights are licensed under the Solderpad Hardware\n3: // License, Version 0.51 (the \"License\"); you may not use this file except in\n4: // compliance with the License.  You may obtain a copy of the License at\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n6: // or agreed to in writing, software, hardware and materials distributed under\n7: // this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\n9: // specific language governing permissions and limitations under the License.\n10: //\n11: // Author: Florian Zaruba, ETH Zurich\n12: // Description: Contains SoC information as constants\n13: package ariane_soc;\n14:     // M-Mode Hart, S-Mode Hart\n15:     localparam NumTargets = 2;\n16:     // Uart, SPI, Ethernet and AES\n17:     localparam NumSources = 4;\n18:     localparam PLICIdWidth = 3;\n19:     localparam ParameterBitwidth = PLICIdWidth;\n20: \n21:     typedef enum int unsigned {\n22:         DRAM     = 0,\n23:         GPIO     = 1,\n24:         Ethernet = 2,\n25:         SPI      = 3,\n26:         AES      = 4,    \n27:         UART     = 5,   \n28:         PLIC     = 6,  \n29:         CLINT    = 7, \n30:         PKT      = 8,\n31:         ROM2     = 9,\n32:         ROM      = 10, \n33:         Debug    = 11\n34:     } axi_slaves_t;\n35: \n36:     localparam NB_PERIPHERALS = Debug + 1;\n37: \n38:     localparam logic[63:0] DebugLength    = 64'h1000;\n39:     localparam logic[63:0] ROMLength      = 64'h10000;\n40:     localparam logic[63:0] ROM2Length     = 64'h10000;\n41:     localparam logic[63:0] PKTLength      = 64'h10000;\n42:     localparam logic[63:0] CLINTLength    = 64'hC0000;\n43:     localparam logic[63:0] PLICLength     = 64'h3FF_FFFF;\n44:     localparam logic[63:0] UARTLength     = 64'h111000; \n45:     localparam logic[63:0] AESLength      = 64'h1000;\n46:     localparam logic[63:0] SPILength      = 64'h800000;\n47:     localparam logic[63:0] EthernetLength = 64'h10000;\n48:     localparam logic[63:0] GPIOLength     = 64'h1000;\n49:     localparam logic[63:0] DRAMLength     = 64'h8000000; // 128 MByte of DDR\n50:     localparam logic[63:0] SRAMLength     = 64'h1800000;  // 24 MByte of SRAM\n51:     // Instantiate AXI protocol checkers\n52:     localparam bit GenProtocolChecker = 1'b0;\n53: \n54:     typedef enum logic [63:0] {\n55:         DebugBase    = 64'h0000_0000,\n56:         ROMBase      = 64'h0001_0000,\n57:         ROM2Base     = 64'h0021_0000, \n58:         PKTBase      = 64'h0041_0000, \n59:         CLINTBase    = 64'h0200_0000,\n60:         PLICBase     = 64'h0C00_0000,\n61:         UARTBase     = 64'h1000_0000,\n62:         AESBase      = 64'h1010_0000,  \n63:         SPIBase      = 64'h2000_0000,\n64:         EthernetBase = 64'h3000_0000,\n65:         GPIOBase     = 64'h4000_0000,\n66:         DRAMBase     = 64'h8000_0000\n67:     } soc_bus_start_t;\n68: \n69:     // Different AES Key ID's this information is public.\n70:     localparam logic[63:0] AESKey_0    = 64'h0000;\n71:     localparam logic[63:0] AESKey_1    = 64'h1000;\n72:     localparam logic[63:0] AESKey_2    = 64'h2000;\n73:     localparam logic[63:0] AESKey_3    = 64'h3000;\n74:     localparam logic[63:0] AESKey_4    = 64'h4000;\n75:     localparam logic[63:0] AESKey_5    = 64'h5000;\n76: endpackage",
+      "truncated": false
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 80,
+        "offset": 0,
+        "path": "src/rom2/rom2.sv"
+      },
+      "status": "ok",
+      "path": "src/rom2/rom2.sv",
+      "error": null,
+      "content": "1:  /*\n2:  * ROM2: Which have all the keys.\n3:  */\n4: \n5: module rom2 (\n6:    input  logic         clk_i,\n7:    input  logic         rst_ni,\n8:    input  logic         req_i,\n9:    input  logic         we_i,\n10:    input  logic [63:0]  addr_i,\n11:    input  logic [63:0]  wdata_i,\n12:    output logic [63:0]  rdata_o,\n13:    output logic [3:0][191:0]  secure_reg // Ideally [1:0] should be [RomSize-1:0]. In this case RomSize is 2.\n14: );\n15:     localparam int RomSize = 4;\n16: \n17: // Store key values here. // Replication of fuse. \n18:     const logic [RomSize-1:0][191:0] mem = {\n19:         192'h00000000_00000000_00000000_00000000_0000f8f8_ff6fe00f, // 3rd location for Access control master 1. First 4 bits for peripheral 0, next 4 for p1 and so on.\n20:         192'h00000000_00000000_00000000_00000000_0000fff8_ff6ff00f, // 2nd location for Access control master 0. First 4 bits for peripheral 0, next 4 for p1 and so on.\n21:         192'h2b7e1516_28aed2a6_abf71588_09cf4f3c_2b7e1516_28aed2a6, // 1st location for JTAG\n22:         192'h55555555_28aed2a6_abf71588_09cf4f3c_2b7e1516_28aed2a6  // oth location for AES\n23:     };\n24: \n25: // Secure registers. Key values copied from fuse to these registers on reset.\n26: //    logic [RomSize-1:0][191:0] secure_reg;\n27: \n28:     logic [$clog2(RomSize)-1:0] raddr_q;\n29: \n30: // We can read and write initial 64 bits.\n31: // On reset, key values will be copied to registers.\n32:     always_ff @ (posedge clk_i) begin\n33:         if (~rst_ni) begin\n34:             secure_reg <= mem;\n35:         end else begin\n36:         if(req_i) begin\n37:             if (!we_i) begin\n38:                 raddr_q <= addr_i[$clog2(RomSize)-1+3:3];\n39:             end else begin\n40:                 secure_reg[addr_i[$clog2(RomSize)-1+3:3]] <= wdata_i;\n41:             end\n42:         end\n43:         end\n44:     end\n45:     // this prevents spurious Xes from propagating into\n46:     // the speculative fetch stage of the core\n47:     assign rdata_o = (raddr_q < RomSize) ? secure_reg[raddr_q] : '0;\n48: \n49: \n50: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 300,
+        "offset": 180,
+        "path": "tb/ariane_testharness.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"180:     end\\n181: \\n182:     ariane_axi::req_t    dm_axi_m_req,  dm_axi_s_req;\\n183:     ariane_axi::resp_t   dm_axi_m_resp, dm_axi_s_resp;\\n184: \\n185:     // debug module\\n186:     dm_top #(\\n187:         // current implementation only supports 1 hart\\n188:         .NrHarts              ( 1                         ),\\n189:         .AxiIdWidth           ( AXI_ID_WIDTH_SLAVES       ),\\n190:         .AxiAddrWidth         ( AXI_ADDRESS_WIDTH         ),\\n191:         .AxiDataWidth         ( AXI_DATA_WIDTH            ),\\n192:         .AxiUserWidth         ( AXI_USER_WIDTH            )\\n193:     ) i_dm_top (\\n194: \\n195:         .clk_i                ( clk_i                ),\\n196:         .rst_ni               ( rst_ni               ), // PoR\\n197:         .testmode_i           ( test_en              ),\\n198:         .ndmreset_o           ( ndmreset             ),\\n199:         .dmactive_o           (                      ), // active debug session\\n200:         .debug_req_o          ( debug_req_core       ),\\n201:         .unavailable_i        ( '0                   ),\\n202:         .axi_s_req_i          ( dm_axi_s_req         ),\\n203:         .axi_s_resp_o         ( dm_axi_s_resp        ),\\n204:         .axi_m_req_o          ( dm_axi_m_req         ),\\n205:         .axi_m_resp_i         ( dm_axi_m_resp        ),\\n206:         .dmi_rst_ni           ( rst_ni               ),\\n207:         .dmi_req_valid_i      ( debug_req_valid      ),\\n208:         .dmi_req_ready_o      ( debug_req_ready      ),\\n209:         .dmi_req_i            ( debug_req            ),\\n210:         .dmi_resp_valid_o     ( debug_resp_valid     ),\\n211:         .dmi_resp_ready_i     ( debug_resp_ready     ),\\n212:         .dmi_resp_o           ( debug_resp           )\\n213:     );\\n214: \\n215:     axi_master_connect i_axi_master_dm (.axi_req_i(dm_axi_m_req), .axi_resp_o(dm_axi_m_resp), .master(slave[1]));\\n216:     axi_slave_connect  i_axi_slave_dm  (.axi_req_o(dm_axi_s_req), .axi_resp_i(dm_axi_s_resp), .slave(master[ariane_soc::Debug]));\\n217: \\n218: \\n219:     // ---------------\\n220:     // ROM\\n221:     // ---------------\\n222:     logic                         rom_req;\\n223:     logic [AXI_ADDRESS_WIDTH-1:0] rom_addr;\\n224:     logic                         rom_we;\\n225:     logic [AXI_DATA_WIDTH-1:0]    rom_rdata;\\n226:     logic [AXI_DATA_WIDTH-1:0]    rom_wdata;\\n227:  \\n228:     axi2mem #(\\n229:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH_SLAVES ),\\n230:         .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH   ),\\n231:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH      ),\\n232:         .AXI_USER_WIDTH ( AXI_USER_WIDTH      )\\n233:     ) i_axi2rom (\\n234:         .clk_i  ( clk_i                   ),\\n235:         .rst_ni ( ndmreset_n              ),\\n236:         .slave  ( master[ariane_soc::ROM] ),\\n237:         .req_o  ( rom_req                 ),\\n238:         .we_o   ( rom_we                  ),\\n239:         .addr_o ( rom_addr                ),\\n240:         .be_o   (                         ),\\n241:         .data_o ( rom_wdata               ),\\n242:         .data_i ( rom_rdata               )\\n243:     );\\n244: \\n245:     bootrom i_bootrom (\\n246:         .clk_i      ( clk_i     ),\\n247:         .req_i      ( rom_req   ),\\n248:         .we_i       ( rom_we    ),\\n249:         .addr_i     ( rom_addr  ),\\n250:         .wdata_i    ( rom_wdata ),\\n251:         .rdata_o    ( rom_rdata )\\n252:     );\\n253: \\n254:     // ---------------\\n255:     // Memory\\n256:     // ---------------\\n257: \\n258:     AXI_BUS #(\\n259:         .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH   ),\\n260:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH      ),\\n261:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH_SLAVES ),\\n262:         .AXI_USER_WIDTH ( AXI_USER_WIDTH      )\\n263:     ) dram();\\n264: \\n265:     logic                         req;\\n266:     logic                         we;\\n267:     logic [AXI_ADDRESS_WIDTH-1:0] addr;\\n268:     logic [AXI_DATA_WIDTH/8-1:0] \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 250,
+        "offset": 300,
+        "path": "tb/ariane_testharness.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"300:         .w_chan_i   ( w_chan_i                          ),\\n301:         .w_ready_o  ( master[ariane_soc::DRAM].w_ready  ),\\n302:         .b_valid_o  ( master[ariane_soc::DRAM].b_valid  ),\\n303:         .b_chan_o   ( b_chan_o                          ),\\n304:         .b_ready_i  ( master[ariane_soc::DRAM].b_ready  ),\\n305:         .ar_valid_i ( master[ariane_soc::DRAM].ar_valid ),\\n306:         .ar_chan_i  ( ar_chan_i                         ),\\n307:         .ar_ready_o ( master[ariane_soc::DRAM].ar_ready ),\\n308:         .r_valid_o  ( master[ariane_soc::DRAM].r_valid  ),\\n309:         .r_chan_o   ( r_chan_o                          ),\\n310:         .r_ready_i  ( master[ariane_soc::DRAM].r_ready  ),\\n311:         .aw_valid_o ( dram.aw_valid                     ),\\n312:         .aw_chan_o  ( aw_chan_o                         ),\\n313:         .aw_ready_i ( dram.aw_ready                     ),\\n314:         .w_valid_o  ( dram.w_valid                      ),\\n315:         .w_chan_o   ( w_chan_o                          ),\\n316:         .w_ready_i  ( dram.w_ready                      ),\\n317:         .b_valid_i  ( dram.b_valid                      ),\\n318:         .b_chan_i   ( b_chan_i                          ),\\n319:         .b_ready_o  ( dram.b_ready                      ),\\n320:         .ar_valid_o ( dram.ar_valid                     ),\\n321:         .ar_chan_o  ( ar_chan_o                         ),\\n322:         .ar_ready_i ( dram.ar_ready                     ),\\n323:         .r_valid_i  ( dram.r_valid                      ),\\n324:         .r_chan_i   ( r_chan_i                          ),\\n325:         .r_ready_o  ( dram.r_ready                      )\\n326:     );\\n327: \\n328:     assign aw_chan_i.atop = '0;\\n329:     assign aw_chan_i.id = master[ariane_soc::DRAM].aw_id;\\n330:     assign aw_chan_i.addr = master[ariane_soc::DRAM].aw_addr;\\n331:     assign aw_chan_i.len = master[ariane_soc::DRAM].aw_len;\\n332:     assign aw_chan_i.size = master[ariane_soc::DRAM].aw_size;\\n333:     assign aw_chan_i.burst = master[ariane_soc::DRAM].aw_burst;\\n334:     assign aw_chan_i.lock = master[ariane_soc::DRAM].aw_lock;\\n335:     assign aw_chan_i.cache = master[ariane_soc::DRAM].aw_cache;\\n336:     assign aw_chan_i.prot = master[ariane_soc::DRAM].aw_prot;\\n337:     assign aw_chan_i.qos = master[ariane_soc::DRAM].aw_qos;\\n338:     assign aw_chan_i.region = master[ariane_soc::DRAM].aw_region;\\n339: \\n340:     assign ar_chan_i.id = master[ariane_soc::DRAM].ar_id;\\n341:     assign ar_chan_i.addr = master[ariane_soc::DRAM].ar_addr;\\n342:     assign ar_chan_i.len = master[ariane_soc::DRAM].ar_len;\\n343:     assign ar_chan_i.size = master[ariane_soc::DRAM].ar_size;\\n344:     assign ar_chan_i.burst = master[ariane_soc::DRAM].ar_burst;\\n345:     assign ar_chan_i.lock = master[ariane_soc::DRAM].ar_lock;\\n346:     assign ar_chan_i.cache = master[ariane_soc::DRAM].ar_cache;\\n347:     assign ar_chan_i.prot = master[ariane_soc::DRAM].ar_prot;\\n348:     assign ar_chan_i.qos = master[ariane_soc::DRAM].ar_qos;\\n349:     assign ar_chan_i.region = master[ariane_soc::DRAM].ar_region;\\n350: \\n351:     assign w_chan_i.data = master[ariane_soc::DRAM].w_data;\\n352:     assign w_chan_i.strb = master[ariane_soc::DRAM].w_strb;\\n353:     assign w_chan_i.last = master[ariane_soc::DRAM].w_last;\\n354: \\n355:     assign master[ariane_soc::DRAM].r_id = r_chan_o.id;\\n356:     assign master[ariane_soc::DRAM].r_data = r_chan_o.data;\\n357:     assign master[ariane_soc::DRAM].r_resp = r_chan_o.resp;\\n358:     assign master[ariane_soc::DRAM].r_last = r_chan_o.last;\\n359: \\n360:     assign master[ariane_soc::DRAM].b_id = b_chan_o.id;\\n361:     assign master[ariane_soc::DRAM].b_resp = b_chan_o.resp;\\n362: \\n363: \\n364:     assign dram.aw_id = aw_chan_o.id;\\n365:     assign dram.aw_addr = aw_chan_o.addr;\\n366:     assign dram.aw_len = aw_chan_o.len;\\n367:     assign dram.aw_size = aw_chan_o.size;\\n368:     assign dram.aw_burst\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 200,
+        "offset": 250,
+        "path": "src/axi_node/src/axi_node_intf_wrap.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"250:       assign                        slave[j].b_id[AXI_ID_WIDTH_TARG-1:0] = s_slave_b_id[j];\\n251:       assign                        slave[j].b_resp                      = s_slave_b_resp[j];\\n252:       assign                        slave[j].b_valid                     = s_slave_b_valid[j];\\n253:       assign                        slave[j].b_user                      = s_slave_b_user[j];\\n254:       assign s_slave_b_ready[j]   = slave[j].b_ready;\\n255: \\n256:       assign                        slave[j].r_id[AXI_ID_WIDTH_TARG-1:0] = s_slave_r_id[j];\\n257:       assign                        slave[j].r_data                      = s_slave_r_data[j];\\n258:       assign                        slave[j].r_resp                      = s_slave_r_resp[j];\\n259:       assign                        slave[j].r_last                      = s_slave_r_last[j];\\n260:       assign                        slave[j].r_user                      = s_slave_r_user[j];\\n261:       assign                        slave[j].r_valid                     = s_slave_r_valid[j];\\n262:       assign s_slave_r_ready[j]   = slave[j].r_ready;\\n263:     end\\n264:   endgenerate\\n265: \\n266:   axi_node\\n267:   #(\\n268:     .AXI_ADDRESS_W      ( AXI_ADDR_WIDTH    ),\\n269:     .AXI_DATA_W         ( AXI_DATA_WIDTH    ),\\n270:     .N_MASTER_PORT      ( NB_MANAGER         ),\\n271:     .N_SLAVE_PORT       ( NB_SUBORDINATE          ),\\n272:     .AXI_ID_IN          ( AXI_ID_WIDTH_TARG ),\\n273:     .AXI_USER_W         ( AXI_USER_WIDTH    ),\\n274:     .N_REGION           ( NB_REGION         )\\n275:   )\\n276:   axi_node_i\\n277:   (\\n278:     .clk                    ( clk                ),\\n279:     .rst_n                  ( rst_n              ),\\n280:     .test_en_i              ( test_en_i          ),\\n281: \\n282:     .slave_awid_i           ( s_slave_aw_id      ),\\n283:     .slave_awaddr_i         ( s_slave_aw_addr    ),\\n284:     .slave_awlen_i          ( s_slave_aw_len     ),\\n285:     .slave_awsize_i         ( s_slave_aw_size    ),\\n286:     .slave_awburst_i        ( s_slave_aw_burst   ),\\n287:     .slave_awlock_i         ( s_slave_aw_lock    ),\\n288:     .slave_awcache_i        ( s_slave_aw_cache   ),\\n289:     .slave_awprot_i         ( s_slave_aw_prot    ),\\n290:     .slave_awregion_i       ( s_slave_aw_region  ),\\n291:     .slave_awqos_i          ( s_slave_aw_qos     ),\\n292:     .slave_awuser_i         ( s_slave_aw_user    ),\\n293:     .slave_awvalid_i        ( s_slave_aw_valid   ),\\n294:     .slave_awready_o        ( s_slave_aw_ready   ),\\n295: \\n296:     .slave_wdata_i          ( s_slave_w_data     ),\\n297:     .slave_wstrb_i          ( s_slave_w_strb     ),\\n298:     .slave_wlast_i          ( s_slave_w_last     ),\\n299:     .slave_wuser_i          ( s_slave_w_user     ),\\n300:     .slave_wvalid_i         ( s_slave_w_valid    ),\\n301:     .slave_wready_o         ( s_slave_w_ready    ),\\n302: \\n303:     .slave_bid_o            ( s_slave_b_id       ),\\n304:     .slave_bresp_o          ( s_slave_b_resp     ),\\n305:     .slave_buser_o          ( s_slave_b_user     ),\\n306:     .slave_bvalid_o         ( s_slave_b_valid    ),\\n307:     .slave_bready_i         ( s_slave_b_ready    ),\\n308: \\n309:     .slave_arid_i           ( s_slave_ar_id      ),\\n310:     .slave_araddr_i         ( s_slave_ar_addr    ),\\n311:     .slave_arlen_i          ( s_slave_ar_len     ),\\n312:     .slave_arsize_i         ( s_slave_ar_size    ),\\n313:     .slave_arburst_i        ( s_slave_ar_burst   ),\\n314:     .slave_arlock_i         ( s_slave_ar_lock    ),\\n315:     .slave_arcache_i        ( s_slave_ar_cache   ),\\n316:     .slave_arprot_i         ( s_slave_ar_prot    ),\\n317:     .slave_arregion_i       ( s_slave_ar_region  ),\\n318:     .slave_aruser_i         ( s_slave_ar_user    ),\\n319:     .slave_arqos_i          ( s_slave_ar_qos     ),\\n320:     .slave_arvalid_i        ( s_slave_ar_valid   ),\\n321:     .slave_arready_o        ( s_slave_ar_read\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": ".",
+        "query": "access_ctrl_reg"
+      },
+      "status": "ok",
+      "path": ".",
+      "error": null,
+      "content": "tb/ariane_testharness.sv:66: logic [1:0][47:0]   access_ctrl_reg;\ntb/ariane_testharness.sv:450: assign access_ctrl[i][j] = access_ctrl_reg[i][4*j +: 4];\ntb/ariane_testharness.sv:555: .access_ctrl_reg   ( access_ctrl_reg              ),",
+      "truncated": false
+    },
+    {
+      "step": 2,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": ".",
+        "query": "rom2"
+      },
+      "status": "ok",
+      "path": ".",
+      "error": null,
+      "content": "src/rom2/rom2.sv:2: * ROM2: Which have all the keys.\nsrc/rom2/rom2.sv:5: module rom2 (\ntb/ariane_soc_pkg.sv:31: ROM2     = 9,\ntb/ariane_soc_pkg.sv:40: localparam logic[63:0] ROM2Length     = 64'h10000;\ntb/ariane_soc_pkg.sv:57: ROM2Base     = 64'h0021_0000,\ntb/ariane_testharness.sv:476: ariane_soc::ROM2Base,\ntb/ariane_testharness.sv:490: ariane_soc::ROM2Base     + ariane_soc::ROM2Length - 1,\ntb/ariane_testharness.sv:550: .rom2_fuse         ( master[ariane_soc::ROM2]     ),",
+      "truncated": false
+    },
+    {
+      "step": 2,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": ".",
+        "query": "jtag_key"
+      },
+      "status": "ok",
+      "path": ".",
+      "error": null,
+      "content": "tb/ariane_testharness.sv:65: logic [31:0] jtag_key;\ntb/ariane_testharness.sv:139: .jtag_key         ( jtag_key        ),\ntb/ariane_testharness.sv:554: .jtag_key          ( jtag_key                     ),",
+      "truncated": false
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 430,
+        "path": "tb/ariane_testharness.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"430:         .wdata_i    ( wdata                                                                       ),\\n431:         .be_i       ( be                                                                          ),\\n432:         .rdata_o    ( rdata                                                                       )\\n433:     );\\n434: \\n435:     // ---------------\\n436:     // AXI Xbar\\n437:     // ---------------\\n438: \\n439:     riscv::priv_lvl_t           priv_lvl_processor;   \\n440:     logic [riscv::PRIV_LVL_WIDTH-1:0] priv_lvl ; \\n441:     assign priv_lvl = priv_lvl_processor ; \\n442:     logic [NB_SUBORDINATE-1:0][ariane_soc::NB_PERIPHERALS-1:0][riscv::NB_PRIV_LVL-1:0] access_ctrl ;   \\n443:     \\n444:     // Getting configuration registers form FUSE memory. \\n445:     genvar i,j;\\n446: \\n447:     generate\\n448:         for (i=0; i<NB_SUBORDINATE; i++) begin\\n449:             for (j=0; j<ariane_soc::NB_PERIPHERALS; j++) begin\\n450:                 assign access_ctrl[i][j] = access_ctrl_reg[i][4*j +: 4];\\n451:             end\\n452:         end\\n453:     endgenerate\\n454:     axi_node_intf_wrap #(\\n455:         .NB_SUBORDINATE           ( NB_SUBORDINATE                   ),\\n456:         .NB_MANAGER          ( ariane_soc::NB_PERIPHERALS ),\\n457: \\t.NB_PRIV_LVL\\t    ( riscv::NB_PRIV_LVL\\t ), \\n458: \\t.PRIV_LVL_WIDTH\\t    ( riscv::PRIV_LVL_WIDTH\\t ),\\n459:         .AXI_ADDR_WIDTH     ( AXI_ADDRESS_WIDTH          ),\\n460:         .AXI_DATA_WIDTH     ( AXI_DATA_WIDTH             ),\\n461:         .AXI_USER_WIDTH     ( AXI_USER_WIDTH             ),\\n462:         .AXI_ID_WIDTH       ( AXI_ID_WIDTH               )\\n463:         // .MASTER_SLICE_DEPTH ( 0                          ),\\n464:         // .SLAVE_SLICE_DEPTH  ( 0                          )\\n465:     ) i_axi_xbar (\\n466:         .clk          ( clk_i      ),\\n467:         .rst_n        ( ndmreset_n ),\\n468:         .test_en_i    ( test_en    ),\\n469:         .slave        ( slave      ),\\n470:         .master       ( master     ),\\n471: \\t.priv_lvl_i   ( priv_lvl   ),   \\n472: \\t.access_ctrl_i( access_ctrl),  \\n473:         .start_addr_i ({\\n474:             ariane_soc::DebugBase,\\n475:             ariane_soc::ROMBase,\\n476:             ariane_soc::ROM2Base,\\n477:             ariane_soc::PKTBase,\\n478:             ariane_soc::CLINTBase,\\n479:             ariane_soc::PLICBase,\\n480:             ariane_soc::UARTBase,\\n481:             ariane_soc::AESBase,\\n482:             ariane_soc::SPIBase,\\n483:             ariane_soc::EthernetBase,\\n484:             ariane_soc::GPIOBase,\\n485:             ariane_soc::DRAMBase\\n486:         }),\\n487:         .end_addr_i   ({\\n488:             ariane_soc::DebugBase    + ariane_soc::DebugLength - 1,\\n489:             ariane_soc::ROMBase      + ariane_soc::ROMLength - 1,\\n490:             ariane_soc::ROM2Base     + ariane_soc::ROM2Length - 1,\\n491:             ariane_soc::PKTBase      + ariane_soc::PKTLength - 1, \\n492:             ariane_soc::CLINTBase    + ariane_soc::CLINTLength - 1,\\n493:             ariane_soc::PLICBase     + ariane_soc::PLICLength - 1,\\n494:             ariane_soc::UARTBase     + ariane_soc::UARTLength - 1,\\n495:             ariane_soc::AESBase      + ariane_soc::AESLength - 1, \\n496:             ariane_soc::SPIBase      + ariane_soc::SPILength - 1,\\n497:             ariane_soc::EthernetBase + ariane_soc::EthernetLength -1,\\n498:             ariane_soc::GPIOBase     + ariane_soc::GPIOLength - 1,\\n499:             ariane_soc::DRAMBase     + ariane_soc::DRAMLength - 1\\n500:         })\\n501:     );\\n502: \\n503:     // ---------------\\n504:     // CLINT\\n505:     // ---------------\\n506:     logic ipi;\\n507:     logic timer_irq;\\n508: \\n509:     ariane_axi::req_t    axi_clint_req;\\n510:     ariane_axi::resp_t   axi_clint_resp;\\n511: \\n512:     clint #(\\n513:         .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH   ),\\n514:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH      ),\\n515:     \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 60,
+        "offset": 407,
+        "path": "src/axi_node/src/axi_node_intf_wrap.sv"
+      },
+      "status": "ok",
+      "path": "src/axi_node/src/axi_node_intf_wrap.sv",
+      "error": null,
+      "content": "407: ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////\n408: \n409: module connectivity_mapping #(\n410:     parameter NB_MANAGER      = 4,\n411:     parameter NB_SUBORDINATE       = 4,\n412:     parameter NB_PRIV_LVL    = 4,   \n413:     parameter PRIV_LVL_WIDTH = 4   \n414:   )(\n415:     input logic [PRIV_LVL_WIDTH-1:0] \t       priv_lvl_i,   \n416:     input logic [NB_SUBORDINATE-1:0][NB_MANAGER-1:0][NB_PRIV_LVL-1:0] access_ctrl_i,  \n417:     \n418:     output logic [NB_SUBORDINATE-1:0][NB_MANAGER-1:0]  connectivity_map_o\n419:   ); \n420: \n421:     \n422:   genvar i,j ; \n423: \n424:   generate\n425:     \n426:     for (i=0; i<NB_SUBORDINATE; i++)\n427:     begin\n428:       \tfor (j=0; j<NB_MANAGER; j++)\n429:       \tbegin\n430: \t  assign connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]) ; \n431:       \tend  \t\t    \t\t      \t\t\n432:     end\n433: \n434:   endgenerate \n435: \n436: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 3,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": ".",
+        "query": "debug_req_core"
+      },
+      "status": "ok",
+      "path": ".",
+      "error": null,
+      "content": "tb/ariane_testharness.sv:36: logic        debug_req_core;\ntb/ariane_testharness.sv:200: .debug_req_o          ( debug_req_core       ),\ntb/ariane_testharness.sv:599: .debug_req_i          ( debug_req_core      ),",
+      "truncated": false
+    },
+    {
+      "step": 3,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": ".",
+        "query": "priv_lvl_processor"
+      },
+      "status": "ok",
+      "path": ".",
+      "error": null,
+      "content": "tb/ariane_testharness.sv:439: riscv::priv_lvl_t           priv_lvl_processor;\ntb/ariane_testharness.sv:441: assign priv_lvl = priv_lvl_processor ;\ntb/ariane_testharness.sv:600: .priv_lvl_o\t          ( priv_lvl_processor  ),",
+      "truncated": false
+    },
+    {
+      "step": 3,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": ".",
+        "query": "test_en"
+      },
+      "status": "ok",
+      "path": ".",
+      "error": null,
+      "content": "src/axi_node/src/axi_node_intf_wrap.sv:24: input logic test_en_i,\nsrc/axi_node/src/axi_node_intf_wrap.sv:280: .test_en_i              ( test_en_i          ),\ntb/ariane_testharness.sv:33: logic        test_en;\ntb/ariane_testharness.sv:74: assign test_en = 1'b0;\ntb/ariane_testharness.sv:97: .test_mode_i  ( test_en              ),\ntb/ariane_testharness.sv:138: .testmode_i       ( test_en         ),\ntb/ariane_testharness.sv:197: .testmode_i           ( test_en              ),\ntb/ariane_testharness.sv:468: .test_en_i    ( test_en    ),\ntb/ariane_testharness.sv:520: .testmode_i  ( test_en        ),",
+      "truncated": false
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 40,
+        "offset": 590,
+        "path": "tb/ariane_testharness.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_testharness.sv",
+      "error": null,
+      "content": "590:         .CachedAddrBeg ( ariane_soc::DRAMBase )\n591:     ) i_ariane (\n592:         .clk_i                ( clk_i               ),\n593:         .rst_ni               ( ndmreset_n          ),\n594:         .boot_addr_i          ( ariane_soc::ROMBase ), // start fetching from ROM\n595:         .hart_id_i            ( '0                  ),\n596:         .irq_i                ( irqs                ),\n597:         .ipi_i                ( ipi                 ),\n598:         .time_irq_i           ( timer_irq           ),\n599:         .debug_req_i          ( debug_req_core      ),\n600: \t    .priv_lvl_o\t          ( priv_lvl_processor  ),  \n601:         .axi_req_o            ( axi_ariane_req      ),\n602:         .axi_resp_i           ( axi_ariane_resp     ),\n603: \t.umode_i              ( ariane_umode)            \n604:     );\n605: \n606:     axi_master_connect i_axi_master_connect_ariane (.axi_req_i(axi_ariane_req), .axi_resp_o(axi_ariane_resp), .master(slave[0]));\n607: \n608: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 5,
+      "tool": "model_message",
+      "args": {},
+      "status": "ok",
+      "content": "{\n  \"scope_id\": \"module2_permission_obligations_current_scope\",\n  \"results\": [\n    {\n      \"obligation_id\": \"PERM-AXI-CONN-PRIV-001\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"AXI requesters on slave[0] (Ariane core) and slave[1] (debug module AXI master) entering axi_node_intf_wrap.\",\n      \"operation\": \"Route AXI read/write transactions to target/peripheral master ports.\",\n      \"object\": \"Subordinate/target access policy for ariane_soc targets DRAM=0, GPIO=1, Ethernet=2, SPI=3, AES=4, UART=5, PLIC=6, CLINT=7, PKT=8, ROM2=9, ROM=10, Debug=11.\",\n      \"expected_guard\": \"For requester i and target j, route permission should be access_ctrl_i[i][j][priv_lvl_i], unless an intentional, documented alias is present and safe.\",\n      \"observed_behavior\": \"connectivity_mapping grants connectivity_map_o[i][j] when access_ctrl_i[i][j][priv_lvl_i] is set, but also grants target j==6 when access_ctrl_i[i][7][priv_lvl_i] is set. In ariane_soc_pkg, j==6 is PLIC and j==7 is CLINT, so CLINT permission also grants PLIC connectivity.\",\n      \"path\": \"tb/ariane_testharness.sv access_ctrl_reg -> access_ctrl[i][j] -> axi_node_intf_wrap.access_ctrl_i -> connectivity_mapping.connectivity_map_o -> axi_node.cfg_connectivity_map_i.\",\n      \"state_condition\": \"All privilege levels selected by priv_lvl_i; specific condition j==6 / PLIC and access_ctrl_i[i][7][priv_lvl_i]==1; NB_PRIV_LVL is riscv::NB_PRIV_LVL and priv_lvl_i width is riscv::PRIV_LVL_WIDTH in the harness.\",\n      \"impact\": \"A requester authorized for CLINT can be routed to PLIC even if PLIC permission is not set, potentially allowing interrupt-controller MMIO access beyond the configured policy.\",\n      \"rtl_evidence\": [\n        \"src/axi_node/src/axi_node_intf_wrap.sv:430: assign connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]);\",\n        \"tb/ariane_soc_pkg.sv:28-29: PLIC = 6, CLINT = 7.\",\n        \"tb/ariane_testharness.sv:450: assign access_ctrl[i][j] = access_ctrl_reg[i][4*j +: 4];\",\n        \"tb/ariane_testharness.sv:471-472: .priv_lvl_i(priv_lvl), .access_ctrl_i(access_ctrl).\",\n        \"src/axi_node/src/axi_node_intf_wrap.sv:383: .cfg_connectivity_map_i(s_connectivity_map).\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM-AXI-RANGE-ROUTE-002\",\n      \"status\": \"inconclusive\",\n      \"subject\": \"AXI requesters on the wrapper slave ports.\",\n      \"operation\": \"Route AW/AR transactions by address to target/peripheral ports.\",\n      \"object\": \"Address-map protected regions: Debug, ROM, ROM2, PKT, CLINT, PLIC, UART, AES, SPI, Ethernet, GPIO, DRAM.\",\n      \"expected_guard\": \"AW/AR address must match configured start/end range and connectivity/access-control policy before target valid reaches a manager/peripheral port.\",\n      \"observed_behavior\": \"The wrapper forwards slave AW/AR address/valid/prot/user into axi_node and passes configured start/end ranges and connectivity map into axi_node. The wrapper itself assigns s_valid_rule='1 and does not contain the range comparison or invalid-access response logic; that logic is inside axi_node, whose implementation is not visible in this scope.\",\n      \"path\": \"slave[j].aw/ar_* -> s_slave_aw/ar_* -> axi_node_i -> s_master_aw/ar_* -> master[i].aw/ar_*.\",\n      \"state_condition\": \"Address ranges are configured from ariane_soc_pkg bases and lengths. The visible ranges are non-overlapping by their listed base/length values, but the effect of s_valid_rule='1 and invalid/out-of-range responses cannot be proven without axi_node internals.\",\n      \"impact\": \"If axi_node treats all rules as valid without enforcing start/end, address-based isolation could be over-broadened; if axi_node enforces cfg_START/END normally, the obligation is satisfied. Visible RTL is insufficient to decide.\",\n      \"rtl_evidence\": [\n        \"src/axi_node/src/axi_node_intf_wrap.sv:282-321: slave AW/AR channels are connected into axi_node_i.\",\n        \"src/axi_node/src/axi_node_intf_wrap.sv:331-370: master AW/AR channels are driven from axi_node_i outputs.\",\n        \"src/axi_node/src/axi_node_intf_wrap.sv:380-383: cfg_START_ADDR_i, cfg_END_ADDR_i, cfg_valid_rule_i, cfg_connectivity_map_i connected to axi_node_i.\",\n        \"src/axi_node/src/axi_node_intf_wrap.sv:387: assign s_valid_rule = '1;\",\n        \"tb/ariane_testharness.sv:473-500: start_addr_i/end_addr_i populated from ariane_soc base/length constants.\",\n        \"tb/ariane_soc_pkg.sv:38-66: region lengths and bases.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM-DEBUG-AUTH-003\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"JTAG/SimDTM/DMI debug requester.\",\n      \"operation\": \"Issue DMI read/write/debug operations and use debug module AXI master path.\",\n      \"object\": \"dm_top debug module, debug slave region, and AXI master path reachable via dm_axi_m_req/slave[1], including protected memory/MMIO if routed.\",\n      \"expected_guard\": \"Debug requests should require debug enable plus authentication/key/lifecycle authorization before being accepted by dm_top or allowed to reach protected assets.\",\n      \"observed_behavior\": \"The visible harness selects JTAG vs SimDTM based on jtag_enable[0]. jtag_key is wired into dmi_jtag, but no visible comparison/authorization state gates debug_req_valid or debug_req before dm_top. If InclSimDTM is enabled, SimDTM can drive dmi_req_valid directly into the mux when jtag_enable[0]==0.\",\n      \"path\": \"SimJTAG/dmi_jtag or SimDTM -> debug_req_valid/debug_req/debug_resp_ready mux -> dm_top DMI interface -> dm_axi_m_req -> axi_master_connect -> slave[1] interconnect requester.\",\n      \"state_condition\": \"jtag_enable[0]=1 selects JTAG path; jtag_enable[0]=0 selects SimDTM/DMI path. jtag_enable comes from plusarg default 0. dmi_req_valid is tied off only when InclSimDTM is false.\",\n      \"impact\": \"Unauthenticated debug transactions may be accepted and may access or modify debug state and AXI-reachable protected memory/MMIO through the debug module master.\",\n      \"rtl_evidence\": [\n        \"tb/ariane_testharness.sv:107-109: jtag_enable set from plusarg, default 'h0.\",\n        \"tb/ariane_testharness.sv:112-117: debug request/response mux controlled only by jtag_enable[0].\",\n        \"tb/ariane_testharness.sv:135-154: dmi_jtag receives jtag_key and emits jtag_dmi_req/jtag_req_valid.\",\n        \"tb/ariane_testharness.sv:161-175: SimDTM drives dmi_req_valid, dmi_req address/op/data, and response handshakes.\",\n        \"tb/ariane_testharness.sv:186-213: dm_top receives dmi_req_valid_i(debug_req_valid), dmi_req_i(debug_req), dmi_resp_*.\",\n        \"tb/ariane_testharness.sv:215: debug module AXI master connected to slave[1].\",\n        \"tb/ariane_testharness.sv:554: jtag_key also connected from ariane_peripherals, but no visible auth gate on debug_req_valid.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM-DEBUG-RESET-004\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"JTAG/DMI debug interface through dm_top.\",\n      \"operation\": \"Trigger non-debug-module reset and core debug/halt request.\",\n      \"object\": \"System/core reset through ndmreset/ndmreset_n and core debug request through debug_req_core.\",\n      \"expected_guard\": \"Debug-triggered reset/halt/control signals should require authorized debug state and should not bypass reset/lifecycle permission boundaries.\",\n      \"observed_behavior\": \"dm_top drives ndmreset and debug_req_core. ndmreset is combined with external rst_ni in rstgen input; debug_req_core is connected directly to the Ariane core debug_req_i. The visible harness shows no authorization gate between DMI/JTAG requests and these dm_top outputs.\",\n      \"path\": \"DMI/JTAG request mux -> dm_top -> ndmreset_o/debug_req_o -> rstgen/core.\",\n      \"state_condition\": \"During normal rst_ni, asserted ndmreset from dm_top forces rstgen input low via rst_ni & (~ndmreset). debug_req_core reaches the core whenever dm_top asserts it. test_en is tied 0, but that does not authenticate debug control.\",\n      \"impact\": \"A debug requester may\n[TRUNCATED]",
+      "truncated": true
+    }
+  ]
+}

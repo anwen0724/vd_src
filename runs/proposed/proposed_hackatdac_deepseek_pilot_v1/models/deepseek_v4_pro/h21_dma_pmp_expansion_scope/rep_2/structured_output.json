@@ -1,0 +1,514 @@
+{
+  "analysis_summary": "The proposed method produced 10 finding(s) from 12 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "External we_flag inputs can override register lock, violating expected lock protection. This is a direct bypass of reglk_ctrl.",
+      "vulnerability_category": "Write to any register protected by reglk_ctrl/we_flag / Peripheral control registers (AES, SHA, HMAC, DMA config, etc.) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master (CPU, debugger, test logic) or internal FSM Operation: Write to any register protected by reglk_ctrl/we_flag Object: Peripheral control registers (AES, SHA, HMAC, DMA config, etc.) Expected guard: When the associated lock bit (from reglk_ctrl) is set, no further write should be accepted. Observed behavior: In peripheral instantiations, the reglk_ctrl input is ORed with external we_flag_* signals. For example, AES0: .reglk_ctrl_i ( reglk_ctrl[1*8+7:1*8] | we_flag_1 ). This means if we_flag_1 is high, the lock is bypassed regardless of the reglk_ctrl bit. we_flag_1 is an external input to riscv_peripherals with no visible gating. Path: External pin we_flag_1 -> OR gate -> AES0 lock override -> write enabled even when lock bit set. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Could allow unauthorized writes to critical AES configuration registers, potentially loading attacker keys or disabling encryption.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Need to confirm if we_flag_* pins are accessible in secure mode and if there is any authentication requirement.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "potential_warning",
+      "summary": "Cannot confirm or refute; requires further investigation of bootrom request generation.",
+      "vulnerability_category": "Read from boot ROM address space / Boot ROM data / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master (CPU, debug, DMA) Operation: Read from boot ROM address space Object: Boot ROM data Expected guard: Only reads from requesters with appropriate privilege (e.g., M-mode) should be allowed. Observed behavior: rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]; rom_req_acct is a signal of unknown origin. The assignment for rom_rdata exists but does not show other paths. No evidence that debug can assert rom_req_acct. Path: unknown Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Potential unauthorized boot ROM read if rom_req_acct can be forced.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Source of rom_req_acct not found in provided RTL snippets. Need full file scan.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "potential_warning",
+      "summary": "Inconclusive, but core_lock_reg reset default is permissive, which is a security concern.",
+      "vulnerability_category": "DMA memory transfer / System memory / peripheral address space / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: DMA engine or entity programming DMA registers Operation: DMA memory transfer Object: System memory / peripheral address space Expected guard: DMA memory access gated by pmp_allow; DMA registers protected by core_lock_reg. Observed behavior: DMA FSM performs PMP check: pmp_allow_new = pmp_data_allow; transfer only advances if pmp_allow_reg && pmp_data_allow. However, core_lock_reg resets to 0 (unlocked) and its gating of writes to DMA configuration registers is not observed. Furthermore, separate reset rst_8 can clear core_lock_reg independently. Path: CPU writes DMA registers -> if lock cleared, reprogram addresses -> DMA transfer bypassing protections. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Potential unauthorized DMA transfers to/from protected regions if lock can be cleared and registers rewritten.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Missing logic that gates DMA register writes by core_lock_reg; need to see we/en generation in dma_wrapper and how core_lock_reg participates.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "potential_warning",
+      "summary": "No direct evidence of exposure, but higher-level analysis of dmi_jtag required.",
+      "vulnerability_category": "Read of jtag_hash, fuse_data / jtag_hash register, fuse memory interface / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG/debug circuitry, internal scanner Operation: Read of jtag_hash, fuse_data Object: jtag_hash register, fuse memory interface Expected guard: jtag_hash must never be readable; fuse reads only from privileged software. Observed behavior: jtag_hash is a 256-bit signal connected to dmi_jtag input. No direct memory-mapped access found. fuse_req is driven by pkt_wrapper. td_o is tied to 0 in simulation, else connected to tdo from dmi_jtag. Path: No clear read path for hash or fuse via debug slave. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Unknown; requires analysis of dmi_jtag module internals.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need dmi_jtag RTL to verify that hash does not appear on td_o or DMI response.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "potential_warning",
+      "summary": "Inconclusive; no bypass found but submodule internals not inspected.",
+      "vulnerability_category": "Any memory or register access while testmode_i is high / All protected assets / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: External test pin (testmode_i) Operation: Any memory or register access while testmode_i is high Object: All protected assets Expected guard: testmode_i must not bypass access controls. Observed behavior: testmode_i is connected to dmi_jtag, dm_top, and clint. No usage that overrides lock or privilege checks observed in the provided RTL. Path: testmode_i -> dmi_jtag, dm_top, clint (no gating of security logic seen). Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Unknown",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need to examine submodules to see if testmode_i disables security checks.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "Partial reset via rst_8 clears DMA lock to permissive state, creating an inconsistent security state. This is a violation of OB-07.",
+      "vulnerability_category": "Assertion of a partial reset (e.g., rst_8) affecting lock registers / core_lock_reg (DMA lock), and potentially other locks / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Reset controller or source asserting individual resets Operation: Assertion of a partial reset (e.g., rst_8) affecting lock registers Object: core_lock_reg (DMA lock), and potentially other locks Expected guard: Security locks should reset to a locked/secure state and not be clearable separately from protected assets. Observed behavior: In dma_wrapper, core_lock_reg is reset to 0 (unlocked) when rst_8 is active. rst_8 is a dedicated reset signal from the RST_CTRL peripheral, which is software-controllable. This allows an attacker to clear the DMA lock by writing to RST_CTRL, while other parts of the system continue running. Path: software writes to RST_CTRL register -> rst_8 asserted -> core_lock_reg cleared -> DMA no longer locked. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Attacker can unlock DMA and reprogram transfers without needing to reset the whole system, violating security.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Need to confirm that rst_8 is indeed software-triggerable and that the RST_CTRL register is not itself protected.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F7",
+      "status": "confirmed_finding",
+      "summary": "Missing privilege check for CLINT timer registers; all bus masters can access them. This violates the expected guard.",
+      "vulnerability_category": "Write to machine timer compare register / CLINT registers (mtimecmp) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/clint/axi_lite_interface.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/clint/axi_lite_interface.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: AXI master accessing CLINT Operation: Write to machine timer compare register Object: CLINT registers (mtimecmp) Expected guard: Writes must be restricted to M-mode accesses. Observed behavior: axi_lite_interface does not perform any privilege check; it simply passes through read/write transactions. The AXI protocol signals aw_prot are tied to '0 for CLINT (line 669). The CLINT module itself receives axi_req_i with no privilege field. Therefore, any bus master (including user-mode) can write to CLINT. Path: CPU load/store (any privilege) -> AXI bus -> noc_axilite_bridge -> clint_axi_req (aw_prot=0) -> clint module -> register write. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Lower-privilege software can modify machine timer compare, potentially triggering spurious machine timer interrupts and affecting M-mode execution.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F8",
+      "status": "potential_warning",
+      "summary": "Cannot determine if PMP configuration is adequately protected from unauthorized modification.",
+      "vulnerability_category": "Write to PMP configuration registers / PMP entries / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/pmp/pmp.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/pmp/pmp.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: CPU instruction writing to PMP CSR, or debug DMI Operation: Write to PMP configuration registers Object: PMP entries Expected guard: PMP writes must be restricted to M-mode and not alterable via debug without authentication. Observed behavior: The PMP module takes conf_addr_i and conf_i as inputs; privilege level checking occurs in the pmp module itself, but the source of those config signals (CSR writes) is outside the RTL under inspection. No direct debug write path to PMP registers found in the RTL. Path: Likely CPU CSR write path (not visible) -> pmpcfg_i/pmpaddr_i -> pmp module. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If debug can write CSRs, PMP protections could be bypassed.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "CSR write logic and debug access to CSRs are not in the inspected files; need core RTL and debug module integration details.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F9",
+      "status": "potential_warning",
+      "summary": "Inconclusive; further inspection required.",
+      "vulnerability_category": "Write to acc_ctrl configuration / acc_ctrl register / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master writing to acc_ctrl registers Operation: Write to acc_ctrl configuration Object: acc_ctrl register Expected guard: acc_ctrl must be write-protected by reglk_ctrl or similar lock, and only allowed from privileged level. Observed behavior: acc_ctrl is an output from ACCT wrapper (i_acct_wrapper), which has reglk_ctrl input. The ACCT peripheral is at ACCTBase 0xfff5205000, separate from other peripherals. No evidence that it can be bypassed by debug or test. Path: ACCT wrapper AXI slave -> internal logic -> acc_ctrl output. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If acc_ctrl write path is unprotected, an attacker could reprogram access permissions.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need ACCT wrapper RTL to see its internal write protection and lock usage.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F10",
+      "status": "potential_warning",
+      "summary": "Inconclusive; race condition cannot be ruled out without full code.",
+      "vulnerability_category": "Write to a register after lock is asserted or during transition / Locked peripheral registers / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any initiator writing to a locked register Operation: Write to a register after lock is asserted or during transition Object: Locked peripheral registers Expected guard: Once lock is set, all writes must be blocked on the same cycle, without glitch. Observed behavior: In dma_wrapper, en = en_acct && acct_ctrl_i; we is not gated by core_lock_reg in the shown RTL. The lock bit's integration into we generation is not visible. In dma.sv, we_flag input exists but its use to gate writes is not shown. Path: dma_wrapper AXI interface -> we signal generation -> unknown gating by core_lock_reg. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Potential race condition if lock and write enable are not sampled together.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need complete write enable generation logic, including lock gating.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

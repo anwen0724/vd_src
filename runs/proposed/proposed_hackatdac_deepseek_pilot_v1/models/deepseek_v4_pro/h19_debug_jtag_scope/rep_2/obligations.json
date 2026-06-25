@@ -1,0 +1,320 @@
+{
+  "scope_id": "ariane_soc_scope",
+  "obligations": [
+    {
+      "obligation_id": "OBL-001",
+      "reason": "Debug JTAG path may bypass authentication for DMI bus access. The presence of a jtag_key input and a DMI bridge requires checking that all DMI transactions (reads, writes, and SBA accesses) are gated by a successful key comparison before reaching the hart or system bus.",
+      "subject": "external debugger via JTAG/DMI",
+      "operation": "DMI read/write and system bus access (SBA)",
+      "object": "hart debug CSRs, system bus memory/peripherals",
+      "expected_guard": "jtag_key == expected secret value; debug authentication state latched after correct key presentation",
+      "candidate_path": "dmi_jtag -> dm_top -> dm_csrs -> hart, and dmi_jtag -> dm_top -> dm_sba -> system bus",
+      "state_conditions_to_check": [
+        "jtag_key input value and comparison result",
+        "dmactive bit state",
+        "dmi_access flow control (shift_dr, update_dr)",
+        "reset state of authentication latch"
+      ],
+      "required_evidence_slots": [
+        "RTL implementation of jtag_key comparison in dmi_jtag",
+        "Gating logic for DMI request valid into dm_top",
+        "Enable condition for debug_req_o and SBA commands"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dm_csrs.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access bypass",
+        "Lock/Sticky Bit/Write Protection for debug enable"
+      ],
+      "priority": "high",
+      "uncertainty": "Whether jtag_key is actually used as an authentication token inside dmi_jtag, and whether the comparison is robust against timing/replay attacks."
+    },
+    {
+      "obligation_id": "OBL-002",
+      "reason": "ROM2 stores a key (pkey_loc_o) that feeds jtag_key. If ROM2 is writable from any bus master, the key can be replaced, defeating debug authentication.",
+      "subject": "any bus master (CPU, debug SBA)",
+      "operation": "write to ROM2 address range",
+      "object": "pkey storage in ROM2",
+      "expected_guard": "ROM2 write port is permanently disabled (we_i tied low) or address decode restricts writes to authorized state.",
+      "candidate_path": "Bus master -> system bus -> ariane_peripherals -> rom2 interface (we_i, wdata_i)",
+      "state_conditions_to_check": [
+        "ROM2 we_i signal generation in ariane_peripherals",
+        "Address mapping for ROM2 in system bus fabric",
+        "Reset state of ROM2 write protection logic (if any)"
+      ],
+      "required_evidence_slots": [
+        "rom2.sv module internals showing how we_i is handled (e.g., write ignored or disabled)",
+        "ariane_peripherals connection of rom2_we signal",
+        "Any write-protection lock that could be bypassed"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Lock/Sticky Bit/Write Protection",
+        "Crypto/Secret State Exposure via writable memory"
+      ],
+      "priority": "high",
+      "uncertainty": "rom2.sv is a small module; need to confirm if we_i is internally ignored or if writability is allowed under certain modes."
+    },
+    {
+      "obligation_id": "OBL-003",
+      "reason": "Machine-mode CSR registers (mstatus, medeleg, mideleg, etc.) must not be writable from lower privilege modes (U-mode, S-mode). The csr_regfile module contains privilege checks; an error could elevate privileges.",
+      "subject": "hart CPU in user/supervisor mode",
+      "operation": "CSR write instruction to machine-mode registers",
+      "object": "machine-mode CSRs (mstatus, mtvec, mepc, etc.)",
+      "expected_guard": "Privilege mode check in csr_regfile: only M-mode or debug mode can write machine-mode CSRs; S/U modes raise illegal instruction exception.",
+      "candidate_path": "Instruction execution -> CSR write request -> csr_regfile address decode and privilege validation",
+      "state_conditions_to_check": [
+        "Current privilege level (umode_i, debug_mode_q)",
+        "CSR address (csr_addr_i) and read_access_exception generation logic",
+        "write enable (csr_we) condition"
+      ],
+      "required_evidence_slots": [
+        "Privilege check implementation for each CSR write case",
+        "Handling of read_access_exception for write attempts"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Privilege escalation"
+      ],
+      "priority": "high",
+      "uncertainty": "Whether debug mode overrides all privilege checks and whether that could be exploited if debug access is unauthenticated."
+    },
+    {
+      "obligation_id": "OBL-004",
+      "reason": "Debug mode may grant unrestricted CSR access. If debug authentication is bypassed (see OBL-001), an attacker could modify security-critical CSRs such as debug_mode itself, PMP, or translation control registers.",
+      "subject": "debug module (via DMI) once authenticated",
+      "operation": "write to protected CSRs while hart is in debug mode",
+      "object": "security-critical CSRs: debug_mode, pmpcfg, satp, mstatus.MPRV, etc.",
+      "expected_guard": "Debug mode writes must still respect certain lock bits or require extra authorization; or formal specification of debug CSR accessibility.",
+      "candidate_path": "DMI -> dm_top -> dm_csrs -> hart debug mode -> CSR write path",
+      "state_conditions_to_check": [
+        "debug_mode_q state",
+        "Whether debug mode bypasses all CSR write protections",
+        "Any per-CSR write-protection bits unaffected by debug mode"
+      ],
+      "required_evidence_slots": [
+        "CSR write logic in debug mode inside csr_regfile",
+        "List of registers that are writable in debug mode",
+        "Documentation/code comments regarding debug CSR access"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/debug/dm_csrs.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access bypass of lock/privilege",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "RISC-V debug spec allows debug mode to access most CSRs; the vulnerability depends on whether debug mode itself can be entered without authorization."
+    },
+    {
+      "obligation_id": "OBL-005",
+      "reason": "Testmode inputs (testmode_i) are present in dm_csrs, dm_top, dmi_jtag, dmi_jtag_tap. These could enable scan chains or bypass authentication, leaking the jtag_key or enabling debug without authentication.",
+      "subject": "test/scan controller via testmode_i signal",
+      "operation": "scan out registers, bypass JTAG key comparison",
+      "object": "jtag_key register, authentication state, internal CSRs",
+      "expected_guard": "testmode_i is de-asserted or isolated from security-sensitive logic; scan chains do not include key material.",
+      "candidate_path": "testmode_i -> internal logic in dmi_jtag, dm_top, dm_csrs, dmi_jtag_tap",
+      "state_conditions_to_check": [
+        "How testmode_i affects dmi_access, shift_dr, update_dr",
+        "Whether testmode can force debug enable or bypass reset"
+      ],
+      "required_evidence_slots": [
+        "Definition of testmode_i signal route in each module",
+        "Any security-sensitive logic gated by testmode_i"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access bypass",
+        "Crypto/Secret State Exposure via scan"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to verify actual use of testmode_i; it might be unused or tied low in integration."
+    },
+    {
+      "obligation_id": "OBL-006",
+      "reason": "DMI reset signals (dmi_reset, dmihardreset) may clear authentication state, allowing an attacker to reset the debug module and then use debug without re-authentication.",
+      "subject": "external JTAG controlling DMI reset sequences",
+      "operation": "trigger DMI soft/hard reset",
+      "object": "debug authentication latch (key comparison result), dmactive bit",
+      "expected_guard": "DMI reset does not clear authentication latch, or after reset, debug remains disabled until key is presented again.",
+      "candidate_path": "dmi_jtag_tap dmi_reset_o -> dm_csrs/dmi_jtag -> internal debug state",
+      "state_conditions_to_check": [
+        "Effect of dmi_reset on key_valid or similar authentication signal",
+        "dmactive reset value",
+        "dmihardreset vs dmireset differences"
+      ],
+      "required_evidence_slots": [
+        "Internal signal for key_valid or jtag_key comparison outcome in dmi_jtag",
+        "Effect of reset lines on that signal"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dm_csrs.sv"
+      ],
+      "knowledge_used": [
+        "Reset/Lifecycle/State Residue affecting authentication",
+        "Lock/Sticky Bit reset safety"
+      ],
+      "priority": "medium",
+      "uncertainty": "Whether authentication is implemented as a sticky bit that survives reset or a volatile comparison that resets."
+    },
+    {
+      "obligation_id": "OBL-007",
+      "reason": "The system bus access (SBA) feature in the debug module can read/write arbitrary memory. If SBA is enabled without authentication, it can read ROM2 (jtag_key source) or write to memory-protected regions (e.g., secure monitor memory).",
+      "subject": "debugger via SBA",
+      "operation": "memory read/write to ROM2 address or other sensitive regions",
+      "object": "ROM2 key storage, secure memory regions",
+      "expected_guard": "SBA transactions are gated by the same authentication as DMI, or address decode prevents SBA from accessing ROM2 range.",
+      "candidate_path": "dm_csrs sbaddress/sbdata -> dm_sba -> system bus fabric -> ariane_peripherals -> rom2",
+      "state_conditions_to_check": [
+        "SBA enable condition (dmactive, authentication state)",
+        "Address routing in system bus; whether ROM2 is accessible to SBA master",
+        "Whether ROM2 read address space overlaps with SBA accessible region"
+      ],
+      "required_evidence_slots": [
+        "SBA master enable logic in dm_top/dm_csrs",
+        "System address map for ROM2 vs debug master visibility",
+        "Any PMP-like protection on SBA accesses"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "tb/ariane_peripherals.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP bypass",
+        "Crypto/Secret State Exposure via debug DMA"
+      ],
+      "priority": "high",
+      "uncertainty": "The exact address mapping and whether the SBA master is subject to any PMP checks needs verification."
+    },
+    {
+      "obligation_id": "OBL-008",
+      "reason": "The debug request signal (debug_req_o) can halt the hart and enter debug mode. If debug_req is asserted without authentication, an attacker can stop the processor and potentially exploit debug mode.",
+      "subject": "external debugger",
+      "operation": "assert halt request to hart",
+      "object": "hart execution control (halt, resume)",
+      "expected_guard": "debug_req_o is forced inactive until successful jtag_key authentication.",
+      "candidate_path": "dmi_jtag -> dm_top -> dm_csrs -> hartsel, haltreq generation",
+      "state_conditions_to_check": [
+        "Gating of debug_req_o by key_valid or authentication state within dm_top/dm_csrs",
+        "Whether dmactive can be set without key"
+      ],
+      "required_evidence_slots": [
+        "Logic that generates debug_req_o from DMI commands",
+        "The dependency (if any) on a key authentication signal"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dmi_jtag.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access bypass",
+        "State lifecycle of debug enable"
+      ],
+      "priority": "high",
+      "uncertainty": "Whether the RISC-V debug spec allows unauthenticated halting; the product may consider that acceptable, but for a security review it is a vulnerability."
+    },
+    {
+      "obligation_id": "OBL-009",
+      "reason": "The dmactive bit (debug module active) might be set to enable debug and later cleared to disable it. If there is no sticky lock to permanently disable debug after a secure boot phase, an attacker could re-enable debug later.",
+      "subject": "external debugger",
+      "operation": "write dmactive=1 via DMI after it was cleared",
+      "object": "debug module activation",
+      "expected_guard": "A sticky lock bit (e.g., dmactive_lock) prevents dmactive from being set again after it was cleared, until a system reset.",
+      "candidate_path": "DMI write to dmcontrol register (dmactive field) in dm_csrs",
+      "state_conditions_to_check": [
+        "Existence of a dmactive_lock or similar lock bit",
+        "Reset value of dmactive and any lock",
+        "Whether dmactive can be cleared by software (hart) and then later set by debugger"
+      ],
+      "required_evidence_slots": [
+        "DM control register implementation in dm_csrs for dmactive bit",
+        "Any logic that latches a permanent lock state"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv"
+      ],
+      "knowledge_used": [
+        "Lock/Sticky Bit/Write Protection",
+        "Lifecycle state lockout"
+      ],
+      "priority": "medium",
+      "uncertainty": "The design may not implement such a lock; it may be a missing security feature rather than a direct bug."
+    },
+    {
+      "obligation_id": "OBL-010",
+      "reason": "The jtag_key signal is an input to dmi_jtag. It may be observable through JTAG boundary scan or internal test/debug features if not explicitly excluded.",
+      "subject": "scan chains or debug observability logic",
+      "operation": "capture/sample jtag_key register during scan/dft",
+      "object": "jtag_key value",
+      "expected_guard": "jtag_key is excluded from scan chains; test capture does not include it; or testmode_i is disabled in production.",
+      "candidate_path": "testmode_i -> dmi_jtag/dmi_jtag_tap internals, boundary scan cells",
+      "state_conditions_to_check": [
+        "Whether jtag_key is part of any shift register or data signal observable during capture_dr",
+        "Whether dtmcs_select or bypass paths expose key bits"
+      ],
+      "required_evidence_slots": [
+        "RTL code showing where jtag_key is registered or used in dmi_jtag",
+        "Any shift register path that includes that register",
+        "Testmode influence on key comparison logic"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv"
+      ],
+      "knowledge_used": [
+        "Crypto/Secret State Exposure via scan/debug",
+        "Test access bypass"
+      ],
+      "priority": "medium",
+      "uncertainty": "The jtag_key might be compared asynchronously and not stored, reducing the exposure window."
+    },
+    {
+      "obligation_id": "OBL-011",
+      "reason": "Performance counters in the RISC-V core can potentially leak information about executed code (side channel). If accessible from user mode, they may violate a security policy.",
+      "subject": "user-mode software",
+      "operation": "read performance counters via CSR instructions",
+      "object": "performance counter registers (cycle, instret, etc.)",
+      "expected_guard": "mcounteren CSR bit settings restrict access to M/S modes only, or counters are disabled for user-mode reads.",
+      "candidate_path": "CSR read address decode -> performance counter read path -> csr_rdata_o",
+      "state_conditions_to_check": [
+        "mcounteren register value",
+        "read_access_exception generation for user-mode counter reads",
+        "Counter enables tied to privilege mode"
+      ],
+      "required_evidence_slots": [
+        "CSR read access logic for performance counters in csr_regfile",
+        "Implementation of mcounteren and scounteren"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Information leakage through performance monitoring"
+      ],
+      "priority": "low",
+      "uncertainty": "Standard RISC-V behavior allows M-mode to configure counter accessibility; if the hardware correctly implements the specification, this is not a bug but a configuration choice."
+    }
+  ]
+}

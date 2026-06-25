@@ -1,0 +1,365 @@
+{
+  "analysis_summary": "The proposed method produced 8 finding(s) from 8 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "Debug accesses use the current CPU privilege level without a separate debug authorization gate. This could allow an unauthenticated debug session to access sensitive peripherals if the core is halted in a high-privilege mode.",
+      "vulnerability_category": "read/write peripherals (HMAC, PKT, ACCT, REGLK) / Access-control matrix (acc_ctrl_c) and lock bits (reglk_ctrl) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "hmac_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "hmac_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug/test interface (SimDTM / dmi_jtag / testmode_i) Operation: read/write peripherals (HMAC, PKT, ACCT, REGLK) Object: Access-control matrix (acc_ctrl_c) and lock bits (reglk_ctrl) Expected guard: Debug accesses must be separately authenticated; not automatically inherit CPU privilege level. Observed behavior: debug_mode_i is not used to gate AXI access to security wrappers except key masking in HMAC. Access is granted solely based on priv_lvl_i and acc_ctrl_c. The acc_ctrl_c matrix assigns permissions using CPU privilege without debug-specific gating. dm_master is tied off, so no direct system bus from debug module, but debug can still issue loads/stores via core's interface using current privilege level. Path: Core CPU access -> priv_lvl_i -> acc_ctrl_c indexing -> peripheral AXI enable (en = en_acct && acct_ctrl_i). Debug mode does not alter this path. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debug can access any peripheral for which the current CPU privilege has acc_ctrl permission, without requiring separate debug authentication.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "How debug_mode_i influences priv_lvl_i; whether core stalls in debug mode and if privilege can be elevated.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Lock bits are cleared by jtag_unlock or at reset, directly violating the requirement that they default to locked and cannot be forced clear by debug/test.",
+      "vulnerability_category": "clear lock bits / reglk_ctrl lock bits stored in reglk_mem inside reglk_wrapper / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "reglk_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "reglk_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "reglk_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "reglk_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "reglk_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "reglk_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master (CPU, debug) Operation: clear lock bits Object: reglk_ctrl lock bits stored in reglk_mem inside reglk_wrapper Expected guard: Lock bits default to locked (1) and cannot be cleared by debug/test without authentication. Observed behavior: reglk_mem is cleared (set to 0) on reset. Reset condition: if(~(rst_ni && ~jtag_unlock && ~rst_9)). Thus asserting jtag_unlock (which comes from JTAG authentication) forces reglk_mem to zero, unlocking all peripherals. After reset (without jtag_unlock), reglk_mem is zero anyway (default unlocked). Path: jtag_unlock -> reglk_wrapper reset logic -> reglk_mem cleared -> reglk_ctrl_o all zeros -> reglk_ctrl_i bits low -> write protection bypassed. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "All peripheral lock bits become 0 (unlocked), allowing any AXI master to write to configuration registers of HMAC, PKT, ACCT, REGLK, etc.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Whether reglk_mem is ever initialized to a locked state (all 1s) by software; hardware reset defaults to unlocked.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "debug_mode_i does not gate writes to key registers; only the aggregated output is zeroed. A debug session can overwrite HMAC keys if lock is defeated.",
+      "vulnerability_category": "write to HMAC key registers (key0[]) / HMAC keys (key0[7:0]) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "hmac_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "hmac_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "hmac_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "hmac_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: debug_mode_i, AXI write interface Operation: write to HMAC key registers (key0[]) Object: HMAC keys (key0[7:0]) Expected guard: Key registers not writable in debug mode; debug_mode_i should block writes. Observed behavior: debug_mode_i only zeroes the aggregated key signal (assign key = debug_mode_i ? 256'b0 : ...). Writes to key0[] registers (addresses 26-33) are not blocked by debug_mode_i. They are gated only by en (acct_ctrl_i) and reglk_ctrl_i[5]. If lock bits are cleared (e.g., via jtag_unlock), debug can write arbitrary key values. The stored key values are not zeroed by debug_mode_i, so they could be used later if debug_mode is deasserted before initiating HMAC operation. Path: AXI write -> hmac_wrapper write side (address 26-33) -> key0[] registers updated regardless of debug_mode_i. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Attacker can inject known keys via debug interface, compromising HMAC integrity.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Whether debug can also read back key0[] (read path not present in snippet, likely write-only), but modification is a concern.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "Fuse read trigger is unprotected by lock, and data readout is only protected by a lock bit that can be cleared via jtag_unlock.",
+      "vulnerability_category": "read fuse_rdata_i / Fuse data / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "pkt_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any AXI master with access to pkt_wrapper Operation: read fuse_rdata_i Object: Fuse data Expected guard: Fuse reads protected by access control and lock, not available in debug/test. Observed behavior: pkt_wrapper read side: address 4 => rdata = reglk_ctrl_i[6] ? 'b0 : fuse_rdata_i; So lock bit 6 gates the read. Writes to fuse_req_o and fuse_addr_o are not lock-protected; only gated by acct_ctrl_i (en = en_acct && acct_ctrl_i). Thus an attacker with acct_ctrl_i permission (e.g., debug via CPU) can trigger a fuse read and then read the data if lock bit 6 is cleared (possible via jtag_unlock). Path: AXI write to address 0 sets fuse_req_o, address 1 sets fuse_addr_o -> fuse macro performs read -> address 4 returns fuse_rdata_i via rdata. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Fuse data exposed to untrusted agents, breaking immutability and confidentiality.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No debug_mode_i influence on pkt_wrapper; testmode_i not used.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "potential_warning",
+      "summary": "Insufficient evidence to determine if testmode_i bypasses security; appears limited to debug and timer modules.",
+      "vulnerability_category": "override access control / acc_ctrl, reglk_ctrl, HMAC/PKT state / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: testmode_i Operation: override access control Object: acc_ctrl, reglk_ctrl, HMAC/PKT state Expected guard: Test mode should not bypass security mechanisms. Observed behavior: testmode_i is connected only to dmi_jtag, dm_top, and clint instances. It is not used in any of the security wrappers (hmac, pkt, acct, reglk). No code observed that forces acc_ctrl or lock bypass in test mode. Path: testmode_i -> dmi_jtag (line 278), dm_top (line 361), clint (line 613) – no path to wrappers. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "No direct impact on peripheral access control found in inspected modules.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "dmi_jtag internals not available; could contain testmode-based bypasses. Also, testmode_i may affect other system-level paths not covered.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "potential_warning",
+      "summary": "Inconclusive – the design relies on correct priv_lvl_i generation; debug may be able to elevate privilege.",
+      "vulnerability_category": "read boot ROM / Boot ROM / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master with lower privilege Operation: read boot ROM Object: Boot ROM Expected guard: Only machine-mode and permitted acc_ctrl may access ROM; debug cannot override privilege. Observed behavior: rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]; access uses priv_lvl_i directly. No debug override; however, if debug halts the core in M-mode, priv_lvl_i would be M, granting access. It is unclear if priv_lvl_i reflects CPU privilege in debug mode or if debug can force it. Path: priv_lvl_i -> acc_ctrl_c row select -> ROM access enable. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Potential unauthorized ROM read if debug can achieve M-mode privilege.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Behavior of priv_lvl_i during debug halt not documented; need CPU core source.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F7",
+      "status": "potential_warning",
+      "summary": "Cannot assess without dmi_jtag internals; high risk if weak.",
+      "vulnerability_category": "assert jtag_unlock / jtag_unlock signal / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG interface (dmi_jtag, SimJTAG) Operation: assert jtag_unlock Object: jtag_unlock signal Expected guard: Strong cryptographic challenge-response required. Observed behavior: jtag_unlock drives reglk_wrapper reset condition and presumably other logic. It originates from dmi_jtag module using jtag_hash, ikey_hash, okey_hash inputs from fuse_mem. The authentication logic is not visible in inspected files. Path: fuse_mem -> jtag_hash/ikey/okey -> dmi_jtag -> jtag_unlock -> reglk_wrapper (line 15). Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If authentication is weak, entire lock infrastructure is bypassed.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "dmi_jtag RTL source not provided; cannot verify authentication strength.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F8",
+      "status": "confirmed_finding",
+      "summary": "Unintended privilege inheritance violates isolation; master 5 obtains master 4's rights.",
+      "vulnerability_category": "inherit permissions of master index 4 (likely HMAC or ACCT) / acc_ctrl_c access rights for j=5 / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Master index j=5 (peripheral 5, likely pkt_wrapper) Operation: inherit permissions of master index 4 (likely HMAC or ACCT) Object: acc_ctrl_c access rights for j=5 Expected guard: Independent access permissions; no inheritance. Observed behavior: assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]); This explicitly ORs master 4's permission bit into master 5's access for all privilege levels. Thus master 5 gains the same rights as master 4 regardless of its own configuration. Path: acc_ctrl raw bits -> acc_ctrl_c generation with OR condition. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "If master 4 is a high-privilege asset (e.g., ACCT), master 5 (pkt) can access resources it shouldn't. Could be used to escalate privileges.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Exact master assignments need confirmation; but the code clearly creates inheritance.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

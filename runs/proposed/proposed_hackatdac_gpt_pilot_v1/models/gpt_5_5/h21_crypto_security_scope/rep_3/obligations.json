@@ -1,0 +1,413 @@
+{
+  "scope_id": "piton_ariane_riscv_peripherals_permission_scope",
+  "obligations": [
+    {
+      "obligation_id": "PERM-RISCVPERIPH-DBG-001",
+      "reason": "The scope exposes JTAG pins and DMI/JTAG/SimJTAG instances plus debug request/master signals; verify that a debug/test subject cannot control protected debug capabilities without authorization.",
+      "subject": "external JTAG/SimJTAG/SimDTM debug requester",
+      "operation": "trigger debug entry, reset, read/write via debug module",
+      "object": "debug module controls and system access signals: debug_req_o, ndmreset_o, dmactive_o, dm_master_* and dm_slave_*",
+      "expected_guard": "debug authentication/authorization (e.g., jtag_unlock or equivalent debug enable) before DMI/JTAG can issue debug requests, memory transactions, ndmreset, or debug_req_o",
+      "candidate_path": "JTAG/DTM/DMI path through riscv_peripherals to debug module master/slave signals",
+      "state_conditions_to_check": [
+        "testmode_i state",
+        "debug_mode_i state",
+        "jtag_unlock asserted/deasserted",
+        "reset state of debug authorization"
+      ],
+      "required_evidence_slots": [
+        "subject: tck_i/tms_i/td_i or SimJTAG/SimDTM/DMI requester",
+        "operation: debug request/reset or memory read/write",
+        "object: debug_req_o/ndmreset_o/dm_master/dm_slave",
+        "expected guard: jtag_unlock/debug auth/testmode condition",
+        "observed RTL behavior and source lines",
+        "reachability from ports to object"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "evidence closure: subject, operation, object, guard, reachability"
+      ],
+      "priority": "high",
+      "uncertainty": "Need inspect actual assignments/instance connections because fact layer lists signals and instances but not guards."
+    },
+    {
+      "obligation_id": "PERM-REGLK-JTAG-002",
+      "reason": "reglk_wrapper has a jtag_unlock input and outputs lock controls used by multiple wrappers; verify JTAG cannot bypass sticky write protection without an authorization guard.",
+      "subject": "JTAG/debug requester",
+      "operation": "unlock, clear, or override register lock controls",
+      "object": "reglk_ctrl_o / reglk_ctrl lock state controlling peripheral register protections",
+      "expected_guard": "jtag_unlock should itself be authenticated and should not clear/override lock bits except under authorized lifecycle/debug state",
+      "candidate_path": "jtag_unlock generation and use from riscv_peripherals into reglk_wrapper",
+      "state_conditions_to_check": [
+        "lock set vs unset",
+        "jtag_unlock pulse/level behavior",
+        "reset default of lock registers",
+        "whether unlock is sticky or transient"
+      ],
+      "required_evidence_slots": [
+        "subject: JTAG/debug path driving jtag_unlock",
+        "operation: unlock/clear/override",
+        "object: reglk_ctrl_o and downstream reglk_ctrl_i guards",
+        "expected guard: authentication/lifecycle/debug authorization",
+        "observed behavior at generation and use site",
+        "source locations in top and wrapper"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer identifies the input but not whether unlock is protected or how lock bits update."
+    },
+    {
+      "obligation_id": "PERM-AES-WRITELOCK-003",
+      "reason": "AES wrappers expose AXI register interfaces and contain key/state signals with reglk_ctrl_i and debug_mode_i inputs; check lock enforcement at actual write enables.",
+      "subject": "software or bus master accessing AES MMIO",
+      "operation": "write/configure/start AES operation",
+      "object": "AES key registers/signals key0/key1/key2/key_reg*, cii_K/core_key, state/control/start registers",
+      "expected_guard": "writes to AES key/config/start registers should be blocked when corresponding reglk_ctrl_i bits indicate locked; all write paths including debug_mode_i paths should use the guard",
+      "candidate_path": "reglk_ctrl_i use in AES wrappers for key/control/data registers",
+      "state_conditions_to_check": [
+        "reglk_ctrl_i locked/unlocked",
+        "debug_mode_i asserted/deasserted",
+        "rst_* and rst_ni reset defaults",
+        "we/en/address decode"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/MMIO requester via ariane_axi",
+        "operation: register write/start",
+        "object: AES key/config/state registers",
+        "expected guard: reglk_ctrl_i bit and any access-control bit",
+        "observed write enable expression",
+        "source lines for decode and register update"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/aes0/aes0_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes1/aes1_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes2/aes2_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "high",
+      "uncertainty": "Exact address map and lock-bit mapping require source inspection."
+    },
+    {
+      "obligation_id": "PERM-AES-READ-004",
+      "reason": "The wrappers contain secret key/internal state signals and AXI rdata outputs; verify read decode does not expose protected material without guard.",
+      "subject": "software or bus master reading AES MMIO",
+      "operation": "read/expose through MMIO rdata",
+      "object": "AES key material and internal state: key0/key1/key2/key_reg*, key_big/cii_K/core_key, state/state_big/core_block; read data rdata",
+      "expected_guard": "secret key/internal state registers should not be readable, or reads should be mediated by lock/privilege/debug authorization; ciphertext/result reads should not expose stale secret-dependent state beyond intended output",
+      "candidate_path": "AES read muxes from key/state/result registers to AXI rdata and NoC response",
+      "state_conditions_to_check": [
+        "after key write",
+        "during/after encryption",
+        "debug_mode_i state",
+        "lock state",
+        "reset/stale output state"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/MMIO requester",
+        "operation: read",
+        "object: key/internal state signal",
+        "expected guard: non-readable or lock/privilege authorization",
+        "observed read mux expression",
+        "external path: rdata to ariane_axi output/NoC response"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/aes0/aes0_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes1/aes1_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes2/aes2_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need source read case statements to distinguish intended result registers from secret registers."
+    },
+    {
+      "obligation_id": "PERM-HMAC-WRITELOCK-005",
+      "reason": "HMAC wrapper has key/control signals and reglk_ctrl_i/acct_ctrl_i/debug_mode_i inputs; verify protected control and key updates are mediated.",
+      "subject": "software or bus master accessing HMAC MMIO",
+      "operation": "write/configure/start HMAC or bypass key hashing",
+      "object": "HMAC key/control registers/signals including key0, key_hash_bypass, startHash/newMessage, data",
+      "expected_guard": "HMAC key and bypass/control configuration writes should be gated by reglk_ctrl_i/acct_ctrl_i and not writable by unauthorized AXI subjects once locked",
+      "candidate_path": "HMAC wrapper key/data/control register writes and key_hash_bypass",
+      "state_conditions_to_check": [
+        "reglk_ctrl_i locked/unlocked",
+        "acct_ctrl_i allow/deny",
+        "debug_mode_i",
+        "rst_4/rst_ni reset",
+        "we/en/address decode"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/MMIO requester",
+        "operation: write/configure",
+        "object: HMAC key/control/bypass registers",
+        "expected guard: reglk_ctrl_i/acct_ctrl_i and no debug bypass unless authorized",
+        "observed write enable/address decode",
+        "source lines"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "high",
+      "uncertainty": "Need inspect wrapper register update logic and lock-bit mapping."
+    },
+    {
+      "obligation_id": "PERM-HMAC-READ-006",
+      "reason": "Fact layer lists HMAC key and derived hash byte signals near AXI rdata; check whether read mux exposes protected material.",
+      "subject": "software or bus master reading HMAC MMIO",
+      "operation": "read/expose secret or intermediate state",
+      "object": "HMAC key0, ikey_hash_bytes, okey_hash_bytes, internal hash state/data, rdata",
+      "expected_guard": "HMAC keys, inner/outer key hash bytes, and intermediate state should not be externally readable except through intended digest/status under authorization",
+      "candidate_path": "HMAC read muxes and outputs exposing key/intermediate hash state",
+      "state_conditions_to_check": [
+        "after key load",
+        "during and after hash",
+        "key_hash_bypass state",
+        "debug_mode_i",
+        "reset/stale rdata state"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/MMIO requester",
+        "operation: read",
+        "object: key/derived key/intermediate state",
+        "expected guard: non-readable or authorization/lock",
+        "observed read mux behavior",
+        "external propagation to AXI/NoC"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Signal list is truncated; inspect full module for rdata case statement and output registers."
+    },
+    {
+      "obligation_id": "PERM-REGLK-STICKY-007",
+      "reason": "The lock controller is central to downstream protection; verify lock bits cannot be rewritten or reset to an unsafe state through normal MMIO or peripheral resets.",
+      "subject": "software/MMIO requester and reset control path",
+      "operation": "write, set, clear, reset lock state",
+      "object": "register lock state reglk_ctrl_o/reglk_ctrl and reset controls rst_9/rst_ni",
+      "expected_guard": "lock bits should have safe reset defaults, become effective at all downstream use sites, and be sticky or only cleared by authorized reset/lifecycle/debug unlock",
+      "candidate_path": "reglk_wrapper register update and reset behavior",
+      "state_conditions_to_check": [
+        "rst_ni vs rst_9 behavior",
+        "jtag_unlock state",
+        "MMIO write to lock registers",
+        "locked state followed by attempted clear"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/MMIO requester or reset controller",
+        "operation: set/clear/reset lock",
+        "object: lock registers",
+        "expected guard: sticky semantics or authorized clear only",
+        "observed update/reset expressions",
+        "downstream use evidence"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Need source to determine reset polarity/default and if lock bits are write-once."
+    },
+    {
+      "obligation_id": "PERM-ACCT-POLICY-008",
+      "reason": "acct_wrapper outputs access control bits for peripherals; verify the policy registers themselves are protected from unauthorized modification.",
+      "subject": "software or bus master accessing accounting/access-control MMIO",
+      "operation": "write/change access policy",
+      "object": "access-control policy acc_ctrl_o/acc_ctrl and acct_ctrl_i/reglk_ctrl_i guarded registers",
+      "expected_guard": "updates to access-control matrix acc_ctrl_o should require authorization and/or lock; once configured/locked, unauthorized writes should not change peripheral access permissions",
+      "candidate_path": "acct_wrapper access-control policy programming and acc_ctrl distribution",
+      "state_conditions_to_check": [
+        "reset defaults of acc_ctrl",
+        "lock state",
+        "acct_ctrl_i state",
+        "we_flag input",
+        "rst_6/rst_ni"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/MMIO requester",
+        "operation: write access-control configuration",
+        "object: acc_ctrl_o policy bits",
+        "expected guard: reglk_ctrl_i/acct_ctrl_i/privilege",
+        "observed register update and decode",
+        "propagation to consumers"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Need inspect how acct_ctrl_i and we_flag gate writes."
+    },
+    {
+      "obligation_id": "PERM-TOP-ROUTE-009",
+      "reason": "riscv_peripherals has many NoC ports and acc_ctrl/reglk_ctrl signals; verify address decoding and routing enforce the access-control policy uniformly.",
+      "subject": "NoC/AXI bus master reaching peripheral wrappers",
+      "operation": "route read/write request to protected peripheral",
+      "object": "NoC/AXI routes to aes0/aes1/aes2/hmac/sha256/reglk/acct/debug/reset peripherals",
+      "expected_guard": "requests to protected peripherals (AES/HMAC/SHA/reglk/acct/reset/debug) should be mediated by access-control policy acc_ctrl, privilege/debug state, and correct address-range checks",
+      "candidate_path": "top-level peripheral routing / NoC address decode to crypto and control wrappers",
+      "state_conditions_to_check": [
+        "acc_ctrl allow/deny",
+        "priv_lvl_i",
+        "debug_mode_i",
+        "we_flag_* inputs",
+        "valid/ready handshakes"
+      ],
+      "required_evidence_slots": [
+        "subject: NoC/bus requester",
+        "operation: read/write route",
+        "object: protected peripheral target",
+        "expected guard: acc_ctrl/privilege/address range mediation",
+        "observed decode/gating behavior",
+        "source lines for request and response path"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer lacks request decode details; inspect top-level unique case around line ~811 and connections."
+    },
+    {
+      "obligation_id": "PERM-RESET-010",
+      "reason": "Top-level exposes multiple per-peripheral reset signals connected to protected crypto and policy wrappers; check reset authorization and post-reset defaults.",
+      "subject": "software/bus requester controlling reset peripheral or reset registers",
+      "operation": "reset/clear protected peripheral or policy state",
+      "object": "peripheral reset signals rst_1/rst_2/rst_3/rst_4/rst_6/rst_9/rst_11 and protected state in wrappers",
+      "expected_guard": "software-controlled or bus-controlled resets of crypto, lock, accounting, and debug-related blocks should require authorization and should not clear locks/secrets in a way that reopens protected access without policy mediation",
+      "candidate_path": "reset-control registers/signals rst_1..rst_13 distributed to security peripherals",
+      "state_conditions_to_check": [
+        "rst_ni global reset vs per-block rst_*",
+        "locked state before reset",
+        "post-reset default of keys/locks/access policy",
+        "debug/test mode during reset"
+      ],
+      "required_evidence_slots": [
+        "subject: reset register/MMIO/NoC requester",
+        "operation: assert reset",
+        "object: protected peripheral state or policy/lock state",
+        "expected guard: authorized reset and safe default",
+        "observed reset generation and use",
+        "impact on downstream access control"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/aes0/aes0_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes1/aes1_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/aes2/aes2_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/sha256/sha256_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need identify source of rst_* assignments in top-level."
+    },
+    {
+      "obligation_id": "PERM-SHA256-011",
+      "reason": "SHA256 wrapper has AXI interface with reglk_ctrl_i/acct_ctrl_i and hash core instance; verify protected register mediation and no unintended internal-state exposure.",
+      "subject": "software or bus master accessing SHA256 MMIO",
+      "operation": "write/configure/read hash engine registers",
+      "object": "SHA256 message/control/internal state and rdata output",
+      "expected_guard": "SHA control/message registers should be mediated by acct_ctrl_i/reglk_ctrl_i as applicable; internal hash state should not be exposed except intended digest/status",
+      "candidate_path": "SHA256 wrapper register access and result/state readback",
+      "state_conditions_to_check": [
+        "lock state",
+        "acct_ctrl_i",
+        "rst_3/rst_ni",
+        "we/en/address decode",
+        "after hash completion"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/MMIO requester",
+        "operation: read/write/start",
+        "object: SHA256 registers/internal state",
+        "expected guard: acct_ctrl_i/reglk_ctrl_i for protected writes and no secret/internal read exposure",
+        "observed read/write decode",
+        "source lines"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/sha256/sha256_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "Hash data may not be secret in all uses; focus on access-policy and unintended exposure paths."
+    },
+    {
+      "obligation_id": "PERM-DMA-BYPASS-012",
+      "reason": "Top-level includes DMA NoC ingress/egress ports alongside protected peripheral ports; check that DMA cannot access crypto/control/debug/register-lock regions without mediation.",
+      "subject": "DMA engine / DMA NoC port",
+      "operation": "DMA read/write to protected MMIO/peripheral region",
+      "object": "protected peripheral address ranges and registers reachable from buf_ariane_dma_noc2_data_i / ariane_dma_buf_noc3_data_o",
+      "expected_guard": "DMA-originated requests should be subject to the same access-control/address-range policy as CPU requests and should not bypass acc_ctrl/reglk/privilege checks",
+      "candidate_path": "DMA NoC path to protected peripheral address ranges",
+      "state_conditions_to_check": [
+        "acc_ctrl allow/deny",
+        "active DMA request handshakes",
+        "address range overlaps",
+        "configuration-update race if acc_ctrl changes during transfer"
+      ],
+      "required_evidence_slots": [
+        "subject: DMA NoC requester",
+        "operation: read/write MMIO/peripheral",
+        "object: AES/HMAC/SHA/reglk/acct/debug/reset regions",
+        "expected guard: acc_ctrl/address range/PMP-like check",
+        "observed routing and gating",
+        "source lines for DMA decode/path"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need inspect top-level decode and whether DMA is a distinct requester or only a peripheral endpoint."
+    }
+  ]
+}

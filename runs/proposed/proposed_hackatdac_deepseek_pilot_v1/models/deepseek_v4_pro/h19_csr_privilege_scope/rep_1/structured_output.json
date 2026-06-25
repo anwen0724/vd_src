@@ -1,0 +1,371 @@
+{
+  "analysis_summary": "The proposed method produced 5 finding(s) from 6 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "Debug mode entry via debug_req_i immediately grants M-mode privilege and full CSR write access without any authentication, enabling an attacker to arbitrarily modify security-critical machine registers.",
+      "vulnerability_category": "CSR write from debugger / machine-mode CSRs (mstatus, mepc, mcause, mtvec, mie, dcsr, dpc, etc.) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Privilege level forced to M in debug mode",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "debug mode entry on debug_req_i without any authentication check",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "CSR write occurs when csr_we is high, no debug-specific checks",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Privilege check uses priv_lvl_o (which is M in debug mode), passing all checks",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external debugger through debug_req_i, debug_mode_q Operation: CSR write from debugger Object: machine-mode CSRs (mstatus, mepc, mcause, mtvec, mie, dcsr, dpc, etc.) Expected guard: debug authentication/authorization state before granting CSR write access, or privilege-level check even in debug mode for certain CSRs Observed behavior: When debug_mode_q is set, CSR writes proceed without any authentication check. The privilege level is forced to M, allowing writes to all CSRs. Path: debug_req_i → debug_mode_d (line 646) → debug_mode_q; csr_we remains enabled for CSR write operations; no auth signal gates the write. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthorized modification of any CSR including critical machine state, compromising secure boot and enabling privilege escalation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No debug authentication signal (e.g., debug unlock) exists in the provided RTL; the design may rely on an external permanent disable mechanism not in scope.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "The privilege check contains an explicit exclusion for CSR_MEPC, allowing unprivileged (user-mode) writes to mepc, which can be exploited to hijack machine-mode exception returns.",
+      "vulnerability_category": "CSR write (csr_we=1) to machine-mode CSR / machine-mode CSRs, specifically mepc / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Privilege check with MEPC bypass explained",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "MEPC write assignment",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "priv_lvl_o assignment (U when umode_i=0 and debug off)",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: user-mode CSR instruction (priv_lvl_q = U, umode_i = 0) Operation: CSR write (csr_we=1) to machine-mode CSR Object: machine-mode CSRs, specifically mepc Expected guard: privilege-level check raising illegal instruction exception for any write by user mode Observed behavior: The privilege check at line 854 blocks most machine-mode CSR writes when priv_lvl_o = U, raising an illegal instruction exception. However, CSR_MEPC is explicitly excluded from this check, allowing user-mode code to write to mepc without exception. Path: fu_op / csr_addr_i → csr_we generation → write to mepc_q (line 484) → exception logic bypassed for MEPC (line 854). Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "User-mode code can modify the machine exception program counter (mepc), potentially redirecting return from exceptions to attacker-controlled addresses, enabling privilege escalation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The reason for the MEPC bypass is unclear; it may be a deliberate debug feature, but it violates the expected isolation between user and machine mode.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "Debug mode grants unrestricted read access to all CSRs, including those containing sensitive exception and state information, without any authentication mechanism.",
+      "vulnerability_category": "CSR read / sensitive CSRs (mepc, mcause, mtval, sepc, stval, dpc, dscratch0/1, etc.) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Privilege forced to M in debug mode, granting read access to all CSRs",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "CSR read for mepc returns mepc_q",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "DPC read available in debug mode",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Debug mode entry without authentication",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external debugger through debug_req_i Operation: CSR read Object: sensitive CSRs (mepc, mcause, mtval, sepc, stval, dpc, dscratch0/1, etc.) Expected guard: debug authentication before granting read access to non-debug CSRs, or restriction that debug mode cannot read certain CSRs without proper privilege Observed behavior: In debug mode, priv_lvl_o is forced to M, so the CSR read path (csr_read_process) returns the current values of all CSRs including mepc, mcause, etc. No authentication or filtering is applied. Path: debug_req_i → debug_mode_q → csr_read_process (lines 149-260) → csr_rdata_o; the privilege check uses M. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Information disclosure of sensitive processor state (exception cause, return addresses) to an external debugger without authentication, aiding attacks against secure execution.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No authentication gating on CSR read path; the design may assume debug access is physically protected, but such protection is not visible in the RTL.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "Debug mode (and any M-mode code) can unconditionally clear the TSR, TW, and TVM bits, undermining the hypervisor-like protections they provide. An external debugger can easily disable these security features.",
+      "vulnerability_category": "write/clear TSR, TW, TVM bits in mstatus / mstatus register bits TSR, TW, TVM / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "MSTATUS write logic; no special handling of TSR/TW/TVM",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Privilege is M in debug mode, allowing mstatus writes",
+          "supports_claim": ""
+        },
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "TSR, TW, TVM bits defined in mstatus",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: supervisor-mode code or debug interface Operation: write/clear TSR, TW, TVM bits in mstatus Object: mstatus register bits TSR, TW, TVM Expected guard: only machine mode (or trusted firmware) may clear these bits; debug should not bypass without authentication Observed behavior: Supervisor mode cannot write to mstatus due to privilege check (requires M). However, in debug mode, privilege is M, and writing to mstatus directly sets these bits. No additional write protection exists for TSR/TW/TVM; they can be cleared arbitrarily. Path: csr_we and address decode to mstatus → mstatus_d = csr_wdata (line 438) with selective hardwiring but no restriction on TSR/TW/TVM. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker using debug mode can disable hypervisor-like protections (TSR, TW, TVM), breaking supervisor isolation and potentially enabling further attacks.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "There is no evidence of a write-lock mechanism for TSR/TW/TVM bits; once set, they can be cleared by any M-mode write.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "Debug mode can be entered immediately after reset via a simple debug_req_i assertion, allowing an attacker to take control before any software lock can be applied, bypassing secure boot.",
+      "vulnerability_category": "enter debug mode / CPU execution flow (PC, privilege state) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "debug_mode_d set directly from debug_req_i without any lock or lifecycle check",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Reset state: debug_mode_q is 0, no lock set",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Sequential process shows no lifecycle or lock state for debug",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external debugger asserting debug_req_i shortly after reset Operation: enter debug mode Object: CPU execution flow (PC, privilege state) Expected guard: debug mode should be disabled until a secure boot sequence explicitly enables it, or an authentication handshake is completed Observed behavior: After reset, debug_mode_q is 0, but debug_req_i can set debug_mode_d = 1 as soon as the first valid instruction commits. No lifecycle state or lock mechanism prevents this. Path: debug_req_i → debug_mode_d assignment (line 646) → debug_mode_q set, set_debug_pc_o asserted. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker can hijack the boot process before any security initialization, gaining full control over the processor, bypassing secure boot.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "There is no debug authorization signal, lifecycle controller, or boot lock visible in this scope. The design might rely on an external permanent disable pin, but that is not present.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

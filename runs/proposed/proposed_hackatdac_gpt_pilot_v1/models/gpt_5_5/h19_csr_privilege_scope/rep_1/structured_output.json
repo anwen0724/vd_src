@@ -1,0 +1,1130 @@
+{
+  "analysis_summary": "The proposed method produced 8 finding(s) from 8 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "External debug_req_i can drive debug entry and PC redirection with only AMO-commit masking visible; no debug authorization/lifecycle policy is present in the inspected RTL.",
+      "vulnerability_category": "enter debug mode / redirect PC to debug handler / debug_mode_q/debug_mode_o, set_debug_pc_o/set_debug_pc, dpc_q, frontend/controller debug PC control / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external debug interface requester on top-level debug_req_i Operation: enter debug mode / redirect PC to debug handler Object: debug_mode_q/debug_mode_o, set_debug_pc_o/set_debug_pc, dpc_q, frontend/controller debug PC control Expected guard: debug entry should be mediated by debug authorization/lifecycle policy and should not be asserted solely by an external request; entry should also respect pipeline/AMO safety conditions Observed behavior: ariane masks debug_req_i only with ~amo_valid_commit. csr_regfile debug logic can set dpc_d=pc_i, debug_mode_d=1, set_debug_pc_o=1 on an external debug request while not already in debug mode. debug_mode_q then selects dm::ExceptionAddress and causes privileged debug execution semantics. No authentication, lifecycle, lock, or debug-enable policy signal is visible in the inspected path. Path: src/ariane.sv debug_req_i -> debug_req -> csr_regfile.debug_req_i -> debug_mode_q/debug_mode_o and set_debug_pc_o -> ariane set_debug_pc/debug_mode -> frontend.set_debug_pc_i/debug_mode_i and controller.set_debug_pc_i Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An external debug requester can force debug mode and redirect execution to the debug exception address without an RTL-visible authorization guard.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Debug CSR backing state is decoded in the normal CSR read/write path; non-debug access raises an illegal-instruction sideband, but the update cases themselves are not gated by debug_mode_q.",
+      "vulnerability_category": "read/write debug CSRs through normal CSR instruction interface / CSR_DCSR, CSR_DPC, CSR_DSCRATCH0, CSR_DSCRATCH1; dcsr_q, dpc_q, dscratch0_q, dscratch1_q / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software-visible CSR instruction interface Operation: read/write debug CSRs through normal CSR instruction interface Object: CSR_DCSR, CSR_DPC, CSR_DSCRATCH0, CSR_DSCRATCH1; dcsr_q, dpc_q, dscratch0_q, dscratch1_q Expected guard: debug CSRs should be readable/writable only in debug mode or by authorized debug context; non-debug U/S/M CSR instructions should trap without updating debug backing state Observed behavior: The read mux returns dcsr_q/dpc_q/dscratch values for 0x7b0-0x7b3. The write case directly assigns dcsr_d, dpc_d, dscratch0_d, dscratch1_d for the same addresses. exception_ctrl separately asserts illegal instruction for csr_addr_i[11:4] == 8'h7b when !debug_mode_q; however, the observed update case is not locally conditional on debug_mode_q. Path: csr_addr_i/csr_wdata_i/csr_op_i -> csr_we/csr_rdata -> debug CSR read/write cases -> dcsr_d/dpc_d/dscratch*_d -> sequential debug CSR registers; separate csr_exception_o for !debug_mode_q debug CSR access Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "If illegal-instruction handling does not squash same-cycle CSR state updates, normal software may read or modify protected debug CSR state outside debug mode.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "Machine CSR privilege checking is implemented as a sideband exception, while machine CSR updates are decoded directly; CSR_MEPC is explicitly exempted from the privilege failure condition.",
+      "vulnerability_category": "read/write machine-level CSR state / CSR_MSTATUS, CSR_MEDELEG, CSR_MIDELEG, CSR_MIE, CSR_MTVEC, CSR_MSCRATCH, CSR_MEPC, CSR_MCAUSE, CSR_MTVAL, CSR_MIP and mstatus privilege-control fields / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software CSR access path from decoded instructions Operation: read/write machine-level CSR state Object: CSR_MSTATUS, CSR_MEDELEG, CSR_MIDELEG, CSR_MIE, CSR_MTVEC, CSR_MSCRATCH, CSR_MEPC, CSR_MCAUSE, CSR_MTVAL, CSR_MIP and mstatus privilege-control fields Expected guard: machine CSRs and privilege-control fields should be writable only by machine privilege or equivalent trap/exception mediation; U/S writes must be rejected and must not update backing state Observed behavior: CSR address privilege checking uses csr_addr.csr_decode.priv_lvl in exception_ctrl, but the machine CSR write case updates backing registers under csr_we and address decode. The privilege check is not used to gate the update assignments and includes a special exception excluding CSR_MEPC from illegal-instruction generation. Path: decoded CSR instruction -> csr_op_i/csr_addr_i/csr_wdata_i -> csr_we/csr_wdata -> machine CSR write cases -> *_d registers -> sequential q registers; exception_ctrl separately asserts csr_exception_o Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Lower-privilege CSR operations may be able to corrupt machine privilege, interrupt, or trap-routing state if sideband exceptions do not suppress state updates; MEPC appears explicitly accessible despite privilege mismatch.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "SATP updates are decoded directly in csr_regfile without a visible TVM guard; translation outputs are driven from satp_q and privilege state.",
+      "vulnerability_category": "configure address translation policy through SATP and SFENCE/VMA-related controls / CSR_SATP, satp mode/asid/ppn state, en_translation_o, en_ld_st_translation_o, satp_ppn_o, asid_o, flush_tlb_ctrl_ex / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software CSR access path / lower privilege modes Operation: configure address translation policy through SATP and SFENCE/VMA-related controls Object: CSR_SATP, satp mode/asid/ppn state, en_translation_o, en_ld_st_translation_o, satp_ppn_o, asid_o, flush_tlb_ctrl_ex Expected guard: SATP writes and translation-control changes should be allowed only from permitted S/M privilege and should be blocked/trapped when machine TVM policy forbids S-mode SATP/SFENCE changes Observed behavior: csr_regfile read mux exposes SATP and write case updates satp_d from csr_wdata when mode is MODE_OFF or MODE_SV39, with ASID masking. No TVM check is visible in the SATP write case. tvm_o is output from mstatus_q.tvm and routed to id_stage, suggesting ID may mediate SFENCE/TVM, but the provided RTL evidence does not show TVM gating of csr_regfile SATP updates. Translation outputs are directly derived from satp_q and priv_lvl_o. Path: csr_addr_i/csr_wdata_i/csr_op_i -> CSR_SATP write case -> satp_d/satp_q -> satp_ppn_o/asid_o/en_translation_o/en_ld_st_translation_o -> execute/MMU path; tvm_o -> ariane tvm_csr_id -> id_stage.tvm_i Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "S-mode software may be able to change address translation state despite TVM policy if ID-stage trapping does not fully prevent the CSR update; this affects memory isolation through PPN/ASID/translation-enable outputs.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "Status policy fields drive MMU/privilege outputs; SSTATUS uses a mask, but MSTATUS accepts raw csr_wdata and update gating depends on sideband privilege exceptions rather than local write guards.",
+      "vulnerability_category": "change memory/privilege access policy through status CSRs / mstatus/sstatus permission bits SUM, MXR, MPRV, TVM, TW, TSR and related outputs / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software CSR access path Operation: change memory/privilege access policy through status CSRs Object: mstatus/sstatus permission bits SUM, MXR, MPRV, TVM, TW, TSR and related outputs Expected guard: writes to fields that relax memory or supervisor controls should be restricted to sufficiently privileged modes and preserve field-level architectural masking Observed behavior: SSTATUS read/write uses SMODE_STATUS_READ_MASK/WRITE_MASK, but mask definitions were not present in the provided evidence. MSTATUS write assigns mstatus_d = csr_wdata, then only hardwires some fields such as sd/sxl/uxl/fs. Policy outputs sum_o, mxr_o, tvm_o, tw_o, tsr_o, and mprv are driven from mstatus_q. Lower-privilege blocking relies on the generic sideband privilege exception, not on write-case gating. Path: csr_addr_i/csr_wdata_i/csr_op_i -> CSR_SSTATUS/CSR_MSTATUS write cases -> mstatus_d/mstatus_q -> sum_o/mxr_o/tvm_o/tw_o/tsr_o/mprv/en_ld_st_translation_o -> ID/EX/MMU Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthorized or improperly masked writes to mstatus policy bits can relax memory access checks (SUM/MXR/MPRV) or alter S-mode restrictions (TVM/TW/TSR).",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Definitions of SMODE_STATUS_READ_MASK and SMODE_STATUS_WRITE_MASK were not found in the provided observations.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "User-visible counters and performance CSRs are readable without mcounteren/scounteren mediation; performance counter writes drive perf_we_o from CSR writes.",
+      "vulnerability_category": "read/write counters and performance-monitoring CSRs / cycle_q, instret_q, perf_data_i/perf_data_o/perf_addr_o/perf_we_o, CSR_CYCLE/CSR_INSTRET and performance event CSRs / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: U/S/M CSR requester through software CSR instruction path Operation: read/write counters and performance-monitoring CSRs Object: cycle_q, instret_q, perf_data_i/perf_data_o/perf_addr_o/perf_we_o, CSR_CYCLE/CSR_INSTRET and performance event CSRs Expected guard: user/supervisor reads of counters and performance events should be controlled by counter-enable CSRs and writes/configuration should be privileged Observed behavior: CSR_CYCLE and CSR_INSTRET reads return cycle_q and instret_q; performance event CSR reads return perf_data_i. perf_addr_o is fed from csr_addr.address. Performance CSR writes set perf_data_o=csr_wdata and perf_we_o=1. SCOUNTEREN reads as 0 and write is a no-op; MCOUNTEREN is defined but no implementation evidence was observed. No counter-enable gating is visible for user-level 0xC00+ reads. Path: CSR_CYCLE/CSR_INSTRET/perf CSR address decode -> csr_rdata_o/perf_data_i; perf CSR write decode -> perf_data_o/perf_we_o -> ariane i_perf_counters Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Lower-privilege software can observe timing/performance events and possibly configure performance counters, leaking execution activity or enabling side-channel measurement beyond intended policy.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F7",
+      "status": "confirmed_finding",
+      "summary": "Custom cache-control CSRs drive cache enable/flush behavior; write mediation relies on generic CSR privilege sideband rather than local update gating.",
+      "vulnerability_category": "configure or flush instruction/data caches / CSR_ICACHE, CSR_DCACHE, icache_q, dcache_q, icache_en_o, dcache_en_o, icache_flush_ctrl_cache, dcache_flush_ctrl_cache / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "include/riscv_pkg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software CSR access path Operation: configure or flush instruction/data caches Object: CSR_ICACHE, CSR_DCACHE, icache_q, dcache_q, icache_en_o, dcache_en_o, icache_flush_ctrl_cache, dcache_flush_ctrl_cache Expected guard: cache enable/disable and cache flush controls should be writable only by privileged software and not by U-mode or unauthorized aliases Observed behavior: Custom CSR_ICACHE/CSR_DCACHE addresses are defined at 0x700/0x701. csr_regfile read mux returns icache_q/dcache_q, outputs icache_en_o/dcache_en_o derive from those registers, and ariane routes them to the cache subsystem. Search evidence shows flush_o side effects near write cases, consistent with CSR side effects. The provided observations do not show a cache-specific guard; enforcement appears to depend on generic CSR privilege exception logic, whose exception is sideband to state update. Path: csr_addr_i/csr_wdata_i/csr_op_i -> CSR_ICACHE/CSR_DCACHE write cases -> icache_q/dcache_q -> icache_en_o/dcache_en_o -> ariane cache subsystem; csr flush_o -> controller flush_icache/flush_dcache controls Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthorized cache enable/disable or flush can affect memory-system behavior, performance, coherency, or isolation if sideband CSR exceptions do not suppress the write side effect.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact CSR_ICACHE/CSR_DCACHE write-case lines were not fully visible, but the fact layer and search observations show corresponding backing state, read paths, outputs, and side-effect flush locations.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F8",
+      "status": "confirmed_finding",
+      "summary": "Return operations mret/sret/dret are accepted by csr_op_logic without local privilege/debug-state guards; PC selection can use protected EPC/DPC based solely on decoded return signals.",
+      "vulnerability_category": "return from exception/debug and change PC/privilege state / mepc_q, sepc_q, dpc_q, epc_o, eret_o, debug_mode_q, priv_lvl_d / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/ariane.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software instruction path / decoded system instructions Operation: return from exception/debug and change PC/privilege state Object: mepc_q, sepc_q, dpc_q, epc_o, eret_o, debug_mode_q, priv_lvl_d Expected guard: mret/sret/dret should be permitted only in corresponding privilege/debug state, and should restore PC/privilege from the correct protected EPC register; sret should respect TSR Observed behavior: csr_op_logic sets mret, sret, or dret for MRET/SRET/DRET opcodes and suppresses normal CSR read/write side effects, but no current-privilege or debug_mode_q check is visible in that block. Return-update logic unconditionally performs eret_o and updates priv_lvl_d/status/debug_mode_d when the corresponding decoded signal is true. epc_o selects mepc_q by default, sepc_q if sret, and dpc_q if dret. Generic privilege checking applies only when csr_we or csr_read is true, so it does not cover return ops after csr_we/csr_read are cleared. id_stage receives priv_lvl_i/tvm_i/tw_i/tsr_i/debug_mode_i and may reject illegal returns, but that evidence is outside the provided RTL observations. Path: decoded system return instruction -> csr_op_i MRET/SRET/DRET -> mret/sret/dret -> eret_o/epc_o/priv_lvl_d/debug_mode_d -> ariane frontend/controller PC redirection Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "If decode-stage legality checks do not prevent these CSR ops, lower modes or non-debug code can redirect PC from protected EPC/DPC and alter privilege/debug state.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "ID-stage legality handling for MRET/SRET/DRET and TSR was not included in the provided observations.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

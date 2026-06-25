@@ -1,0 +1,210 @@
+{
+  "scope_id": "riscv_peripherals_permission_analysis",
+  "obligations": [
+    {
+      "obligation_id": "OB-1",
+      "reason": "Debug access to DMA configuration registers may bypass peripheral register locks, allowing an unauthenticated debugger to reprogram DMA and violate memory protection.",
+      "subject": "Debug module (dm_slave_req, dm_master AXI)",
+      "operation": "write",
+      "object": "DMA control registers (start_reg, length_reg, source_addr_*, dest_addr_*, core_lock_reg)",
+      "expected_guard": "Debug master writes to DMA registers must be gated by debug authentication or the same register lock (reglk_ctrl) that applies to CPU-initiated accesses.",
+      "candidate_path": "debug.request → dm_slave_req → AXI fabric → dma_wrapper register interface",
+      "state_conditions_to_check": [
+        "debug_mode_i",
+        "jtag_unlock",
+        "reglk_ctrl for DMA peripheral",
+        "we_flag for DMA"
+      ],
+      "required_evidence_slots": [
+        "debug request to AXI master translation",
+        "AXI address decode matching DMA register space",
+        "write enable gating with lock bits",
+        "reset and lock default values"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm whether the debug path can physically target the DMA register block and whether the lock network covers all write enables."
+    },
+    {
+      "obligation_id": "OB-2",
+      "reason": "The jtag_unlock signal may unconditionally clear peripheral register locks without requiring prior JTAG authentication, weakening the entire lock mechanism.",
+      "subject": "JTAG debug interface (jtag_hash, jtag_unlock)",
+      "operation": "set/unlock",
+      "object": "Register lock control outputs (reglk_ctrl_o) that gate peripheral writes",
+      "expected_guard": "jtag_unlock must be asserted only after successful authentication (e.g., a hash challenge/response) and must not be driven high by default or by trivial JTAG commands.",
+      "candidate_path": "JTAG TAP → jtag_unlock signal → reglk_wrapper → reglk_ctrl_o",
+      "state_conditions_to_check": [
+        "JTAG authentication state machine status",
+        "jtag_hash comparison result",
+        "reset value of jtag_unlock"
+      ],
+      "required_evidence_slots": [
+        "assignment for jtag_unlock",
+        "logic that gates jtag_unlock with authentication",
+        "reset and power-on default of jtag_unlock"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "The existence of jtag_hash suggests authentication may be implemented, but need to verify that jtag_unlock is properly gated by a successful authentication event."
+    },
+    {
+      "obligation_id": "OB-3",
+      "reason": "The access control matrix computation `acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i])` hardcodes an override for peripheral index 5, potentially granting access irrespective of the privilege level stored in acc_ctrl.",
+      "subject": "CPU privilege level (priv_lvl_i) used in access control",
+      "operation": "read/write",
+      "object": "Peripheral with index 5 (possibly a debug or special function block)",
+      "expected_guard": "Access to each peripheral should be controlled solely by the programmed acc_ctrl bits for the current privilege level, without any hardwired OR exceptions unless documented as safe.",
+      "candidate_path": "priv_lvl_i → acc_ctrl_c row selection → gating of peripheral read/write enables",
+      "state_conditions_to_check": [
+        "value of acc_ctrl bit for privilege level and peripheral",
+        "value of the overriding bit acc_ctrl[4*4+i]",
+        "whether index 5 corresponds to a protected asset"
+      ],
+      "required_evidence_slots": [
+        "full decode of acc_ctrl_c usage in enable generation",
+        "list of peripherals and their index mapping",
+        "comment or documentation explaining index 5 override"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Index 5 may be a non-sensitive debug port intentionally open; further analysis is required to determine if this constitutes a security weakness."
+    },
+    {
+      "obligation_id": "OB-4",
+      "reason": "The fuse read path (pkt_wrapper) may expose secret key material or other sensitive fuse values to software unless the read is gated by privilege and/or a post-boot lock.",
+      "subject": "CPU or debug master (AXI read requests)",
+      "operation": "read",
+      "object": "Fuse data (fuse_rdata_i) containing keys (pkey_loc)",
+      "expected_guard": "Fuse read access must be limited to machine mode only or disabled after boot via a sticky lock bit, preventing user-mode or debugger access.",
+      "candidate_path": "AXI read → pkt_wrapper decode → fuse_req_o → external fuse block → fuse_rdata_i → read response",
+      "state_conditions_to_check": [
+        "priv_lvl_i of requestor",
+        "reglk_ctrl bit for pkt peripheral",
+        "acct_ctrl bit for pkt",
+        "lifecycle state after boot (e.g., lock)"
+      ],
+      "required_evidence_slots": [
+        "address decode for fuse space in pkt_wrapper",
+        "read data mux and enable gating",
+        "lock bit usage in read path"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to verify whether the fuse read interface is always enabled or if there is a post-boot lockdown; also confirm that pkey_loc is a sensitive key."
+    },
+    {
+      "obligation_id": "OB-5",
+      "reason": "The write-enable flags (we_flag_0 through we_flag_4) might be overridden when the system is in debug mode or test mode, allowing writes to locked peripherals.",
+      "subject": "Debug mode (debug_mode_i) or test mode (testmode_i)",
+      "operation": "write",
+      "object": "Peripherals protected by we_flag signals",
+      "expected_guard": "Debug and test modes must not bypass the hardware write gate signals; if they provide alternative write paths, those must be subject to the same or stronger access control.",
+      "candidate_path": "debug_mode_i / testmode_i → alternative we_flag generation or direct enable",
+      "state_conditions_to_check": [
+        "debug_mode_i assertion",
+        "testmode_i assertion",
+        "how we_flag signals are combined with mode signals"
+      ],
+      "required_evidence_slots": [
+        "logic that generates final write enable for each peripheral",
+        "any debug-specific backdoor into peripheral write strobes"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "The exact role of we_flags and their interaction with debug/test modes is not yet known from the fact layer; need deeper signal tracing."
+    },
+    {
+      "obligation_id": "OB-6",
+      "reason": "DMA may not lock configuration registers (start, length, source/dest addresses) while a DMA transfer is active, allowing an attacker to hijack an in-flight transfer and read/write arbitrary memory.",
+      "subject": "CPU or debug master",
+      "operation": "write",
+      "object": "DMA configuration registers (start_reg, length_reg, source_addr_*, dest_addr_*)",
+      "expected_guard": "While a DMA transfer is active (busy), configuration writes should be blocked by a hardware lock or the software-set lock bit (core_lock_reg).",
+      "candidate_path": "AXI write → dma_wrapper decode → register file → enable gating",
+      "state_conditions_to_check": [
+        "DMA busy / active state",
+        "value of core_lock_reg",
+        "reset default of lock registers",
+        "possibility to clear lock while busy"
+      ],
+      "required_evidence_slots": [
+        "conditional write enable for DMA registers",
+        "lock register write and clear conditions",
+        "DMA state machine"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to inspect how core_lock_reg is used; if it only locks writes but allows reads, still risky; if busy flag is not considered, TOCTOU may exist."
+    },
+    {
+      "obligation_id": "OB-7",
+      "reason": "The debug path may retain access to the boot ROM after the system has finished booting, allowing a debugger to read or modify the initial firmware that may contain secrets or access-control policy.",
+      "subject": "Debug module (dm_master AXI)",
+      "operation": "read/write",
+      "object": "boot ROM memory (i_bootrom_bm, i_bootrom_linux)",
+      "expected_guard": "After boot, the boot ROM should either be locked (read-only or no access) or the debug port should be restricted by the same access-control policy that applies to the CPU (e.g., acc_ctrl_c check for bootrom).",
+      "candidate_path": "dm_master AXI → address decode → boot ROM selection",
+      "state_conditions_to_check": [
+        "debug_mode_i / dmactive_o",
+        "boot phase indicator",
+        "acc_ctrl_c bits for bootrom",
+        "rom_req gating function (acc_ctrl_c[priv_lvl_i][0])"
+      ],
+      "required_evidence_slots": [
+        "boot ROM read/write enables",
+        "debug master address reachability to boot ROM region",
+        "access control logic for debug-initiated transactions"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "The boot ROM may be intentionally readable; need to assess whether any sensitive data resides there and whether debug access is acceptable."
+    }
+  ]
+}

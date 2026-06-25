@@ -11,7 +11,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the proposed-method Hack@DAC pilot batch.")
     parser.add_argument(
         "--config",
-        default="configs/proposed_hackatdac_deepseek_gpt_pilot.yaml",
+        default="configs/proposed_hackatdac_deepseek_pilot.yaml",
         help="Batch config path relative to src/.",
     )
     args = parser.parse_args()

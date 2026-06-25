@@ -42,6 +42,7 @@ endmodule
     assert Path(record.permission_fact_layer_path).exists()
     assert Path(record.obligations_path).exists()
     assert Path(record.inspection_records_path).exists()
+    assert Path(record.tool_observations_path).exists()
     assert Path(record.closure_records_path).exists()
     assert Path(record.final_answer_path).exists()
     output_text = Path(record.structured_output_path).read_text(encoding="utf-8")
@@ -52,3 +53,4 @@ endmodule
     assert metadata["method_name"] == "proposed_initial"
     assert metadata["provider"] == "mock"
     assert metadata["final_answer_path"] == record.final_answer_path
+    assert metadata["tool_observations_path"] == record.tool_observations_path

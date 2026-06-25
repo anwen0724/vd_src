@@ -1,0 +1,471 @@
+{
+  "analysis_summary": "The proposed method produced 6 finding(s) from 6 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "Debug master can access safe_domain without authentication due to missing authorization gate.",
+      "vulnerability_category": "read/write memory-mapped accesses / safe_domain memory/peripheral registers / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "rtl/pulpissimo/pulpissimo.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Instantiation of adbg_axi_module with direct AXI master port connection, no lock/auth signals.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "FSM for AXI module operations does not check any lock or authentication state before issuing read/write commands.",
+          "supports_claim": ""
+        },
+        {
+          "file": "rtl/pulpissimo/pulpissimo.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "safe_domain_i instance, debug AXI/LINT buses connect to safe_domain without any access control gating.",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Search for 'lock', 'debug_locked', 'auth', 'lifecycle' returned no hits, confirming absence of any gating mechanism.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG debug master (adbg_axi_module/adbg_lint_module) Operation: read/write memory-mapped accesses Object: safe_domain memory/peripheral registers Expected guard: Debug authorization state gating access to safe domain bus transactions Observed behavior: No authorization or lock mechanism present between debug TAP and AXI/LINT bus initiation. The debug module can generate AXI transactions to any address reachable by the bus fabric, including safe_domain peripherals. Path: adbg_tap_top -> adbg_top -> adbg_axi_module/adbg_lint_module -> AXI/LINT master ports -> AXI/LINT fabric -> safe_domain bus slaves Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker with JTAG access can read/write sensitive safe domain components (e.g., key storage, secure configuration) without any authentication or authorization.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Debug command registers are writable via JTAG without any authentication or lock mechanism.",
+      "vulnerability_category": "write to debug module command/control register / Command or internal register inside adbg_axi_module/adbg_or1k_module / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Registers operation, address_counter, word_count, etc. loaded from input_shift_reg on update_dr without any lock condition. No lock bit signal present.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Similar lack of lock gating for CPU debug command registers.",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Search for 'lock', 'auth', 'password' in adv_dbg_if directory returned no results.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG user (via TAP) Operation: write to debug module command/control register Object: Command or internal register inside adbg_axi_module/adbg_or1k_module Expected guard: A lock bit or authentication state preventing command execution when not unlocked. Observed behavior: No lock bit or authentication state exists in the debug module. The internal registers (e.g., operation, address, word count) are loaded directly from the JTAG data register stream when update_dr_i is asserted, without any condition check. Path: TDI -> adbg_tap_top -> debug_select_i -> adbg_axi_module input_shift_reg -> update_dr loads command/control registers Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker can immediately write any debug command (read, write, burst) to initiate bus transactions to arbitrary addresses, completely bypassing any intended debug authorization.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "No lock glue exists, and any future lock would likely be cleared by reset, enabling unauthorized debug access.",
+      "vulnerability_category": "assertion of trstn_i or power-on reset / debug lock state (if existed, e.g., a lock register in adbg_or1k_status_reg or top-level) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Reset logic uses trstn_i to clear all registers; no provision for a lock bit.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "All internal state registers reset to default on trstn_i, no lock register.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Status register includes CPU state but no global lock bit; reset cleared on trstn_i.",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Search for 'lock' or 'sticky' in debug modules returned nothing.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG debug interface (trstn_i, tck domain resets) Operation: assertion of trstn_i or power-on reset Object: debug lock state (if existed, e.g., a lock register in adbg_or1k_status_reg or top-level) Expected guard: Lock bit must be sticky and not cleared by normal reset; only by authenticated unlock sequence. Observed behavior: No lock register exists in any inspected module. The concept of a debug lock is entirely absent. If a lock were to be added, any reset would necessarily clear it unless specifically designed as a non-volatile or fuse-based register. Path: trstn_i resets all flops in debug modules (e.g., adbg_tap_top, adbg_axi_module) to default state, which would clear any hypothetical lock bit. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "A hardware lock mechanism, if ever implemented, would be vulnerable to reset attacks (power glitch, test mode) causing unlock. Currently, the absence of any lock is a worse security gap.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "Debug master can access any memory region without respecting PMP or any memory protection, bypassing secure partitions.",
+      "vulnerability_category": "AXI read/write / System memory (DMEM, IMEM) that might be protected by PMP for CPU cores / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "rtl/pulpissimo/soc_domain.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "AXI transactions are initiated with fixed AXI ID (no master-ID based filtering). No PMP or equivalent check.",
+          "supports_claim": ""
+        },
+        {
+          "file": "rtl/pulpissimo/soc_domain.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "No evidence of a debug-specific access control block or PMP integration for non-CPU masters.",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Search for 'pmp' in rtl directory returned no results, indicating PMP is absent or only present in CPU local logic.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug master (adbg_axi_module) Operation: AXI read/write Object: System memory (DMEM, IMEM) that might be protected by PMP for CPU cores Expected guard: Debug AXI transactions should be subject to same memory protection as CPU, or debug should be disabled when PMP is active. Observed behavior: No PMP logic or memory protection unit is present in the debug path. The debug master AXI interface generates transactions with a fixed AXI ID (likely 0) and does not interact with any address-checking module. The fabric (AXI crossbar) does not appear to filter based on master ID or implement any PMP-like checks for debug accesses. Path: adbg_axi_module -> adbg_axi_biu -> AXI master ports -> AXI fabric -> memory slaves Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debug accesses bypass any PMP restrictions set by the secure software, allowing arbitrary reads/writes to protected code/data regions, defeating memory isolation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "Debug path can read any safe_domain peripheral registers, potentially leaking secret material if crypto or key storage is present.",
+      "vulnerability_category": "Read access / Potential internal buffer/register holding secret material (e.g., crypto key in safe_domain) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "rtl/pulpissimo/safe_domain.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "The module can issue read requests to any AXI address without filtering.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Comments reference PASSWORD but no RTL logic for a password or lock.",
+          "supports_claim": ""
+        },
+        {
+          "file": "rtl/pulpissimo/safe_domain.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "No debug access gating or address range exclusion for sensitive peripherals.",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Search for 'zeroize', 'clear', 'filter' in debug path returned no relevant logic.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug master Operation: Read access Object: Potential internal buffer/register holding secret material (e.g., crypto key in safe_domain) Expected guard: Address space filter or zeroization before debug read possibility. Observed behavior: The debug AXI module can access any address in the system's memory map, including safe_domain peripherals. No address filtering or region-based gating exists in the debug path. The adv_dbg_if.sv file contains a comment mentioning 'PASSWORD' but no actual password check or access restriction. There is no mechanism to clear sensitive data upon debug access. Path: adbg_axi_module -> AXI bus -> safe_domain peripheral bus -> crypto core registers (if present) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "If a crypto core exists in safe_domain, its internal state (keys, intermediate values) could be read directly via debug, compromising secrets.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Actual existence of crypto core in safe_domain is not confirmed from source list, but the obligation warns about potential exposure.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "Debug interface lacks lifecycle-based disablement and is always active.",
+      "vulnerability_category": "Enable (clock, reset, selection) / Debug block (adbg_top, adbg_tap_top) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "rtl/pulpissimo/jtag_tap_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "rtl/pulpissimo/safe_domain.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "rtl/pulpissimo/jtag_tap_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Clock and reset pass straight through; no gating based on lifecycle. The confreg register does not provide a debug disable bit.",
+          "supports_claim": ""
+        },
+        {
+          "file": "rtl/pulpissimo/safe_domain.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "No lifecycle state signal generated or passed to debug domain.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "No input for lifecycle; debug modules operate unconditionally.",
+          "supports_claim": ""
+        },
+        {
+          "file": "",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Search for 'lifecycle_state' in rtl returned no hits.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug interface enable logic Operation: Enable (clock, reset, selection) Object: Debug block (adbg_top, adbg_tap_top) Expected guard: Lifecycle state signal from OTP/fuses must gate debug operation. Observed behavior: The debug interface is permanently enabled. The JTAG clock (tck) is always supplied, and the reset (trstn) is connected. No lifecycle state signal is fed into the debug modules to disable them. The safe_domain does not output a lifecycle signal to the debug chain. The adbg_tap_top uses a 9-bit configuration register (confreg) which includes a bit from soc_jtag_reg_i, but that is used for clock selection (sel_fll_clk_o) and not as a debug disablement control. Path: lifecycle_state (missing) -> adbg_tap_top clock/reset gating (none) -> debug module always operational Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debug interface remains functional in deployed products, allowing attackers full system access in secure lifecycle stages where debug should be disabled.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

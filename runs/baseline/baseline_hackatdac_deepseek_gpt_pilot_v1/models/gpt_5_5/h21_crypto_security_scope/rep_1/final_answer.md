@@ -1,383 +1,239 @@
 {
-  "analysis_summary": "The RTL under the input scope implements a privilege-indexed access-control matrix (`acc_ctrl_c[priv_lvl_i][...]`) that gates AXI register access to crypto and control peripherals. The visible source shows several permission-related weaknesses: the ACCT permission table resets to all ones, a sideband `we_flag` can OR-enable permission bits, JTAG/debug unlock clears register-lock state, and ACCT/REGLK themselves are protected only by the mutable ACCT matrix in the visible wrappers. These issues can allow unauthorized or overly broad access to crypto/control registers unless external boot, NoC filtering, debug authentication, or firmware sequencing mitigates them outside the provided source scope.",
+  "analysis_summary": "The visible RTL implements a privilege-indexed access-control scheme (`acc_ctrl_c[priv_lvl_i][...]`) and per-peripheral register locks (`reglk_ctrl_i`). Several permission-related weaknesses are visible. The strongest issue is in `acct_wrapper`: top-level configuration sets `NB_SLAVE = 1` while `NB_PERIPHERALS = 14`, but the access-control memory is sized as `NB_SLAVE*3` and the code still indexes entries up to 9 and exports only a concatenation of entries 0..2. This creates out-of-bounds/incorrect access-control state for many peripherals and can cause incorrect permission decisions in the top-level gating. Additional permission risks exist in the register-lock controller: asserting `jtag_unlock` clears all lock registers, and a locked write to `reglk_mem[2]` incorrectly loads `reglk_mem[3]`, potentially corrupting lock state. These issues can weaken or bypass intended access permissions for crypto/security peripherals.",
   "findings": [
     {
-      "finding_id": "FINDING-001",
+      "finding_id": "PERM-ACCT-MIS-SIZED-001",
       "status": "confirmed_finding",
-      "summary": "ACCT permission memory resets to all ones, making the access-control matrix permissive by default.",
-      "vulnerability_category": "Permission default / fail-open access control",
+      "summary": "Access-control memory is incorrectly sized and indexed relative to the top-level 14-peripheral permission scheme, undermining privilege-based permission enforcement.",
+      "vulnerability_category": "permission/access-control misconfiguration; incorrect authorization state storage",
       "affected_locations": [
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 80,
-          "line_end": 84,
+          "line_start": 30,
+          "line_end": 33,
           "module": "acct_wrapper",
-          "signal_or_register": "acct_mem"
+          "signal_or_register": "acc_ctrl_o, AcCt_MEM_SIZE, acct_mem"
         },
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 49,
-          "line_end": 49,
-          "module": "acct_wrapper",
-          "signal_or_register": "acc_ctrl_o"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 215,
-          "line_end": 222,
-          "module": "riscv_peripherals",
-          "signal_or_register": "acc_ctrl / acc_ctrl_c"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/aes0/aes0_wrapper.sv",
-          "line_start": 78,
-          "line_end": 78,
-          "module": "aes0_wrapper",
-          "signal_or_register": "en / acct_ctrl_i"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/aes1/aes1_wrapper.sv",
-          "line_start": 201,
-          "line_end": 201,
-          "module": "aes1_wrapper",
-          "signal_or_register": "en / acct_ctrl_i"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/aes2/aes2_wrapper.sv",
           "line_start": 79,
-          "line_end": 79,
-          "module": "aes2_wrapper",
-          "signal_or_register": "en / acct_ctrl_i"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
-          "line_start": 80,
-          "line_end": 80,
-          "module": "hmac_wrapper",
-          "signal_or_register": "en / acct_ctrl_i"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/sha256/sha256_wrapper.sv",
-          "line_start": 74,
-          "line_end": 74,
-          "module": "sha256_wrapper",
-          "signal_or_register": "en / acct_ctrl_i"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 84,
-          "line_end": 84,
+          "line_end": 103,
           "module": "acct_wrapper",
-          "object": "acct_mem[j] <= 32'hffffffff",
-          "evidence_type": "source_assignment",
-          "description": "ACCT permission memory is reset to all ones.",
-          "supports_claim": "Shows the access-control storage defaults to a fully set bit pattern after reset-like conditions."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 49,
-          "line_end": 49,
-          "module": "acct_wrapper",
-          "object": "assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};",
-          "evidence_type": "source_assignment",
-          "description": "ACCT output is derived directly from the permission memory.",
-          "supports_claim": "Shows programmed ACCT bits become the top-level permission vector."
+          "signal_or_register": "acct_mem[00]..acct_mem[09]"
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 222,
+          "line_start": 211,
           "line_end": 222,
           "module": "riscv_peripherals",
-          "object": "assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]);",
-          "evidence_type": "source_assignment",
-          "description": "Top-level maps access-control vector into privilege/peripheral matrix.",
-          "supports_claim": "Shows top-level permissions are selected by privilege and peripheral from ACCT output."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src",
-          "line_start": null,
-          "line_end": null,
-          "module": "multiple wrappers",
-          "object": "assign en = en_acct && acct_ctrl_i",
-          "evidence_type": "search_result",
-          "description": "Crypto and control wrappers gate AXI register access with `acct_ctrl_i`.",
-          "supports_claim": "Shows a set permission bit is used as an enable for local register access across AES, HMAC, SHA256, ACCT, and REGLK wrappers."
-        }
-      ],
-      "reasoning_summary": "The wrappers use `acct_ctrl_i` as an access enable. The ACCT memory that drives these permission bits resets to `32'hffffffff`; because `1` is used as allow, reset initializes the permission matrix to a permissive state. Unless a trusted sequence reliably reprograms and locks permissions before untrusted access can occur, unauthorized privilege levels may access crypto or security-control peripherals after reset or after an ACCT reset event.",
-      "security_impact": "Unauthorized software or bus requesters may access AES, HMAC, SHA256, ACCT, REGLK, or related control registers during reset/boot windows, allowing unauthorized crypto operations, key programming, result reads, or permission reconfiguration.",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "The sanitized scope does not include complete boot firmware, upstream NoC filters, or system reset sequencing. These could mitigate exploitability, but the local RTL default is permissive.",
-      "recommended_follow_up": [
-        "Change ACCT reset defaults to deny-by-default for security-sensitive peripherals, then explicitly enable only required trusted privilege levels during secure initialization.",
-        "Add assertions or formal checks that no untrusted privilege level can access ACCT/REGLK/crypto registers after reset before authorization.",
-        "Verify system boot ordering and NoC filtering to confirm whether an exposure window exists."
-      ]
-    },
-    {
-      "finding_id": "FINDING-002",
-      "status": "potential_warning",
-      "summary": "Sideband `we_flag` can force-enable access-control bits independent of programmed ACCT policy.",
-      "vulnerability_category": "Permission bypass via sideband override",
-      "affected_locations": [
-        {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 49,
-          "line_end": 49,
-          "module": "acct_wrapper",
-          "signal_or_register": "we_flag / acc_ctrl_o"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 31,
-          "line_end": 31,
-          "module": "acct_wrapper",
-          "signal_or_register": "we_flag"
+          "signal_or_register": "NB_SLAVE, NB_PERIPHERALS, acc_ctrl, acc_ctrl_c"
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 55,
-          "line_end": 59,
+          "line_start": 926,
+          "line_end": 1906,
           "module": "riscv_peripherals",
-          "signal_or_register": "we_flag_0..we_flag_4"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1194,
-          "line_end": 1194,
-          "module": "riscv_peripherals",
-          "signal_or_register": "reglk_ctrl_i / we_flag_1"
+          "signal_or_register": "acc_ctrl_c[priv_lvl_i][...]"
         }
       ],
       "evidence": [
         {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 31,
-          "line_end": 31,
-          "module": "acct_wrapper",
-          "object": "input logic we_flag;",
-          "evidence_type": "source_declaration",
-          "description": "`we_flag` is an input to the ACCT wrapper.",
-          "supports_claim": "Shows `we_flag` is externally supplied to ACCT logic."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 49,
-          "line_end": 49,
-          "module": "acct_wrapper",
-          "object": "acct_mem[3*0+0]|{8{we_flag}}",
-          "evidence_type": "source_assignment",
-          "description": "`we_flag` is replicated and ORed into ACCT output permissions.",
-          "supports_claim": "Shows `we_flag` can force a subset of permission bits high independent of `acct_mem`."
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 211,
+          "line_end": 222,
+          "module": "riscv_peripherals",
+          "object": "NB_SLAVE, NB_PERIPHERALS, acc_ctrl_c",
+          "evidence_type": "source",
+          "description": "Top-level declares only one slave but fourteen peripherals, and derives privilege-indexed access-control bits from `acc_ctrl`.",
+          "supports_claim": "`NB_SLAVE = 1`, `NB_PERIPHERALS = 14`, and `acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | ...` show that permission decisions are expected for 14 peripherals and 4 privilege levels."
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 55,
-          "line_end": 59,
+          "line_start": 517,
+          "line_end": 1906,
           "module": "riscv_peripherals",
-          "object": "input we_flag_0..we_flag_4",
-          "evidence_type": "source_declaration",
-          "description": "Top-level exposes multiple write-enable flag inputs.",
-          "supports_claim": "Shows these bypass-influencing signals are top-level inputs in the visible module."
+          "object": "acc_ctrl_c[priv_lvl_i][...]",
+          "evidence_type": "source_search",
+          "description": "Top-level gates many peripheral requests using the privilege-indexed `acc_ctrl_c[priv_lvl_i][...]`, including ROM and multiple crypto/security peripherals.",
+          "supports_claim": "Visible connections include `assign rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]` and wrapper inputs such as `.acct_ctrl_i(acc_ctrl_c[priv_lvl_i][12])`, `[13]`, `[10]`, `[1]`, `[2]`, `[11]`, `[3]`, `[4]`, `[5]`, `[6]`, `[9]`, and `[8]`."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 30,
+          "line_end": 45,
+          "module": "acct_wrapper",
+          "object": "AcCt_MEM_SIZE, acct_mem, acc_ctrl_o",
+          "evidence_type": "source",
+          "description": "`acct_wrapper` sizes its memory from `NB_SLAVE*3`, not from the number of peripherals, and exports access-control bits only from `acct_mem[0]`, `[1]`, and `[2]`.",
+          "supports_claim": "`localparam AcCt_MEM_SIZE = NB_SLAVE*3`, `reg [AcCt_MEM_SIZE-1:0][31:0] acct_mem`, and `assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};` do not scale correctly to 14 peripherals."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 79,
+          "line_end": 103,
+          "module": "acct_wrapper",
+          "object": "acct_mem[00]..acct_mem[09]",
+          "evidence_type": "source",
+          "description": "Despite the memory being only 3 entries when `NB_SLAVE=1`, the write/read address maps access entries up to `acct_mem[09]`.",
+          "supports_claim": "The case statement writes `acct_mem[00]` through `acct_mem[09]`, which exceeds the visible `AcCt_MEM_SIZE = NB_SLAVE*3` configuration when `NB_SLAVE` is 1."
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1194,
-          "line_end": 1194,
+          "line_start": 1719,
+          "line_end": 1725,
           "module": "riscv_peripherals",
-          "object": ".reglk_ctrl_i  ( reglk_ctrl[1*8+7:1*8] | we_flag_1 )",
-          "evidence_type": "source_connection",
-          "description": "A write-enable flag is also ORed into a register-lock control bus for one peripheral.",
-          "supports_claim": "Shows sideband flag logic can alter lock-control input behavior outside programmed `reglk_ctrl` state."
+          "object": "i_acct_wrapper parameters",
+          "evidence_type": "source_search",
+          "description": "Top-level passes `NB_SLAVE` and `NB_PERIPHERALS` into `acct_wrapper`, so the problematic size relationship is active in this instantiation.",
+          "supports_claim": "Search results show `acct_wrapper` instantiated with `.NB_SLAVE ( NB_SLAVE )` and `.NB_PERIPHERALS ( NB_PERIPHERALS )`; top-level search showed `NB_SLAVE = 1` and `NB_PERIPHERALS = 14`."
         }
       ],
-      "reasoning_summary": "The ACCT output is not solely determined by the programmed policy table. A top-level sideband `we_flag` is replicated into permission bits using OR logic. Since high permission bits are used as access enables, assertion of `we_flag` can grant access despite the programmed ACCT contents. The visible source does not show local authorization, privilege checking, or production tie-off for these flags.",
-      "security_impact": "If an attacker or untrusted condition can assert `we_flag`, access-control restrictions may be bypassed, enabling unauthorized peripheral access or altered lock behavior.",
-      "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The source scope does not show who drives `we_flag_*`. They may be trusted test/manufacturing signals, tied off in production, or externally controlled. Exploitability depends on that missing context.",
+      "reasoning_summary": "The design intends to enforce access permissions per privilege level and per peripheral using `acc_ctrl_c[priv_lvl_i][peripheral]`. However, the access-control storage in `acct_wrapper` is sized from `NB_SLAVE*3`; with the top-level `NB_SLAVE=1`, this provides only three 32-bit entries while the top-level expects permissions for 14 peripherals. The wrapper also hard-codes export of only `acct_mem[0..2]`, and its case map references `acct_mem[3..9]`, which are outside the configured memory range. Therefore, permission bits for many peripherals can be missing, truncated, unknown, or otherwise not controlled as intended. Since those bits directly gate accesses to ROM and crypto/security peripherals, this is a permission-control vulnerability.",
+      "security_impact": "Incorrect or incomplete access-control state can allow software running at an unauthorized privilege level to access protected peripherals or can cause denial of service by unintentionally denying authorized accesses. Because the gated targets include crypto/security blocks and control blocks, impact may include unauthorized use of AES/SHA/HMAC/RNG/RSA/reset/register-lock functionality, exposure or modification of sensitive registers, and privilege-boundary bypass.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact synthesized behavior of out-of-range array references and width truncation is tool-dependent and was not simulated or synthesized. However, the visible parameter values, array sizing, hard-coded indexes, and top-level permission gating are sufficient to identify a real RTL design defect in the permission logic.",
       "recommended_follow_up": [
-        "Trace `we_flag_*` drivers in the full design and verify they are trusted, authenticated, and disabled outside intended modes.",
-        "Avoid OR-bypassing permission bits; if a special override is required, gate it with immutable lifecycle/debug authorization.",
-        "Add security assertions that `we_flag_*` cannot grant lower-privilege access to protected peripherals in production mode."
+        "Resize and index access-control storage based on `NB_PERIPHERALS` and privilege count, not `NB_SLAVE`, or clearly separate slave/peripheral dimensions.",
+        "Eliminate out-of-bounds `acct_mem` references and add compile-time assertions checking that the memory dimensions cover all addressed entries and all `NB_PERIPHERALS`.",
+        "Review bit-order/truncation of `acc_ctrl_o` assignment and ensure every `acc_ctrl_c[priv][peripheral]` has an explicitly initialized, writable, and lock-protected source bit.",
+        "Add RTL assertions proving that denied permissions prevent AXI transactions from reaching each protected peripheral."
       ]
     },
     {
-      "finding_id": "FINDING-003",
-      "status": "confirmed_finding",
-      "summary": "Asserting `jtag_unlock` clears register-lock memory, effectively unlocking protected registers.",
-      "vulnerability_category": "Debug/JTAG permission bypass / lock reset",
+      "finding_id": "PERM-REGLK-JTAG-UNLOCK-002",
+      "status": "potential_warning",
+      "summary": "`jtag_unlock` clears all register-lock state, creating a potential debug-controlled permission bypass if not externally authenticated and lifecycle-gated.",
+      "vulnerability_category": "debug permission bypass; lock-state reset by debug signal",
       "affected_locations": [
         {
           "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 80,
-          "line_end": 80,
-          "module": "reglk_wrapper",
-          "signal_or_register": "jtag_unlock / reglk_mem"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 82,
+          "line_start": 78,
           "line_end": 84,
           "module": "reglk_wrapper",
-          "signal_or_register": "reglk_mem"
+          "signal_or_register": "jtag_unlock, reglk_mem"
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 283,
+          "line_start": 239,
           "line_end": 283,
           "module": "riscv_peripherals",
           "signal_or_register": "jtag_unlock"
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1820,
+          "line_start": 1818,
           "line_end": 1820,
           "module": "riscv_peripherals",
-          "signal_or_register": "jtag_unlock"
+          "signal_or_register": "jtag_unlock, reglk_ctrl"
         }
       ],
       "evidence": [
         {
           "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 80,
-          "line_end": 80,
-          "module": "reglk_wrapper",
-          "object": "if(~(rst_ni && ~jtag_unlock && ~rst_9))",
-          "evidence_type": "source_condition",
-          "description": "Register-lock wrapper reset/unlock condition includes `jtag_unlock`.",
-          "supports_claim": "Shows asserting `jtag_unlock` triggers the reset branch even when normal reset is inactive."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 82,
+          "line_start": 78,
           "line_end": 84,
           "module": "reglk_wrapper",
-          "object": "for (j=0; j < 6; j=j+1) begin reglk_mem[j] <= 'h0; end",
-          "evidence_type": "source_assignment",
-          "description": "Reset/unlock branch clears all lock memory entries.",
-          "supports_claim": "Shows the JTAG-triggered branch clears register-lock state to zero."
+          "object": "jtag_unlock reset of reglk_mem",
+          "evidence_type": "source",
+          "description": "`reglk_wrapper` reset condition includes `jtag_unlock`; when the condition is false, all register-lock memory entries are cleared to zero.",
+          "supports_claim": "`if(~(rst_ni && ~jtag_unlock && ~rst_9))` followed by a loop setting `reglk_mem[j] <= 'h0` means asserting `jtag_unlock` forces all lock values to the unlocked state."
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 283,
+          "line_start": 239,
           "line_end": 1820,
           "module": "riscv_peripherals",
-          "object": ".jtag_unlock_o ( jtag_unlock ), .jtag_unlock ( jtag_unlock )",
-          "evidence_type": "source_connection",
-          "description": "Top-level receives a JTAG unlock output and wires it into REGLK.",
-          "supports_claim": "Shows the same `jtag_unlock` signal is produced by debug/JTAG-related logic and consumed by the register-lock wrapper."
+          "object": "jtag_unlock",
+          "evidence_type": "source_search",
+          "description": "Top-level declares and wires `jtag_unlock` from the debug/JTAG-related logic into the register-lock wrapper.",
+          "supports_claim": "Search results show `logic jtag_unlock;`, a debug-related output `.jtag_unlock_o(jtag_unlock)`, and `reglk_wrapper` connection `.jtag_unlock(jtag_unlock)`."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 925,
+          "line_end": 1905,
+          "module": "riscv_peripherals",
+          "object": "reglk_ctrl_i",
+          "evidence_type": "source_search",
+          "description": "Peripheral lock controls are sourced from `reglk_ctrl`, the output of the register-lock wrapper, and are passed to protected wrappers.",
+          "supports_claim": "Search results show many wrappers receive slices such as `.reglk_ctrl_i(reglk_ctrl[12*8+7:12*8])`, `[13]`, `[10]`, `[1]`, `[2]`, etc., so clearing `reglk_mem` can unlock protected register fields."
         }
       ],
-      "reasoning_summary": "The `reglk_mem` state drives register-lock controls. In the wrappers, lock bits of `1` generally preserve existing register values or suppress reads, so clearing `reglk_mem` to zero corresponds to unlocked state. Because `jtag_unlock` directly causes this clear branch, debug/JTAG unlock can remove register-lock protections unless upstream debug access is strongly authenticated and disabled where required.",
-      "security_impact": "An attacker with debug/JTAG unlock capability could clear register locks and regain write/read access to security-sensitive crypto/control registers, undermining lock-based protection.",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "The debug/JTAG module that generates `jtag_unlock` is not included in the visible scope. Its authentication and lifecycle restrictions are unknown.",
+      "reasoning_summary": "The register-lock wrapper treats `jtag_unlock` like a reset source for all lock registers. If `jtag_unlock` can be asserted through debug/JTAG, all lock controls are cleared to zero, and wrapper code elsewhere interprets zero lock bits as allowing writes/reads. This creates a debug-controlled path to remove permission/lock protections from security-sensitive peripherals. This may be intentional for a secure debug unlock flow, but the visible code does not show authentication or lifecycle gating around `jtag_unlock`.",
+      "security_impact": "If an attacker can assert or glitch `jtag_unlock`, they can clear all register locks, enabling modification or reading of registers that were intended to be locked. This can enable tampering with access-control registers and crypto peripheral keys/configuration.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The source view does not include the debug/JTAG unlock implementation or lifecycle policy, so it is not possible to prove whether `jtag_unlock` is attacker-controllable in production. The finding is therefore reported as a potential warning rather than a confirmed exploit path.",
       "recommended_follow_up": [
-        "Require lifecycle/debug authorization before `jtag_unlock` can clear lock state.",
-        "Consider making production register locks sticky until full secure reset or fuse-controlled authorization.",
-        "Add checks that `jtag_unlock` cannot clear REGLK in production or untrusted states."
+        "Confirm that `jtag_unlock` is reachable only after a cryptographically authenticated or otherwise policy-approved debug unlock sequence.",
+        "Avoid clearing all lock state directly from a debug signal unless this behavior is part of a documented secure lifecycle state.",
+        "Consider making register-lock state sticky until full-chip reset or until an authenticated privileged controller explicitly unlocks it.",
+        "Add assertions or integration checks that unauthenticated debug/JTAG activity cannot assert `jtag_unlock` in production mode."
       ]
     },
     {
-      "finding_id": "FINDING-004",
-      "status": "potential_warning",
-      "summary": "ACCT and REGLK are protected by the same mutable access-control matrix they help define.",
-      "vulnerability_category": "Mutable self-protection / access-control bootstrap weakness",
+      "finding_id": "PERM-REGLK-CORRUPT-LOCK-003",
+      "status": "confirmed_finding",
+      "summary": "A locked write to `reglk_mem[2]` incorrectly changes it to `reglk_mem[3]`, corrupting permission lock state.",
+      "vulnerability_category": "permission lock corruption; incorrect locked-write behavior",
       "affected_locations": [
         {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 73,
-          "line_end": 73,
-          "module": "acct_wrapper",
-          "signal_or_register": "en / acct_ctrl_i"
-        },
-        {
           "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 72,
-          "line_end": 72,
+          "line_start": 87,
+          "line_end": 95,
           "module": "reglk_wrapper",
-          "signal_or_register": "en / acct_ctrl_i"
+          "signal_or_register": "reglk_mem[2], reglk_mem[3], reglk_ctrl[1]"
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1729,
-          "line_end": 1730,
+          "line_start": 925,
+          "line_end": 1905,
           "module": "riscv_peripherals",
-          "signal_or_register": "acct_ctrl_i / acc_ctrl"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1819,
-          "line_end": 1819,
-          "module": "riscv_peripherals",
-          "signal_or_register": "acct_ctrl_i"
+          "signal_or_register": "reglk_ctrl_i"
         }
       ],
       "evidence": [
         {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 73,
-          "line_end": 73,
-          "module": "acct_wrapper",
-          "object": "assign en = en_acct && acct_ctrl_i;",
-          "evidence_type": "source_assignment",
-          "description": "ACCT wrapper access is gated by `acct_ctrl_i`.",
-          "supports_claim": "Shows ACCT register access is controlled by a mutable access-control bit rather than an apparent hardwired privilege check in the wrapper."
-        },
-        {
           "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 72,
-          "line_end": 72,
+          "line_start": 87,
+          "line_end": 95,
           "module": "reglk_wrapper",
-          "object": "assign en = en_acct && acct_ctrl_i;",
-          "evidence_type": "source_assignment",
-          "description": "REGLK wrapper access is gated by `acct_ctrl_i`.",
-          "supports_claim": "Shows REGLK register access is controlled by a mutable access-control bit rather than an apparent hardwired privilege check in the wrapper."
+          "object": "reglk_mem[2] assignment",
+          "evidence_type": "source",
+          "description": "The locked-write path for address case 2 assigns `reglk_mem[2]` from `reglk_mem[3]` instead of preserving `reglk_mem[2]`.",
+          "supports_claim": "The case statement includes `2: reglk_mem[2] <= reglk_ctrl[1] ? reglk_mem[3] : wdata;`, unlike the surrounding entries which preserve their own value when locked."
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1729,
-          "line_end": 1730,
+          "line_start": 925,
+          "line_end": 1905,
           "module": "riscv_peripherals",
-          "object": ".acct_ctrl_i ( acc_ctrl_c[priv_lvl_i][6] ), .acc_ctrl_o ( acc_ctrl )",
-          "evidence_type": "source_connection",
-          "description": "Top-level connects ACCT's own access permission from `acc_ctrl_c[priv_lvl_i][6]` and also takes ACCT's output as `acc_ctrl`.",
-          "supports_claim": "Shows ACCT is part of the same mutable policy loop it controls."
+          "object": "reglk_ctrl_i",
+          "evidence_type": "source_search",
+          "description": "`reglk_ctrl` values produced by this module are passed to many protected peripheral wrappers as `reglk_ctrl_i`.",
+          "supports_claim": "Search results show numerous slices of `reglk_ctrl` wired into AES, SHA/HMAC, ACCT, REGLK, and other wrapper lock inputs."
         },
         {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1819,
-          "line_end": 1819,
-          "module": "riscv_peripherals",
-          "object": ".acct_ctrl_i ( acc_ctrl_c[priv_lvl_i][9] )",
-          "evidence_type": "source_connection",
-          "description": "Top-level connects REGLK access permission from `acc_ctrl_c[priv_lvl_i][9]`.",
-          "supports_claim": "Shows REGLK access is also controlled by the mutable ACCT matrix."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 63,
-          "line_end": 1908,
-          "module": "riscv_peripherals",
-          "object": "pmpcfg_i / pmpaddr_i",
-          "evidence_type": "search_result",
-          "description": "PMP inputs exist but search only showed them connected near one later block, not broadly to ACCT/REGLK/crypto wrapper gates.",
-          "supports_claim": "Suggests visible local ACCT/REGLK protection does not rely on PMP in these wrappers."
+          "file": "piton/design/chip/tile/ariane/src/aes0/aes0_wrapper.sv",
+          "line_start": 100,
+          "line_end": 118,
+          "module": "aes0_wrapper",
+          "object": "reglk_ctrl_i write gating",
+          "evidence_type": "source",
+          "description": "Wrappers interpret lock bits as permission gates for register writes and reads.",
+          "supports_claim": "Visible AES0 code uses constructs such as `start <= reglk_ctrl_i[1] ? start : wdata[0]` and key/data updates guarded by `reglk_ctrl_i[3]`, `[5]`, and `[7]`, demonstrating that lock bits directly control register permissions."
         }
       ],
-      "reasoning_summary": "ACCT and REGLK are security-critical control registers, but their local wrappers only gate access with `acct_ctrl_i`, which is derived from the mutable ACCT output. Because ACCT resets permissively and controls its own accessibility, the design has a bootstrap/self-protection weakness: if an unauthorized privilege can reach ACCT or REGLK during a permissive state, it may reconfigure permissions or locks. The visible wrapper code does not show an immutable machine-mode-only or PMP-based guard for these registers.",
-      "security_impact": "Unauthorized software may be able to reconfigure permission policy or register locks, then grant itself access to crypto/control peripherals.",
-      "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The full NoC filter policy, boot firmware sequencing, and any external PMP/address firewalls are not included. These may provide additional protection not visible in the local source.",
+      "reasoning_summary": "Most locked-write cases in `reglk_wrapper` preserve the addressed lock register when the corresponding lock bit is set. Case 2 is inconsistent: when locked, it copies `reglk_mem[3]` into `reglk_mem[2]`. A write attempt to a locked register should not alter its value. This typo can corrupt lock configuration for the peripheral slice represented by `reglk_mem[2]`, potentially changing read/write lock permissions without authorization.",
+      "security_impact": "A software or bus master that can trigger writes to the register-lock interface may be able to corrupt lock state even when the register is supposed to be locked. Depending on bit mapping, this can unlock or incorrectly lock protected peripheral register fields, affecting confidentiality and integrity of crypto/control registers.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact peripheral-to-lock mapping for `reglk_mem[2]` was not fully decoded from the visible source. However, the erroneous self-preservation logic is explicit and affects the lock-control vector used by protected wrappers.",
       "recommended_follow_up": [
-        "Protect ACCT and REGLK with immutable privilege/lifecycle checks independent of the mutable ACCT table.",
-        "Ensure ACCT/REGLK are deny-by-default until secure firmware initializes policy.",
-        "Verify external NoC/PMP filters enforce hard access restrictions for ACCT and REGLK address regions."
+        "Fix case 2 to `reglk_mem[2] <= reglk_ctrl[1] ? reglk_mem[2] : wdata;`.",
+        "Audit all lock-register case statements for copy/paste errors and add assertions that locked writes leave the targeted register unchanged.",
+        "Add regression tests or formal properties for each lock register: if locked and a write occurs, the register value remains stable."
       ]
     }
   ],
   "no_finding_reason": "",
-  "global_uncertainty": "Analysis was limited to files under the provided input scope and used only visible source/read/search evidence. Missing context includes upstream NoC filters, full debug/JTAG implementation, firmware initialization order, lifecycle/test-mode policy, drivers for `we_flag_*`, and complete PMP enforcement. These factors affect exploitability but do not remove the local RTL permission weaknesses observed."
+  "global_uncertainty": "The analysis is limited to visible source files and search results under the provided scope. No simulation, synthesis, lint, formal analysis, or external documentation was used. Some top-level behavior, especially the trustworthiness of `jtag_unlock` and exact synthesis handling of out-of-range array accesses, cannot be fully resolved from the visible evidence alone."
 }

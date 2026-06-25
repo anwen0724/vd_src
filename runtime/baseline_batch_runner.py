@@ -48,6 +48,7 @@ class BaselineBatchConfig:
     input_scopes: list[BatchInputScopeConfig]
     max_file_chars: int = 20_000
     max_tool_result_chars: int = 8_000
+    request_timeout: float | None = 600
 
 
 class BaselineBatchRunner:
@@ -74,6 +75,12 @@ class BaselineBatchRunner:
         manifest_path = batch_dir / "batch_manifest.json"
         status_path = batch_dir / "batch_status.jsonl"
         config_copy_path = batch_dir / "batch_config.yaml"
+        existing_status_rows = _load_status_rows(status_path)
+        successful_run_ids = {
+            str(row.get("run_id"))
+            for row in existing_status_rows
+            if row.get("batch_id") == config.batch_id and row.get("status") == "success"
+        }
 
         if source_config_path:
             shutil.copyfile(source_config_path, config_copy_path)
@@ -95,13 +102,14 @@ class BaselineBatchRunner:
             "models": [model.__dict__ for model in config.models],
             "input_scopes": [scope.__dict__ for scope in config.input_scopes],
             "started_at": _now_iso(),
-            "runs": [],
+            "runs": existing_status_rows.copy(),
         }
 
         total_runs = len(config.models) * len(config.input_scopes) * config.repetitions
         current_run = 0
         success_count = 0
         failed_count = 0
+        skipped_count = 0
 
         print(
             f"[baseline] batch_id={config.batch_id} total_runs={total_runs} "
@@ -123,6 +131,15 @@ class BaselineBatchRunner:
                         / model_cfg.model_id
                         / scope_cfg.scope_id
                     )
+                    if full_run_id in successful_run_ids:
+                        skipped_count += 1
+                        print(
+                            f"[baseline][{current_run}/{total_runs}] SKIP  "
+                            f"model={model_cfg.model_id} scope={scope_cfg.scope_id} "
+                            f"rep={rep} existing_success=true",
+                            flush=True,
+                        )
+                        continue
 
                     run_config = BaselineRunConfig(
                         run_id=run_id,
@@ -137,6 +154,7 @@ class BaselineBatchRunner:
                         max_steps=config.max_steps,
                         max_file_chars=config.max_file_chars,
                         max_tool_result_chars=config.max_tool_result_chars,
+                        request_timeout=config.request_timeout,
                     )
 
                     started_at = _now_iso()
@@ -210,7 +228,7 @@ class BaselineBatchRunner:
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         print(
             f"[baseline] batch completed: success={success_count} "
-            f"failed={failed_count} total={total_runs}",
+            f"failed={failed_count} skipped={skipped_count} total={total_runs}",
             flush=True,
         )
         print(f"[baseline] status_file={status_path}", flush=True)
@@ -235,6 +253,7 @@ class BaselineBatchRunner:
             max_tokens=int(raw.get("max_tokens", 8192)),
             max_file_chars=int(raw.get("max_file_chars", 20_000)),
             max_tool_result_chars=int(raw.get("max_tool_result_chars", 8_000)),
+            request_timeout=_optional_float(raw.get("request_timeout", 600)),
             models=[
                 BatchModelConfig(
                     model_id=str(item["model_id"]),
@@ -292,6 +311,7 @@ def _batch_config_to_dict(config: BaselineBatchConfig) -> dict[str, Any]:
         "max_tokens": config.max_tokens,
         "max_file_chars": config.max_file_chars,
         "max_tool_result_chars": config.max_tool_result_chars,
+        "request_timeout": config.request_timeout,
         "models": [model.__dict__ for model in config.models],
         "input_scopes": [scope.__dict__ for scope in config.input_scopes],
     }
@@ -300,6 +320,28 @@ def _batch_config_to_dict(config: BaselineBatchConfig) -> dict[str, Any]:
 def _append_jsonl(path: Path, row: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _load_status_rows(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 def _now_iso() -> str:

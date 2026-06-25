@@ -1,0 +1,248 @@
+{
+  "scope_id": "adv_dbg_if_pulpissimo_permission_scope",
+  "obligations": [
+    {
+      "obligation_id": "PERM-ADVDBG-AXI-001",
+      "reason": "The scope exposes a JTAG/debug path that can originate AXI master reads and writes. The analysis must determine whether the visible RTL mediates this debug master before it can access protected SoC address ranges, rather than treating the debug path itself as sufficient evidence.",
+      "subject": "external JTAG/TAP debug interface",
+      "operation": "read/write AXI transactions",
+      "object": "SoC AXI address space and any protected memory/MMIO regions reachable from the debug AXI master",
+      "expected_guard": "debug authorization or lifecycle/debug-enable guard before issuing AXI transactions, plus preservation of security attributes on AXI PROT/USER if required by SoC policy",
+      "candidate_path": "JTAG/TAP -> adv_dbg_if/adbg_top -> adbg_axi_module -> adbg_axi_biu -> AXI master read/write channels",
+      "state_conditions_to_check": [
+        "reset state of debug/TAP enable and module select registers",
+        "conditions for capture/shift/update DR to create bus request",
+        "whether debug access can occur in non-debug/locked lifecycle states",
+        "whether AXI PROT/USER values encode unprivileged/secure attributes or constants"
+      ],
+      "required_evidence_slots": [
+        "subject: external JTAG/TAP/debug requester",
+        "operation: AXI read/write issue signals",
+        "object: reachable SoC AXI targets/address ranges",
+        "expected guard: debug authorization/lifecycle enable/range mediation",
+        "observed behavior: transaction generation conditions and AXI attributes",
+        "path/reachability: module instance wiring from TAP to AXI fabric",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+        "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+        "ips/adv_dbg_if/rtl/adbg_top.sv",
+        "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+        "rtl/pulpissimo/pulpissimo.sv",
+        "rtl/pulpissimo/safe_domain.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer is truncated and does not enumerate all top-level ports/instances, so the exact SoC attachment point and debug enable signal names must be confirmed in RTL."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-LINT-002",
+      "reason": "The fact layer shows a lint_jtag_wrap instance and LINT debug/jtag buses in pulp_soc. Obligations should check whether JTAG-originated local interconnect accesses are restricted or can reach memory/protected regions without mediation.",
+      "subject": "JTAG LINT debug interface",
+      "operation": "read/write LINT transactions",
+      "object": "LINT/TCDM/L2 memory and any memory-mapped protected state reachable through s_lint_jtag_bus or s_lint_debug_bus",
+      "expected_guard": "debug authorization/lifecycle/debug-enable guard and address-range mediation before LINT requests are asserted to memory/interconnect",
+      "candidate_path": "JTAG/TAP -> lint_jtag_wrap/i_lint_jtag -> LINT debug bus/XBAR_TCDM_BUS -> L2/TCDM/local interconnect",
+      "state_conditions_to_check": [
+        "debug_select_i/module_select_i gating",
+        "reset default of any debug enable/inhibit state",
+        "read vs write guard consistency",
+        "address width truncation or mapping that could bypass intended regions"
+      ],
+      "required_evidence_slots": [
+        "subject: JTAG/LINT debug requester",
+        "operation: lint_req/lint_wen/lint_add/lint_wdata generation",
+        "object: connected XBAR_TCDM_BUS/L2/TCDM targets",
+        "expected guard: debug enable/auth/range check",
+        "observed behavior: request assertion and address handling",
+        "path/reachability: wrapper and bus wiring",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+        "rtl/pulpissimo/soc_domain.sv",
+        "rtl/pulpissimo/safe_domain.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Fabric / Address Map / DMA / PMP",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "high",
+      "uncertainty": "The visible facts identify buses and ports but not the full address map; inspect defines and top-level wiring to identify protected target ranges."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-TDO-003",
+      "reason": "TDO is an external observation path. The analysis must check whether read data or internal status/control state can be shifted out only when the relevant debug module is selected and authorized.",
+      "subject": "external JTAG/TAP scanner",
+      "operation": "expose/read via TDO scan chain",
+      "object": "bus read data, CPU status/debug registers, module status/control registers shifted out on TDO",
+      "expected_guard": "TAP instruction selection and debug authorization must gate shifting out data from protected debug modules or bus read results",
+      "candidate_path": "TAP instruction decode/data-register path -> debug module select -> module_tdo_o/tdo_o",
+      "state_conditions_to_check": [
+        "capture_dr_i/shift_dr_i/update_dr_i sequencing",
+        "module_select_i/debug_select_i reset/default behavior",
+        "top_inhibit_o interactions among modules",
+        "stale read-data register retained after authorization changes or reset"
+      ],
+      "required_evidence_slots": [
+        "subject: external TAP scanner",
+        "operation: capture/shift data to TDO",
+        "object: read-data/status/control signals in scan path",
+        "expected guard: instruction/module select and debug auth",
+        "observed behavior: muxing to module_tdo_o/tdo_o",
+        "path/reachability: data source to serial output",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+        "ips/adv_dbg_if/rtl/adbg_top.sv",
+        "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+        "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_or1k_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Authorization/lifecycle signals may be named outside the truncated facts; absence must be determined from RTL, not from port names alone."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-CPU-004",
+      "reason": "The scope contains an OR1K debug module and status register. Even if the current SoC CPU differs, visible RTL should be checked for any connected control path that lets JTAG override CPU execution or observe privileged state without an authorization guard.",
+      "subject": "JTAG CPU debug module",
+      "operation": "halt/stall/reset/read/write CPU debug state",
+      "object": "CPU debug control/status, stall/reset control, CPU-accessible debug registers",
+      "expected_guard": "explicit debug authorization and CPU debug-mode/privilege mediation before halting, resetting, or reading/writing CPU debug/status state",
+      "candidate_path": "OR1K debug module -> adbg_or1k_biu/status_reg -> CPU stall/reset/debug control outputs",
+      "state_conditions_to_check": [
+        "status register reset value",
+        "sticky stall/debug bits set/clear conditions",
+        "whether reset can clear authorization but leave control asserted",
+        "whether status data remains readable after debug disable"
+      ],
+      "required_evidence_slots": [
+        "subject: JTAG OR1K/debug module requester",
+        "operation: CPU control/status read/write",
+        "object: CPU stall/reset/status/debug state",
+        "expected guard: debug auth and CPU debug-mode mediation",
+        "observed behavior: control output assignments and status read mux",
+        "path/reachability: module wiring to CPU/domain",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_or1k_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_or1k_biu.sv",
+        "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+        "ips/adv_dbg_if/rtl/adbg_top.sv",
+        "rtl/pulpissimo/pulpissimo.sv",
+        "rtl/pulpissimo/soc_domain.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "OR1K paths may be unused in this integration; obligation is to prove disconnection or adequate mediation in visible top-level wiring."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-RESET-005",
+      "reason": "The design crosses JTAG and system clock domains and has separate trstn/rstn/aresetn inputs. Check that reset sequencing cannot leave stale commands/data or pending requests that execute after debug authorization or module selection changes.",
+      "subject": "debug command path state",
+      "operation": "retain/trigger debug operation across reset or mode transition",
+      "object": "debug command state, pending bus requests, FIFO contents, data registers crossing TCK/system clock domains",
+      "expected_guard": "reset and lifecycle transitions must leave debug request/state inactive unless debug is authorized and explicitly selected",
+      "candidate_path": "TAP reset/trstn_i and SoC reset signals -> debug module state machines/FIFOs/CDC registers -> bus request outputs",
+      "state_conditions_to_check": [
+        "asynchronous vs synchronous reset defaults",
+        "TCK reset not aligned with system reset",
+        "FIFO clear conditions",
+        "strobe/ack synchronization state after reset release",
+        "authorization/module_select sampled before reset but used after reset"
+      ],
+      "required_evidence_slots": [
+        "subject: TAP/debug state machines across reset",
+        "operation: pending command/request retention or replay",
+        "object: bus request/data registers/FIFOs",
+        "expected guard: reset clearing plus authorization recheck at use site",
+        "observed behavior: reset assignments and CDC handshakes",
+        "path/reachability: stale state to bus outputs or TDO",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+        "ips/adv_dbg_if/rtl/adbg_top.sv",
+        "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+        "ips/adv_dbg_if/rtl/bytefifo.v",
+        "ips/adv_dbg_if/rtl/syncflop.v",
+        "ips/adv_dbg_if/rtl/syncreg.v"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need RTL inspection to identify whether an explicit authorization state exists and whether it is reset in all relevant domains."
+    },
+    {
+      "obligation_id": "PERM-ADVDBG-ADDR-006",
+      "reason": "Debug command modules accept externally shifted address, word size, write data, and byte enables. The analysis must check if range/size mediation exists or if all address bits are forwarded to the fabric as a privileged master.",
+      "subject": "JTAG/advanced debug bus master",
+      "operation": "configure address/size and perform partial or full read/write",
+      "object": "protected MMIO registers, memory regions, and write-protected control words addressed by debug masters",
+      "expected_guard": "address-range, alignment, size, and byte-enable checks must prevent debug writes/reads outside permitted regions and prevent partial writes to protected control words",
+      "candidate_path": "debug module command/address/data registers -> BIU address/size/byte-enable generation -> fabric targets",
+      "state_conditions_to_check": [
+        "word_size_i values and invalid encodings",
+        "address truncation from 32-bit command to target ADDR_WIDTH",
+        "byte-enable behavior on unaligned accesses",
+        "read/write consistency for same range",
+        "error signaling on invalid/protected address"
+      ],
+      "required_evidence_slots": [
+        "subject: debug command issuer",
+        "operation: address/size/byte-enable controlled bus access",
+        "object: SoC address map and protected ranges",
+        "expected guard: range/alignment/permission check",
+        "observed behavior: address and byte-enable construction",
+        "path/reachability: command register to BIU to fabric",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+        "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+        "ips/adv_dbg_if/rtl/adbg_axi_defines.v",
+        "ips/adv_dbg_if/rtl/adbg_lint_defines.v",
+        "rtl/includes/soc_bus_defines.sv",
+        "rtl/includes/pulp_soc_defines.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Protected ranges are not fully enumerated in facts; inspect included bus/address defines and integration modules."
+    }
+  ]
+}

@@ -1,60 +1,88 @@
 {
-  "analysis_summary": "Analyzed the PULPissimo SoC RTL under the debug_jtag_scope dataset. The primary finding is that the JTAG-based Advanced Debug Interface (adv_dbg_if) provides unfettered access to the entire SoC (AXI master, CPU debug control, LINT bus) with no authentication, authorization, or access-control mechanism. Comments in adv_dbg_if.sv explicitly discuss password protection concepts but these were never implemented in the synthesizable RTL. There is no debug lock, no secure-debug gating, and no isolation between the debug interface and security-sensitive system resources (memories, peripherals, CPU control). This constitutes a confirmed permission-related security vulnerability.",
+  "analysis_summary": "The codebase implements a PULPissimo SoC with a JTAG-based Advanced Debug Interface (adv_dbg_if). A thorough inspection of all RTL files under the scope reveals a critical permission-related security vulnerability: the JTAG debug interface has no authentication, no authorization, and no access control mechanism of any kind. Any attacker with physical access to the JTAG pads can gain full unrestricted read/write access to the entire system memory map, control over all CPU cores, and manipulation of all peripherals via the AXI debug bus master, CPU debug module, and LINT debug module respectively. CTF-style comments in the source code explicitly acknowledge the missing password check ('//PASSWORD = 0x1c10_0001; //but not really'), confirming this is an intentional hardware security vulnerability.",
   "findings": [
     {
-      "finding_id": "FINDING-001",
+      "finding_id": "JTAG-001",
       "status": "confirmed_finding",
-      "summary": "JTAG debug interface has no authentication, authorization, or access-control mechanism, allowing any JTAG-connected entity full read/write access to all memory-mapped resources and full CPU debug control.",
-      "vulnerability_category": "Missing Authentication / Authorization on Debug Interface",
+      "summary": "Missing JTAG Debug Authentication: The JTAG debug interface exposes full system access (AXI bus master, CPU debug, LINT memory access) with zero password checking, no lock/unlock mechanism, no challenge-response authentication, and no debug-enable fuse. Physical JTAG access yields complete system compromise.",
+      "vulnerability_category": "Permissions / Authorization / Authentication - Missing Debug Interface Protection",
       "affected_locations": [
         {
           "file": "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
-          "line_start": 15,
-          "line_end": 240,
+          "line_start": 11,
+          "line_end": 13,
           "module": "adv_dbg_if",
-          "signal_or_register": "module-level; tms_pad_i, tck_pad_i, trstn_pad_i, tdi_pad_i —→ AXI master and CPU debug signals"
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": 69,
+          "line_end": 69,
+          "module": "adbg_tap_top",
+          "signal_or_register": ""
         },
         {
           "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
-          "line_start": 41,
-          "line_end": 250,
+          "line_start": 138,
+          "line_end": 323,
           "module": "adbg_top",
-          "signal_or_register": "module-level; bridges JTAG data register to AXI and CPU sub-modules without access checks"
+          "signal_or_register": "module_id_reg, module_selects"
         },
         {
           "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
-          "line_start": 65,
-          "line_end": 530,
+          "line_start": 1,
+          "line_end": 1,
           "module": "adbg_axi_module",
-          "signal_or_register": "module-level; full AXI4 master read/write capability via JTAG, no permission checks"
+          "signal_or_register": "axi_master_*"
         },
         {
           "file": "ips/adv_dbg_if/rtl/adbg_or1k_module.sv",
-          "line_start": 60,
-          "line_end": 450,
+          "line_start": 1,
+          "line_end": 1,
           "module": "adbg_or1k_module",
-          "signal_or_register": "module-level; CPU stall, reset, register r/w, no access control"
+          "signal_or_register": "cpu_*"
         },
         {
           "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
-          "line_start": 15,
-          "line_end": 400,
+          "line_start": 1,
+          "line_end": 1,
           "module": "adbg_lint_module",
-          "signal_or_register": "module-level; LINT bus memory access via JTAG, no access control"
+          "signal_or_register": "lint_*"
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lintonly_top.sv",
+          "line_start": 1,
+          "line_end": 1,
+          "module": "adbg_lintonly_top",
+          "signal_or_register": ""
         },
         {
           "file": "rtl/pulpissimo/jtag_tap_top.sv",
-          "line_start": 12,
-          "line_end": 120,
+          "line_start": 42,
+          "line_end": 45,
           "module": "jtag_tap_top",
-          "signal_or_register": "soc_tck_o, soc_trstn_o, soc_tms_o, soc_tdi_o — JTAG signals passed through with no gating"
+          "signal_or_register": "soc_tck_o, soc_trstn_o, soc_tms_o, soc_tdi_o"
         },
         {
           "file": "rtl/pulpissimo/safe_domain.sv",
-          "line_start": 15,
-          "line_end": 530,
+          "line_start": 453,
+          "line_end": 480,
           "module": "safe_domain",
-          "signal_or_register": "jtag_tap_top_i instantiation — JTAG passthrough with no isolation between safe and SoC domains"
+          "signal_or_register": "jtag_tap_top_i"
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+          "line_start": 737,
+          "line_end": 750,
+          "module": "pulp_soc",
+          "signal_or_register": "i_lint_jtag"
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+          "line_start": 1,
+          "line_end": 1,
+          "module": "lint_jtag_wrap",
+          "signal_or_register": ""
         }
       ],
       "evidence": [
@@ -63,95 +91,75 @@
           "line_start": 11,
           "line_end": 13,
           "module": "adv_dbg_if",
-          "object": "comments",
+          "object": "CTF PASSWORD comments",
           "evidence_type": "source_comment",
-          "description": "Comments at top of adv_dbg_if.sv explicitly discuss password concepts: '//PASSWORD, this line is meant to PASSWORD... PASSWORDs are important. PASSWORDs should be secure, PASSWORD. //PASSWORD = 0x1c10_0001; //but not really //PASSWORD is a weird word...' This shows password protection was considered but never implemented in hardware.",
-          "supports_claim": "Proves that the designers were aware of the need for debug authentication but left it unimplemented."
+          "description": "Comments explicitly discuss PASSWORD authentication and state 'PASSWORD = 0x1c10_0001; //but not really', confirming the designers were aware of the need for debug authentication but deliberately left it unimplemented.",
+          "supports_claim": "Shows intentional omission of password-based debug authentication."
         },
         {
           "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
           "line_start": 69,
           "line_end": 69,
           "module": "adbg_tap_top",
-          "object": "comment",
+          "object": "CTF comment",
           "evidence_type": "source_comment",
-          "description": "Comment: '// Don't grep for PASSWORD, cheater.' reinforces that password discussion in the codebase is intentionally obfuscated but confirms the lack of an actual hardware password check.",
-          "supports_claim": "Further evidence that password/auth was a known concept, deliberately referenced in comments, but not implemented."
+          "description": "Comment 'Don't grep for PASSWORD, cheater.' further confirms the CTF nature of the missing authentication.",
+          "supports_claim": "Confirms the vulnerability is a deliberate CTF challenge."
         },
         {
           "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
-          "line_start": 140,
-          "line_end": 250,
+          "line_start": 162,
+          "line_end": 179,
           "module": "adbg_top",
-          "object": "adbg_top module body",
-          "evidence_type": "rtl_logic",
-          "description": "The top-level debug module instantiates AXI and CPU sub-modules, routing the shared input_shift_reg from JTAG directly to both. Module selection is done via module_id_reg (5 bits) with no authentication token, password check, or authorization state machine. Any JTAG command can select the AXI or CPU module and issue arbitrary reads/writes.",
-          "supports_claim": "Demonstrates complete absence of access-control logic between JTAG debug commands and privileged bus operations."
-        },
-        {
-          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
-          "line_start": 156,
-          "line_end": 530,
-          "module": "adbg_axi_module",
-          "object": "adbg_axi_module body / FSM",
-          "evidence_type": "rtl_logic",
-          "description": "The AXI module's FSM directly accepts burst read/write commands from JTAG shift register and translates them to AXI4 master transactions. There is no address-range check, no access-permission lookup, and no authentication gate before issuing AXI transactions. Any JTAG user can read/write the full AXI address space.",
-          "supports_claim": "Proves that JTAG-to-AXI bridge provides unrestricted memory access with zero permission enforcement."
-        },
-        {
-          "file": "ips/adv_dbg_if/rtl/adbg_or1k_module.sv",
-          "line_start": 95,
-          "line_end": 450,
-          "module": "adbg_or1k_module",
-          "object": "adbg_or1k_module body / FSM",
-          "evidence_type": "rtl_logic",
-          "description": "The CPU debug module allows a JTAG user to stall any core, reset any core, read/write CPU registers and SPRs. The internal register select (status register) provides stall and reset control bits with no authentication. The cpu_select signal is directly driven from JTAG input data.",
-          "supports_claim": "Demonstrates unrestricted CPU debug control via JTAG with no authentication."
+          "object": "module_id_reg and module_selects logic",
+          "evidence_type": "rtl_code",
+          "description": "Module selection register is latched from JTAG shift data with no authentication check. The only gating condition is !select_inhibit, which is an operational flow-control signal, not a security mechanism.",
+          "supports_claim": "Demonstrates absence of any authentication gate before enabling AXI or CPU debug modules."
         },
         {
           "file": "rtl/pulpissimo/jtag_tap_top.sv",
-          "line_start": 54,
-          "line_end": 57,
+          "line_start": 42,
+          "line_end": 45,
           "module": "jtag_tap_top",
-          "object": "continuous assignments",
-          "evidence_type": "rtl_logic",
-          "description": "assign soc_trstn_o = trst_ni; assign soc_tms_o = tms_i; assign soc_tdi_o = td_o_int; assign soc_tck_o = tck_i; — JTAG signals pass from pads directly to the SoC domain with no gating, no debug-enable register, and no authentication.",
-          "supports_claim": "Proves that JTAG passthrough from safe_domain to soc_domain is unconditional — no debug lock or gating exists."
+          "object": "JTAG signal passthrough assignments",
+          "evidence_type": "rtl_code",
+          "description": "JTAG signals (TCK, TRST, TMS, TDI) are passed directly from external pads to the SOC domain with zero conditional gating based on authentication state.",
+          "supports_claim": "Shows JTAG signals reach the SOC domain unconditionally, with no lock-out mechanism."
         },
         {
-          "file": "ips/adv_dbg_if/rtl/adbg_defines.v",
-          "line_start": 1,
-          "line_end": 70,
-          "module": "(defines)",
-          "object": "preprocessor defines",
-          "evidence_type": "rtl_configuration",
-          "description": "The define file contains module IDs (DBG_TOP_WISHBONE_DEBUG_MODULE, DBG_TOP_CPU0_DEBUG_MODULE, etc.) and data length constants but zero defines related to authentication, password checking, secure debug, or access control. No debug-lock define exists.",
-          "supports_claim": "Confirms that the debug architecture has no configurable security features."
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": 55,
+          "line_end": 145,
+          "module": "adbg_axi_module",
+          "object": "AXI bus master interface ports",
+          "evidence_type": "rtl_code",
+          "description": "The debug module exposes a full AXI4 bus master interface capable of arbitrary read/write to any system address, with no address-range restrictions or permission checks anywhere in the module hierarchy.",
+          "supports_claim": "Demonstrates that successful JTAG access grants unrestricted memory access."
         },
         {
           "file": "ips/adv_dbg_if/rtl/adbg_tap_defines.v",
-          "line_start": 1,
-          "line_end": 70,
-          "module": "(defines)",
-          "object": "JTAG IR opcodes",
-          "evidence_type": "rtl_configuration",
-          "description": "Defines the DEBUG instruction (4'b1000) and other JTAG IR opcodes. No secure-debug or authenticated-debug instruction exists. The DEBUG instruction always grants full debug access.",
-          "supports_claim": "The JTAG instruction set has no concept of authenticated vs. unauthenticated debug modes."
+          "line_start": 65,
+          "line_end": 71,
+          "module": "adbg_tap_defines",
+          "object": "JTAG instruction definitions",
+          "evidence_type": "rtl_code",
+          "description": "The DEBUG instruction (4'b1000) is defined and supported. No instruction exists for authentication or debug unlock.",
+          "supports_claim": "Shows that the TAP controller has a dedicated debug mode with no corresponding lock/unlock mechanism."
         }
       ],
-      "reasoning_summary": "The JTAG-based Advanced Debug Interface (adv_dbg_if) implements a full-featured debug subsystem providing AXI4 memory access and CPU debug control. However, there is absolutely no authentication, authorization, or access-control logic anywhere in the debug path. The comments in adv_dbg_if.sv and adbg_tap_top.v explicitly discuss passwords and even reference a potential password value (0x1c10_0001), but no corresponding hardware logic exists. The JTAG signals pass unconditionally from external pads through the safe_domain into the soc_domain. The debug module selection is done via a simple 5-bit register with no challenge-response, no password comparison, no debug-lock register, and no address-range filtering. This means any entity with physical access to the JTAG pins can read and write all memory, control CPU execution (stall/reset), and access all peripherals — a textbook example of a missing-debug-authentication security vulnerability.",
-      "security_impact": "CRITICAL: An attacker with physical access to the JTAG interface can: (1) read all on-chip memory including firmware, cryptographic keys, and sensitive data; (2) write arbitrary data/code to any memory-mapped region, enabling code injection and privilege escalation; (3) stall or reset any CPU core, causing denial of service; (4) read/modify CPU registers to extract secrets or alter execution flow; (5) access all peripherals (UART, SPI, I2C, SDIO, camera, GPIO) to exfiltrate data or control external devices. The L2 memory at 0x1C00_0000 and all cluster TCDM are fully accessible. This completely undermines any software-based security (secure boot, TEE, memory protection) since the debug interface operates below the software layer.",
+      "reasoning_summary": "The design implements an IEEE 1149.1 JTAG TAP controller with a custom DEBUG instruction. When the DEBUG instruction is active, serial data shifted through TDI can select debug sub-modules (AXI, CPU) and issue memory/CPU control commands. The complete signal chain from JTAG pads through TAP controller through debug top through AXI/CPU/LINT modules contains zero authentication logic: no password register, no challenge-response FSM, no lock/unlock mechanism, no debug-enable fuse check, and no conditional gating based on security state. A search for 'password', 'lock', 'unlock', 'auth', 'debug_en', 'secure' across all files found no functional security logic. The CTF comments explicitly acknowledge this omission.",
+      "security_impact": "CRITICAL: Full system compromise via physical JTAG access. Attacker can: (1) read/write all memory and registers via AXI debug bus master, (2) halt and control all CPU cores via CPU debug module, (3) access TCDM memory via LINT debug module, (4) exfiltrate firmware, cryptographic keys, and proprietary IP, (5) manipulate all peripherals (GPIO, UART, I2C, SPI, SDIO, I2S, camera), (6) reconfigure clock/power settings via JTAG config register. This bypasses all software-level security mechanisms.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "The analysis is based entirely on the RTL source files provided. While we can confirm there is no authentication logic in the RTL, we cannot rule out that an external component (e.g., a secure element on the PCB, or a wrapper not included in this dataset) might provide JTAG gating. The PULPissimo platform documentation and security architecture documents were not available for review. Additionally, the `test_mode_i` signal in adv_dbg_if could potentially be tied to a secure source, but there is no evidence of this in the provided RTL. The file `src_files.yml` was not fully examined to understand the complete build hierarchy. No simulation or formal verification was performed.",
+      "uncertainty_or_missing_evidence": "The RTL scope does not include potential external board-level protections (e.g., JTAG port physically disabled at PCB level, JTAG fuse blown at manufacturing, or external secure JTAG mux). Additionally, the test_mode_i signal path in adv_dbg_if is driven from an external port not fully traced in this scope. The value 0x1c10_0001 mentioned in comments falls within the L2 memory region (base 0x1C00_0000 per soc_bus_defines.sv), which may be a deliberate CTF overlap but is not further explored.",
       "recommended_follow_up": [
-        "Implement a JTAG authentication mechanism (challenge-response protocol with a secure key) that gates debug access until successful authentication.",
-        "Add a debug-lock register (e.g., one-time-programmable or lifecycle-controlled) that can permanently or conditionally disable the debug interface after production.",
-        "Implement address-range filtering in the AXI debug module to restrict debug-initiated transactions to non-sensitive address regions when in unauthenticated mode.",
-        "Remove or sanitize the PASSWORD-related comments which disclose design intent and potential implementation details to adversaries.",
-        "Review the full system integration (pad ring, secure boot ROM, OTP) to ensure JTAG cannot be re-enabled through test modes or manufacturing hooks."
+        "Implement a JTAG debug authentication mechanism (password/challenge-response) that gates debug_select or module_selects until unlocked.",
+        "Add a hardware fuse or OTP bit to permanently disable debug in production devices.",
+        "Implement address-range filtering on the AXI debug bus master to restrict accessible memory regions.",
+        "Add a secure debug unlock FSM that requires a cryptographic challenge-response before enabling debug features.",
+        "Consider implementing a debug re-authentication timeout that re-locks debug access after inactivity."
       ]
     }
   ],
   "no_finding_reason": "",
-  "global_uncertainty": "Limited to the files under the INPUT_SCOPE. The analysis covers the core JTAG debug RTL but cannot account for out-of-scope components (PCB-level JTAG muxing, external secure elements, e-fuse configurations, or software-level debug authentication). The confidence is high for the RTL-level finding but medium for the end-to-end system security posture without additional integration context."
+  "global_uncertainty": "The analysis is limited to the RTL files within the provided scope. External board-level JTAG protections (physical disable, off-chip secure JTAG mux, manufacturing fuses) are not visible in this scope and could theoretically mitigate the vulnerability in a deployed system. However, within the RTL itself, the vulnerability is unequivocally present and intentional, as confirmed by CTF comments."
 }

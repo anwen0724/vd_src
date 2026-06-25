@@ -1,81 +1,64 @@
 {
-  "analysis_summary": "The RTL/source files under the provided scope show multiple permission-related weaknesses around debug/JTAG access. The primary confirmed vulnerability is that the JTAG DMI password check gates reads but not writes, allowing unauthenticated write operations into the debug module path. The debug CSR block also reports authentication as always successful, and the ROM2 key store used for the JTAG key is visibly readable and writable through an AXI-connected peripheral path. There is also a reset/defaulting concern for the password-check state signal.",
+  "analysis_summary": "The inspected RTL contains permission-related security vulnerabilities in the debug/JTAG path and protected ROM/key-storage path. The JTAG/DMI wrapper attempts to implement a password mechanism, but DMI write operations are not gated by the password check, the authentication state is not robustly registered/reset, and a successful/ asserted password state can force the processor privilege output to Machine mode. The debug CSR block also unconditionally reports the debugger as authenticated despite a source comment saying no authentication is implemented. Separately, ROM2 is described as key/fuse storage and supplies the JTAG key and access-control registers, but it is writable through a memory-mapped AXI path without internal authorization checks.",
   "findings": [
     {
-      "finding_id": "PERM-JTAG-DMI-WRITE-BYPASS",
+      "finding_id": "F-001",
       "status": "confirmed_finding",
-      "summary": "Unauthenticated JTAG/DMI writes are allowed because only DMI reads check pass_chk.",
-      "vulnerability_category": "Permission bypass / improper authorization for debug access",
+      "summary": "JTAG/DMI write operations bypass the password check.",
+      "vulnerability_category": "Missing authorization check / debug authentication bypass",
       "affected_locations": [
         {
           "file": "src/debug/dmi_jtag.sv",
           "line_start": 110,
-          "line_end": 112,
+          "line_end": 117,
           "module": "dmi_jtag",
           "signal_or_register": "pass_chk / state_d / dmi.op"
         },
         {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 114,
-          "line_end": 117,
-          "module": "dmi_jtag",
-          "signal_or_register": "pass_chk / pass / data_d"
-        },
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 177,
-          "line_end": 181,
-          "module": "dmi_jtag",
-          "signal_or_register": "umode_o / pass_chk"
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": 297,
+          "line_end": 398,
+          "module": "dm_csrs",
+          "signal_or_register": "dmi_req_i / dtm_op / cmd_valid_o / sbaddress_write_valid_o / sbdata_write_valid_o / haltreq_o"
         }
       ],
       "evidence": [
         {
           "file": "src/debug/dmi_jtag.sv",
           "line_start": 110,
-          "line_end": 112,
+          "line_end": 117,
           "module": "dmi_jtag",
           "object": "DMI operation dispatch",
           "evidence_type": "source_snippet",
-          "description": "Read requests are allowed only when pass_chk is set, but write requests transition to Write without checking pass_chk.",
-          "supports_claim": "Shows asymmetric authorization: DTM_READ is gated by pass_chk, while DTM_WRITE is not."
+          "description": "DMI read operations require pass_chk, but DMI write operations transition to Write without checking pass_chk. A DTM_PASS operation can set pass_chk only if data_d equals pass.",
+          "supports_claim": "Shows that the password check gates DTM_READ but not DTM_WRITE."
         },
         {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 114,
-          "line_end": 117,
-          "module": "dmi_jtag",
-          "object": "DTM_PASS handling",
-          "evidence_type": "source_snippet",
-          "description": "The password operation sets pass_chk only if the supplied data equals the stored pass value.",
-          "supports_claim": "Shows the intended authentication condition that should protect debug access."
-        },
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 177,
-          "line_end": 181,
-          "module": "dmi_jtag",
-          "object": "umode_o assignment",
-          "evidence_type": "source_snippet",
-          "description": "umode_o is driven high when pass_chk is true and low otherwise.",
-          "supports_claim": "Shows pass_chk is treated as a permission/authentication state signal."
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": 297,
+          "line_end": 398,
+          "module": "dm_csrs",
+          "object": "DMI write handling",
+          "evidence_type": "search_results",
+          "description": "DMI CSR logic accepts DTM_WRITE requests and search evidence shows writes can assert cmd_valid_o, sbaddress_write_valid_o, sbdata_write_valid_o, and haltreq_o.",
+          "supports_claim": "Shows that unauthenticated DMI writes can drive privileged debug controls and system bus access signals."
         }
       ],
-      "reasoning_summary": "The code applies the password check only to DMI read operations. A DMI write operation is accepted and moved to the Write state regardless of pass_chk. Since DMI writes can control debug CSRs and debug-module behavior, unauthenticated JTAG/DMI clients may still manipulate privileged debug state even if reads are blocked.",
-      "security_impact": "An attacker with JTAG/DMI access can potentially issue debug writes without presenting the correct password. This may allow halting/resuming the hart, configuring debug commands, manipulating debug state, causing denial of service, or gaining further privileged control through the debug module.",
+      "reasoning_summary": "The intended JTAG password mechanism only restricts reads. DMI writes proceed regardless of pass_chk, yet DMI writes are used by the debug module to control privileged debug functionality such as halt/resume, abstract commands, and system bus access. Therefore an unauthenticated JTAG/DMI actor can potentially perform privileged debug writes.",
+      "security_impact": "Unauthorized JTAG/DMI users may write debug CSRs, halt or resume harts, issue abstract commands, or configure/use system bus access, resulting in debug takeover and possible memory/control compromise.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "No simulation or formal analysis was run per constraints. The exact downstream effects of each writable DMI register depend on package definitions and connected debug behavior, but the missing write authorization gate is directly visible in source.",
+      "uncertainty_or_missing_evidence": "The exact enum encoding of dm::DTM_PASS and package definitions were not visible, but the local control flow clearly shows DTM_WRITE is not gated by pass_chk.",
       "recommended_follow_up": [
-        "Gate DTM_WRITE with the same authentication condition as DTM_READ, or block all DMIACCESS operations until authentication succeeds.",
-        "Ensure authentication state is synchronized and reset cleanly in the appropriate clock domain.",
-        "Add verification assertions/tests that unauthenticated DMI reads and writes cannot generate dmi_req_valid_o."
+        "Gate all DMI operations, including DTM_WRITE, on a robust authenticated state.",
+        "Consider locking out all debug side effects until authentication succeeds.",
+        "Add assertions/tests that unauthenticated JTAG cannot issue DMI writes, halt requests, abstract commands, or system bus accesses."
       ]
     },
     {
-      "finding_id": "PERM-DM-AUTH-ALWAYS-TRUE",
+      "finding_id": "F-002",
       "status": "confirmed_finding",
-      "summary": "Debug authentication status is hardwired to authenticated.",
-      "vulnerability_category": "Missing authentication / improper debug permission reporting",
+      "summary": "Debug module reports authenticated unconditionally.",
+      "vulnerability_category": "Improper authentication state reporting",
       "affected_locations": [
         {
           "file": "src/debug/dm_csrs.sv",
@@ -83,13 +66,6 @@
           "line_end": 171,
           "module": "dm_csrs",
           "signal_or_register": "dmstatus.authenticated"
-        },
-        {
-          "file": "src/debug/dm_top.sv",
-          "line_start": 109,
-          "line_end": 111,
-          "module": "dm_top",
-          "signal_or_register": "dmi_req_valid_i / dmi_req_i"
         }
       ],
       "evidence": [
@@ -98,208 +74,200 @@
           "line_start": 170,
           "line_end": 171,
           "module": "dm_csrs",
-          "object": "dmstatus.authenticated assignment",
+          "object": "dmstatus.authenticated",
           "evidence_type": "source_snippet",
-          "description": "The debug CSR code explicitly states no authentication is implemented and forces dmstatus.authenticated to 1.",
-          "supports_claim": "Shows the debug module always advertises authenticated status."
-        },
-        {
-          "file": "src/debug/dm_top.sv",
-          "line_start": 109,
-          "line_end": 111,
-          "module": "dm_top",
-          "object": "dm_csrs DMI inputs",
-          "evidence_type": "source_connection",
-          "description": "dm_top wires DMI request signals directly into dm_csrs.",
-          "supports_claim": "Shows no visible authentication gate between dm_top DMI inputs and the CSR block in the inspected source."
+          "description": "The source explicitly comments that no authentication is implemented and then sets dmstatus.authenticated to 1'b1.",
+          "supports_claim": "Shows unconditional authenticated status without implemented authentication."
         }
       ],
-      "reasoning_summary": "The debug module status register reports authenticated as true unconditionally. This removes a standard permission indicator and may cause software/debug tooling to treat the module as authorized even when no authentication has occurred. The visible top-level DMI path does not show a separate authentication gate before dm_csrs.",
-      "security_impact": "External debug clients can see the debug module as authenticated by default. In combination with the unauthenticated DMI write path, this can support unauthorized debug control and weaken lockout policies.",
+      "reasoning_summary": "The debug module permanently advertises an authenticated debugger even though the RTL comment states no authentication is implemented. Any software/tooling or policy logic relying on dmstatus.authenticated will treat the debug session as authorized.",
+      "security_impact": "An unauthenticated debugger may be treated as authenticated, enabling or masking unauthorized debug access and weakening security policy enforcement.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "A mitigation outside the provided scope could theoretically block DMI traffic before reaching dm_top, but no such mitigation is visible in the allowed source files.",
+      "uncertainty_or_missing_evidence": "No external policy module was observed that overrides or constrains this signal. The finding is based on the visible dm_csrs.sv implementation.",
       "recommended_follow_up": [
-        "Implement a real authentication state machine or connect dmstatus.authenticated to the existing JTAG authentication state only after successful authorization.",
-        "Prevent privileged debug CSR effects while authentication is false.",
-        "Verify dmstatus.authenticated resets false and only transitions true after valid authorization."
+        "Drive dmstatus.authenticated from a real authenticated/authorized debug-session state.",
+        "Keep dmstatus.authenticated deasserted until authentication succeeds.",
+        "Ensure privileged DMI side effects are independently gated and do not rely only on the status bit."
       ]
     },
     {
-      "finding_id": "PERM-ROM2-JTAG-KEY-READ-WRITE",
+      "finding_id": "F-003",
       "status": "potential_warning",
-      "summary": "JTAG key storage is visibly readable and writable through the ROM2 peripheral path.",
-      "vulnerability_category": "Sensitive key exposure / missing access control on key storage",
-      "affected_locations": [
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 18,
-          "line_end": 22,
-          "module": "rom2",
-          "signal_or_register": "mem"
-        },
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 34,
-          "line_end": 40,
-          "module": "rom2",
-          "signal_or_register": "secure_reg"
-        },
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 47,
-          "line_end": 47,
-          "module": "rom2",
-          "signal_or_register": "rdata_o / secure_reg"
-        },
-        {
-          "file": "tb/ariane_peripherals.sv",
-          "line_start": 191,
-          "line_end": 200,
-          "module": "ariane_peripherals",
-          "signal_or_register": "rom2_fuse / rom2_req / rom2_we / rom2_rdata / rom2_wdata"
-        },
-        {
-          "file": "tb/ariane_peripherals.sv",
-          "line_start": 215,
-          "line_end": 215,
-          "module": "ariane_peripherals",
-          "signal_or_register": "jtag_key / key_reg_out"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 18,
-          "line_end": 22,
-          "module": "rom2",
-          "object": "mem key constants",
-          "evidence_type": "source_snippet",
-          "description": "ROM2 contains hardcoded key material, including a location commented as the JTAG key.",
-          "supports_claim": "Shows JTAG-related key material is stored in ROM2."
-        },
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 34,
-          "line_end": 40,
-          "module": "rom2",
-          "object": "secure_reg update logic",
-          "evidence_type": "source_snippet",
-          "description": "On reset, key values are copied into secure_reg, and when req_i and we_i are asserted, secure_reg is overwritten by wdata_i at an address-selected index.",
-          "supports_claim": "Shows the supposedly secure key registers are writable after reset."
-        },
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 47,
-          "line_end": 47,
-          "module": "rom2",
-          "object": "rdata_o assignment",
-          "evidence_type": "source_snippet",
-          "description": "rdata_o returns secure_reg contents when raddr_q is in range.",
-          "supports_claim": "Shows secure_reg contents are readable through the ROM2 read path."
-        },
-        {
-          "file": "tb/ariane_peripherals.sv",
-          "line_start": 191,
-          "line_end": 200,
-          "module": "ariane_peripherals",
-          "object": "i_axi2rom2",
-          "evidence_type": "source_connection",
-          "description": "ariane_peripherals connects an AXI-to-memory adapter to the rom2_fuse AXI slave interface and then to rom2 request, write-enable, address, read-data, and write-data signals.",
-          "supports_claim": "Shows ROM2 is exposed through an AXI-connected peripheral path in the visible design."
-        },
-        {
-          "file": "tb/ariane_peripherals.sv",
-          "line_start": 215,
-          "line_end": 215,
-          "module": "ariane_peripherals",
-          "object": "jtag_key assignment",
-          "evidence_type": "source_connection",
-          "description": "The JTAG key is assigned from key_reg_out[1][31:0], which is the secure_reg output of rom2.",
-          "supports_claim": "Shows the DMI JTAG password source depends on the readable/writable ROM2 secure_reg output."
-        }
-      ],
-      "reasoning_summary": "The JTAG key material is stored in ROM2 secure_reg, exposed as rdata_o for reads, and writable when req_i and we_i are asserted. ariane_peripherals connects ROM2 through an AXI-to-memory adapter, and the JTAG key is taken directly from the ROM2 secure_reg output. Without visible access-control enforcement, a bus master could read or modify the JTAG key.",
-      "security_impact": "A bus master with access to the ROM2 peripheral could potentially disclose the JTAG password or overwrite it with a known value, enabling debug unlock or weakening other key-based protections.",
-      "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The inspected source does not show an access-control firewall around ROM2, but one could exist outside the provided scope. Because external mitigation is unknown, this is reported as a potential warning rather than fully confirmed.",
-      "recommended_follow_up": [
-        "Make key storage read-protected and write-protected after provisioning/reset, or enforce a hardware access-control policy before ROM2.",
-        "Do not expose raw key material on normal bus read paths.",
-        "Separate key outputs used internally for authentication from software-visible memory data.",
-        "Verify unauthorized masters cannot read or overwrite ROM2 key locations."
-      ]
-    },
-    {
-      "finding_id": "PERM-JTAG-PASS-STATE-NOT-RESET",
-      "status": "potential_warning",
-      "summary": "JTAG password authorization state is not visibly reset/defaulted to a safe value.",
-      "vulnerability_category": "Unsafe authorization state initialization",
+      "summary": "JTAG password state pass_chk is not safely registered or reset.",
+      "vulnerability_category": "Unsafe authorization state / incomplete reset",
       "affected_locations": [
         {
           "file": "src/debug/dmi_jtag.sv",
           "line_start": 79,
-          "line_end": 79,
+          "line_end": 181,
           "module": "dmi_jtag",
-          "signal_or_register": "pass_chk"
-        },
+          "signal_or_register": "pass_chk / umode_o"
+        }
+      ],
+      "evidence": [
         {
           "file": "src/debug/dmi_jtag.sv",
-          "line_start": 117,
-          "line_end": 117,
+          "line_start": 79,
+          "line_end": 181,
           "module": "dmi_jtag",
-          "signal_or_register": "pass_chk"
-        },
+          "object": "pass_chk",
+          "evidence_type": "source_snippet",
+          "description": "pass_chk is declared as a logic signal and used for access control. Search results show it is assigned only conditionally when data_d == pass and used to gate reads and drive umode_o.",
+          "supports_claim": "Shows pass_chk lacks a visible reset/default registered authentication-state implementation and is used in security decisions."
+        }
+      ],
+      "reasoning_summary": "pass_chk is treated as an authentication state but is not visibly registered or reset. It is assigned conditionally inside combinational logic without a clear default assignment. This can infer latch-like behavior, retain stale authorization, become X/unknown, or behave inconsistently across tools, which is unsafe for a security-critical permission check.",
+      "security_impact": "The JTAG authentication state may persist unintentionally or behave unpredictably, weakening or bypassing debug permission enforcement.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The exact synthesized behavior is tool-dependent. The visible RTL nevertheless lacks a robust registered authentication-state implementation.",
+      "recommended_follow_up": [
+        "Implement pass_chk as a clocked register with explicit reset and clear conditions.",
+        "Assign deterministic defaults in combinational logic.",
+        "Define session lifetime and deauthentication behavior for JTAG authentication."
+      ]
+    },
+    {
+      "finding_id": "F-004",
+      "status": "confirmed_finding",
+      "summary": "JTAG authentication state can force processor privilege to Machine mode.",
+      "vulnerability_category": "Privilege escalation / improper privilege control",
+      "affected_locations": [
         {
           "file": "src/debug/dmi_jtag.sv",
-          "line_start": 177,
+          "line_start": 41,
           "line_end": 181,
           "module": "dmi_jtag",
           "signal_or_register": "umode_o / pass_chk"
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 153,
+          "line_end": 603,
+          "module": "ariane_testharness",
+          "signal_or_register": "ariane_umode"
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 83,
+          "line_end": 938,
+          "module": "csr_regfile",
+          "signal_or_register": "umode_i / priv_lvl_o"
         }
       ],
       "evidence": [
         {
           "file": "src/debug/dmi_jtag.sv",
-          "line_start": 79,
-          "line_end": 79,
-          "module": "dmi_jtag",
-          "object": "pass_chk declaration",
-          "evidence_type": "source_snippet",
-          "description": "pass_chk is declared as a plain logic signal.",
-          "supports_claim": "Shows the authorization state signal under review."
-        },
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 117,
-          "line_end": 117,
-          "module": "dmi_jtag",
-          "object": "pass_chk success assignment",
-          "evidence_type": "source_snippet",
-          "description": "pass_chk is assigned true only on successful password comparison in the combinational operation-dispatch block.",
-          "supports_claim": "Shows no visible reset/default assignment in the nearby authentication logic."
-        },
-        {
-          "file": "src/debug/dmi_jtag.sv",
-          "line_start": 177,
+          "line_start": 41,
           "line_end": 181,
           "module": "dmi_jtag",
-          "object": "umode_o permission output",
+          "object": "umode_o",
           "evidence_type": "source_snippet",
-          "description": "umode_o depends directly on pass_chk.",
-          "supports_claim": "Shows the potentially uninitialized or latched authorization state affects an output used as a permission/mode control."
+          "description": "dmi_jtag declares umode_o with comment 'Sets the processor to machine mode' and drives it high when pass_chk is 1'b1.",
+          "supports_claim": "Shows JTAG authentication state directly controls a signal intended to force Machine mode."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 153,
+          "line_end": 603,
+          "module": "ariane_testharness",
+          "object": "ariane_umode",
+          "evidence_type": "search_results",
+          "description": "Test harness connects dmi_jtag.umode_o to ariane_umode and then to the core CSR input umode_i.",
+          "supports_claim": "Shows the JTAG-controlled signal reaches the core CSR register file."
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": 938,
+          "line_end": 938,
+          "module": "csr_regfile",
+          "object": "priv_lvl_o",
+          "evidence_type": "source_snippet",
+          "description": "csr_regfile assigns priv_lvl_o to PRIV_LVL_M when debug_mode_q or umode_i is asserted.",
+          "supports_claim": "Shows umode_i forces effective processor privilege output to Machine mode."
         }
       ],
-      "reasoning_summary": "The visible code declares pass_chk and sets it only on a successful password comparison. I did not observe a reset assignment or default assignment that forces it to a safe false state. For an authorization signal, incomplete reset/default behavior can infer latch-like behavior or permit unknown/stale state to influence debug permission outputs.",
-      "security_impact": "An unknown, stale, or latched pass_chk value could incorrectly indicate authorized debug state or assert umode_o unexpectedly, weakening debug permission enforcement.",
-      "confidence": "medium",
-      "uncertainty_or_missing_evidence": "No lint, simulation, synthesis, or formal analysis was run. Tool behavior and complete elaboration could affect the exact manifestation, so this is a warning based on visible source structure.",
+      "reasoning_summary": "The JTAG wrapper's password-check state drives umode_o, which is connected into csr_regfile as umode_i. csr_regfile then forces priv_lvl_o to Machine mode whenever umode_i is asserted. This creates a direct privilege escalation path controlled by debug/JTAG authentication state, which is especially dangerous given the weak pass_chk implementation and ungated DMI writes.",
+      "security_impact": "A JTAG actor that can assert or manipulate pass_chk/umode_o may force the core into Machine privilege, bypassing U/S/M privilege separation and gaining access to machine-level resources.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The full core pipeline privilege enforcement is not visible, but csr_regfile clearly exports PRIV_LVL_M when umode_i is asserted.",
       "recommended_follow_up": [
-        "Reset pass_chk to 0 in sequential logic and update it only on validated password transactions.",
-        "Provide explicit combinational defaults for all assigned outputs/state in always_comb blocks.",
-        "Add assertions that pass_chk is false after reset and cannot become true except after a valid password operation."
+        "Remove direct JTAG control of core privilege level unless it is part of a rigorously specified secure debug mode.",
+        "If required, gate Machine-mode forcing with secure lifecycle/debug authorization and explicit debug-mode entry.",
+        "Rename and review umode_i semantics, because it currently forces PRIV_LVL_M rather than user mode."
+      ]
+    },
+    {
+      "finding_id": "F-005",
+      "status": "confirmed_finding",
+      "summary": "ROM2/fuse key and access-control storage is writable through a memory-mapped AXI path.",
+      "vulnerability_category": "Writable security-critical configuration / missing write authorization",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 17,
+          "line_end": 40,
+          "module": "rom2",
+          "signal_or_register": "secure_reg / mem / we_i"
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 191,
+          "line_end": 217,
+          "module": "ariane_peripherals",
+          "signal_or_register": "rom2_fuse / rom2_we / jtag_key / access_ctrl_reg"
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": 54,
+          "line_end": 61,
+          "module": "ariane_soc",
+          "signal_or_register": "ROM2Base"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 17,
+          "line_end": 40,
+          "module": "rom2",
+          "object": "secure_reg",
+          "evidence_type": "source_snippet",
+          "description": "ROM2 is described as containing keys. It initializes secure_reg from constant mem entries that include JTAG and access-control values, but later writes secure_reg when req_i and we_i are asserted.",
+          "supports_claim": "Shows key/access-control storage is writable after reset."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 191,
+          "line_end": 217,
+          "module": "ariane_peripherals",
+          "object": "rom2_fuse / jtag_key / access_ctrl_reg",
+          "evidence_type": "source_snippet",
+          "description": "ariane_peripherals exposes ROM2 through axi2mem using the rom2_fuse AXI slave, and assigns jtag_key and access_ctrl_reg from key_reg_out.",
+          "supports_claim": "Shows ROM2 is memory-mapped and supplies JTAG key and access-control policy values."
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": 54,
+          "line_end": 61,
+          "module": "ariane_soc",
+          "object": "ROM2Base",
+          "evidence_type": "source_snippet",
+          "description": "SoC package defines ROM2Base as a memory-mapped base address.",
+          "supports_claim": "Shows ROM2 is part of the address map."
+        }
+      ],
+      "reasoning_summary": "ROM2/fuse storage is expected to protect root keys and access-control data, but the module allows writes to secure_reg through a generic req_i/we_i interface. The peripheral wrapper maps this interface to AXI and derives the JTAG key and access-control registers from this storage. Without internal write authorization, any master that can write the ROM2 region can change keys or permission tables.",
+      "security_impact": "A bus master able to write ROM2 can replace the JTAG key, modify access-control permissions, alter AES/key material, and convert denied accesses into allowed accesses, compromising system authorization policy.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The complete interconnect access-control policy was not fully inspected. If the interconnect perfectly blocks all unauthorized ROM2 writes, exploitability is reduced; however, the protected storage itself lacks internal write protection.",
+      "recommended_follow_up": [
+        "Make ROM2/fuse storage read-only after reset or permanently immutable in RTL.",
+        "If updates are required, add a secure, authenticated, lifecycle-controlled write mechanism.",
+        "Enforce internal write protection independent of interconnect-level access control.",
+        "Add assertions that unauthorized writes cannot modify jtag_key or access_ctrl_reg values."
       ]
     }
   ],
   "no_finding_reason": "",
-  "global_uncertainty": "Analysis was limited to files under the provided input scope and used only source inspection. No package definitions outside the scope, simulation, lint, synthesis, formal verification, or external documentation were used. External access-control blocks or SoC-level firewalls outside the provided scope could mitigate some potential warnings, but no such mitigation is visible in the inspected files."
+  "global_uncertainty": "The analysis is based only on visible files under the provided input scope. Some package definitions and complete interconnect/security policy internals were not visible. Therefore, exact exploitability may depend on integration details, enum encodings, and external access controls. Nonetheless, the local RTL evidence demonstrates multiple permission-enforcement weaknesses."
 }

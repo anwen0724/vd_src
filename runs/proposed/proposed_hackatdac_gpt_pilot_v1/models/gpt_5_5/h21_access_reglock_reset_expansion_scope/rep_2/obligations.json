@@ -1,0 +1,293 @@
+{
+  "scope_id": "piton/design/chip/tile/ariane permission scope",
+  "obligations": [
+    {
+      "obligation_id": "PERM-RISCVPERIPH-DBG-JTAG-AUTH-001",
+      "reason": "The scope exposes external JTAG pins, debug-mode signals, DMI/JTAG instances, jtag_hash/jtag_unlock signals, and debug reset/request outputs. External debug control is security-sensitive and should be mediated before affecting hart/debug state.",
+      "subject": "external JTAG/DTM interface",
+      "operation": "trigger debug request, issue DMI read/write, assert non-debug-module reset, activate debug module",
+      "object": "debug capability: debug_req_o, ndmreset_o, dmactive_o, DMI/debug module registers or bus-facing debug master/slave signals",
+      "expected_guard": "debug authentication/authorization such as jtag_unlock, lifecycle/testmode gating, or explicit debug enable before external JTAG can issue DMI operations or reset/halt harts",
+      "candidate_path": "JTAG/DTM inputs tck_i/tms_i/trst_ni/td_i -> dmi_jtag/SimJTAG -> DMI/debug request signals -> debug module outputs debug_req_o/ndmreset_o/dmactive_o and any debug master/slave bus path",
+      "state_conditions_to_check": [
+        "testmode_i value",
+        "debug_mode_i value",
+        "jtag_unlock and jtag_hash generation/use",
+        "trst_ni reset state",
+        "dmactive_o/debug_req_o/ndmreset_o assertion conditions"
+      ],
+      "required_evidence_slots": [
+        "subject external JTAG/DTM source",
+        "operation DMI/debug/reset action",
+        "protected debug/hart-control object",
+        "guard expression or absence at use site",
+        "reachable RTL path through instances/signals",
+        "state condition such as testmode/debug_mode/jtag_unlock",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/test access paths may bypass normal access control; check protected object reachability and authorization guards.",
+        "Evidence closure needs subject, operation, object, expected guard, observed behavior, path/reachability, and source locations."
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer shows relevant ports/signals/instances but not full debug connection logic; inspect visible RTL around lines 233-351 and debug-module instantiation/assignments."
+    },
+    {
+      "obligation_id": "PERM-REGLK-WRITE-PROTECT-002",
+      "reason": "reglk_wrapper exposes a software-visible AXI interface and outputs lock-control bits that likely mediate protected peripheral registers; it also has jtag_unlock and acct_ctrl_i inputs. Need to verify that lock policy cannot be modified or cleared by an unauthorized AXI requester or unauthenticated JTAG unlock.",
+      "subject": "AXI software-visible requester and JTAG unlock input",
+      "operation": "write or clear register-lock policy bits",
+      "object": "reglk_ctrl/reglk_ctrl_o register-lock policy bits",
+      "expected_guard": "writes to lock/control registers should be permitted only under authorized conditions such as existing lock bits allowing update, privileged/account-control mediation, and any JTAG unlock path should itself be authenticated",
+      "candidate_path": "reglk_wrapper AXI write path ariane_axi -> axi_lite_interface decoded en/we/address/wdata -> reglk_ctrl register -> reglk_ctrl_o -> reglk_ctrl in riscv_peripherals and downstream wrappers",
+      "state_conditions_to_check": [
+        "rst_ni/rst_9 reset behavior",
+        "jtag_unlock asserted/deasserted",
+        "acct_ctrl_i and reglk_ctrl_i values",
+        "we/en/address matching protected register",
+        "whether bits are sticky after set"
+      ],
+      "required_evidence_slots": [
+        "subject AXI requester and/or JTAG unlock source",
+        "operation write/clear lock bits",
+        "protected object reglk_ctrl bits",
+        "expected lock/privilege/auth guard",
+        "address decode for lock registers",
+        "write enable conditions",
+        "reset/set/clear behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Lock/sticky bit/write protection must protect all write paths and should not be clearable after set unless authorized.",
+        "CSR/MMIO access control requires requester, address decode, read/write enable, protected register, and expected guard."
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer identifies ports and internal signals but not the always-block write conditions; inspect lines around 38-130."
+    },
+    {
+      "obligation_id": "PERM-ACCT-POLICY-WRITE-GUARD-003",
+      "reason": "acc_ctrl is used in riscv_peripherals to gate at least boot ROM access by privilege level, and acct_wrapper has AXI write inputs plus reglk_ctrl_i/acct_ctrl_i/we_flag. Policy registers should not be writable without proper authorization or after lock.",
+      "subject": "AXI software-visible requester",
+      "operation": "configure/change access-control policy",
+      "object": "acc_ctrl_o/acc_ctrl access-control policy bits controlling peripheral access by priv_lvl_i",
+      "expected_guard": "updates to access-control policy should require authorized privilege/account-control mediation and should be blocked by relevant reglk_ctrl lock bits once locked",
+      "candidate_path": "acct_wrapper AXI write path ariane_axi -> decoded en/we/address/wdata -> access-control register/state -> acc_ctrl_o -> acc_ctrl_c[priv_lvl_i][peripheral] gating in riscv_peripherals",
+      "state_conditions_to_check": [
+        "reglk_ctrl_i value",
+        "acct_ctrl_i value",
+        "we_flag value",
+        "rst_6/rst_ni reset behavior",
+        "address/en/we write condition",
+        "priv_lvl_i indexing in use sites"
+      ],
+      "required_evidence_slots": [
+        "subject AXI requester",
+        "operation write policy bits",
+        "protected object acc_ctrl/access policy",
+        "expected privilege/account/lock guard",
+        "decode for policy registers",
+        "write enable behavior",
+        "downstream use site such as acc_ctrl_c and rom_req",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Access-control policy is a protected asset; configuration changes need privilege/lock mediation.",
+        "Do not assume a lock bit is effective; inspect its actual use site."
+      ],
+      "priority": "high",
+      "uncertainty": "Need full wrapper body around lines 40-147 and top-level connections to confirm guard coverage and reset defaults."
+    },
+    {
+      "obligation_id": "PERM-BOOTROM-ACCESS-GATE-004",
+      "reason": "Visible assignment gates rom_req with acc_ctrl_c[priv_lvl_i][0], but the scope includes multiple bootrom instances and a boot select input. Verify all ROM read paths and response valid/data paths are covered by the access-control guard and correct privilege index.",
+      "subject": "NoC/AXI requester reaching boot ROM interface",
+      "operation": "read boot ROM contents",
+      "object": "boot ROM read data rom_rdata from bootrom/bootrom_linux",
+      "expected_guard": "boot ROM read/execute access should be gated by the correct requester privilege/access-control bit and should not be bypassed by alternate ROM request/data paths or boot selection muxes",
+      "candidate_path": "riscv_peripherals incoming NoC/AXI request for boot ROM -> rom_req_acct/rom_addr -> rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0] -> bootrom instances/read data mux",
+      "state_conditions_to_check": [
+        "priv_lvl_i values",
+        "acc_ctrl_c construction including special j==5 alias",
+        "ariane_boot_sel_i",
+        "rom_req_acct and rom_addr decode",
+        "read response when guard is false"
+      ],
+      "required_evidence_slots": [
+        "subject/request path to ROM",
+        "operation ROM read",
+        "protected object ROM contents",
+        "guard expression acc_ctrl_c[priv_lvl_i][0] or equivalent",
+        "address decode and request generation",
+        "response data path and mux behavior",
+        "bypass/alternate path absence",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO and memory-region access require requester, address decode, read enable, protected object, and expected privilege or policy guard.",
+        "Fabric/address map paths must preserve security attributes across paths."
+      ],
+      "priority": "medium",
+      "uncertainty": "Only selected assignments are visible; inspect surrounding request/response routing around lines 488-534 and address decode around line 811."
+    },
+    {
+      "obligation_id": "PERM-RSTCTRL-RESET-AUTH-005",
+      "reason": "rst_wrapper exports many reset outputs and accepts AXI, reglk_ctrl_i, acct_ctrl_i, and debug_mode_i. Unauthorized reset can clear security state or disrupt protected peripherals; verify reset commands are guarded and cannot bypass locks via debug mode.",
+      "subject": "AXI software-visible requester and debug-mode-controlled path",
+      "operation": "trigger or configure peripheral reset",
+      "object": "peripheral reset control outputs rst_1..rst_13 and rst_mem/start/rst_id state",
+      "expected_guard": "software-triggered peripheral resets should require privilege/access-control authorization and lock mediation; debug-mode override should be intentionally constrained",
+      "candidate_path": "rst_wrapper AXI write path -> decoded start/rst_id/rst_mem -> rst_1..rst_13 outputs -> peripheral reset inputs in riscv_peripherals/wrappers",
+      "state_conditions_to_check": [
+        "debug_mode_i asserted/deasserted",
+        "reglk_ctrl_i and acct_ctrl_i",
+        "rst_ni reset behavior",
+        "start/rst_id write conditions",
+        "rst_mem persistence/clearing",
+        "which rst_N connects to reglk/acct/crypto/debug"
+      ],
+      "required_evidence_slots": [
+        "subject AXI requester/debug mode source",
+        "operation reset trigger/configuration",
+        "protected object reset outputs and downstream peripheral state",
+        "expected privilege/account/lock/debug guard",
+        "address decode/write enable",
+        "state update for start/rst_id/rst_mem",
+        "downstream reset connections",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/rst_ctrl/rst_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Reset/lifecycle controls are protected assets; mode transitions and reset operations must be mediated.",
+        "Lock bits must protect all control paths, including reset-trigger paths."
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer lists ports/signals but not complete control logic; inspect lines 52-181 and top-level reset wiring around lines 902-913."
+    },
+    {
+      "obligation_id": "PERM-FUSE-READ-EXPOSURE-006",
+      "reason": "The top-level contains fuse_req/fuse_addr/fuse_rdata signals, suggesting a readable fuse region. Need to verify requester mediation and whether fuse data can be routed to external NoC/debug outputs without proper guard.",
+      "subject": "NoC/AXI/debug requester reaching fuse interface",
+      "operation": "read/expose fuse data",
+      "object": "fuse_rdata/fuse contents addressed by fuse_addr",
+      "expected_guard": "fuse reads should be restricted by lifecycle/privilege/access-control or debug authorization, and fuse data should not be returned to unprivileged/debug/test response paths unless explicitly allowed",
+      "candidate_path": "riscv_peripherals fuse request path -> fuse_req/fuse_addr/fuse_rdata -> any NoC/debug/AXI response or read mux",
+      "state_conditions_to_check": [
+        "priv_lvl_i",
+        "debug_mode_i",
+        "testmode_i",
+        "acc_ctrl/reglk_ctrl gating",
+        "fuse_req assertion conditions",
+        "response valid/data mux selection"
+      ],
+      "required_evidence_slots": [
+        "subject requesting fuse read",
+        "operation read/expose fuse",
+        "protected object fuse_rdata",
+        "expected lifecycle/privilege/debug guard",
+        "address decode for fuse region",
+        "response data path to external interface",
+        "state condition for debug/test/privilege",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fuses are protected assets; exposure through read muxes/debug paths is a permission vulnerability if externally observable.",
+        "Internal secret state alone is not enough; show an exposure path."
+      ],
+      "priority": "high",
+      "uncertainty": "Only signal declarations are in fact layer; inspect around line 1613 and any read mux/NoC response routing."
+    },
+    {
+      "obligation_id": "PERM-CLINT-MMIO-GUARD-007",
+      "reason": "axi_lite_interface exposes generic AXI requests as en/we/address/data to CLINT state. Timer and IPI controls can affect privilege-level execution and should be mediated by privilege/access policy either in this interface or upstream routing.",
+      "subject": "AXI/NoC requester to CLINT",
+      "operation": "write timer/IPI control or read CLINT state",
+      "object": "CLINT timer/IPI control state and interrupt outputs timer_irq_o/ipi_o",
+      "expected_guard": "writes to timer compare/software interrupt registers should be restricted to authorized privilege/access-control policy or upstream wrapper mediation; address decode should prevent unintended register access",
+      "candidate_path": "CLINT AXI-lite interface ariane_axi -> address_o/en_o/we_o/data_o -> timer/IPI registers -> timer_irq_o/ipi_o",
+      "state_conditions_to_check": [
+        "priv_lvl_i relation in top-level routing",
+        "acc_ctrl_c bit for CLINT if any",
+        "address_n/trans_id_n handling",
+        "read/write handshake validity",
+        "reset behavior"
+      ],
+      "required_evidence_slots": [
+        "subject AXI requester",
+        "operation CLINT read/write",
+        "protected object timer/IPI control registers",
+        "expected privilege/access-control guard",
+        "address decode and we/en generation",
+        "upstream acc_ctrl gate if present",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/clint/axi_lite_interface.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "MMIO access control requires requester, address decode, write enable, protected register, and privilege or policy guard.",
+        "Fabric/address-map checks should preserve security attributes across wrappers."
+      ],
+      "priority": "medium",
+      "uncertainty": "Fact layer for axi_lite_interface is generic and lacks top-level CLINT routing details; inspect full file and riscv_peripherals CLINT connections."
+    },
+    {
+      "obligation_id": "PERM-PERIPH-POLICY-COVERAGE-008",
+      "reason": "The top-level declares many security-sensitive peripheral NoC ports and central reglk_ctrl/acc_ctrl policy signals. Need a coverage check that each sensitive peripheral access path uses the policy guard consistently, not only boot ROM.",
+      "subject": "NoC/AXI requesters to top-level peripheral wrappers",
+      "operation": "route/read/write/trigger protected peripheral operations",
+      "object": "protected peripheral NoC/MMIO request enables for AES/RSA/RNG/SHA/HMAC/debug/reset/DMA/reglk/acct and policy-controlled access paths",
+      "expected_guard": "every protected peripheral request path should be gated by the intended acc_ctrl_c[priv_lvl_i][peripheral] policy and, for configuration writes, by corresponding reglk_ctrl lock bits",
+      "candidate_path": "reglk_ctrl/acc_ctrl policy propagation in riscv_peripherals -> acc_ctrl_c indexing by priv_lvl_i and peripheral index -> per-peripheral request enables for crypto, RNG, debug, reset, DMA, packet, account, reglk",
+      "state_conditions_to_check": [
+        "priv_lvl_i",
+        "acc_ctrl_c construction and peripheral index mapping",
+        "reglk_ctrl bits per peripheral",
+        "debug_mode_i/testmode_i",
+        "we_flag_0..we_flag_4",
+        "reset outputs affecting wrappers"
+      ],
+      "required_evidence_slots": [
+        "subject NoC/AXI requester per peripheral",
+        "operation read/write/trigger/route",
+        "protected object per peripheral control/data",
+        "expected acc_ctrl/reglk guard",
+        "actual request enable/data mux use site",
+        "address/routing decode",
+        "bypass path analysis",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Fabric/wrapper connections may fail to preserve security attributes across paths.",
+        "A lock or access-control bit must be checked at the actual use site for each protected operation."
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer is truncated for many assignments; inspect complete riscv_peripherals for all peripheral request/valid/ready/data paths."
+    }
+  ]
+}

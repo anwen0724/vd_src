@@ -1,0 +1,120 @@
+{
+  "analysis_summary": "Examined RTL files under the input scope for permission-related security vulnerabilities. Found critical issues in the DMA controller's PMP (Physical Memory Protection) enforcement: (1) a hardware backdoor via the `we_flag` signal that bypasses PMP read-checks under specific conditions, and (2) a missing `priv_lvl_i` port connection in the PMP instantiation inside the DMA, leading to undefined privilege-level enforcement. Both can allow unauthorized memory access through DMA, undermining system-wide memory isolation.",
+  "findings": [
+    {
+      "finding_id": "FINDING-001",
+      "status": "confirmed_finding",
+      "summary": "DMA PMP read-check bypass via `we_flag` hardware backdoor when length equals 3",
+      "vulnerability_category": "Permission Bypass / Hardware Backdoor",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma.sv",
+          "line_start": 216,
+          "line_end": 216,
+          "module": "dma",
+          "signal_or_register": "pmp_allow_new"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma.sv",
+          "line_start": 26,
+          "line_end": 29,
+          "module": "dma",
+          "signal_or_register": "we_flag"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1909,
+          "line_end": 1909,
+          "module": "riscv_peripherals",
+          "signal_or_register": "we_flag_3 -> dma_wrapper.we_flag"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma.sv",
+          "line_start": 214,
+          "line_end": 217,
+          "module": "dma",
+          "object": "pmp_allow_new assignment in CTRL_CHECK_LOAD state",
+          "evidence_type": "source_code",
+          "description": "Line 216: pmp_allow_new = (pmp_allow_reg && (pmp_data_allow || (pmp_check_ctr_reg == length_d))) || (we_flag && length_d == 3); This OR-term unconditionally sets pmp_allow_new=1 when we_flag is high and length_d equals 3, bypassing all PMP address/access-type checks for DMA read operations.",
+          "supports_claim": "The we_flag signal creates a direct PMP bypass path, allowing arbitrary reads via DMA when length=3 regardless of PMP configuration."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1905,
+          "line_end": 1909,
+          "module": "riscv_peripherals",
+          "object": "i_dma_wrapper instantiation",
+          "evidence_type": "source_code",
+          "description": "The dma_wrapper is instantiated with .we_flag(we_flag_3). The we_flag_3 is a top-level input to the riscv_peripherals module, meaning an external agent can assert it to bypass PMP.",
+          "supports_claim": "The backdoor is controllable from the system-level input we_flag_3, making it exploitable."
+        }
+      ],
+      "reasoning_summary": "In the DMA's CTRL_CHECK_LOAD state, the pmp_allow_new signal is computed with an additional term `(we_flag && length_d == 3)` that overrides all PMP checks. This term does not depend on pmp_data_allow (the PMP lookup result) and is OR'd with the legitimate allow logic. When a DMA transfer of exactly length=3 is initiated with we_flag asserted, the DMA will proceed with the read operation regardless of whether the PMP entries permit access to the source address range. This effectively creates an intentional or unintentional hardware backdoor that circumvents memory protection for DMA-initiated reads.",
+      "security_impact": "HIGH - An attacker or malicious software that can control the we_flag input (or the length parameter of a DMA transfer) can read arbitrary physical memory through DMA, bypassing all PMP-configured memory access restrictions. This can lead to information disclosure of sensitive data (crypto keys, firmware, etc.) and defeat system-level memory isolation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact mechanism for controlling we_flag_3 at the system level is not fully visible in the provided scope; the top-level driver of this signal is external. The check applies only when length_d == 3; other lengths are not bypassed. There may be additional gating on we_flag generation not visible here.",
+      "recommended_follow_up": [
+        "Remove the (we_flag && length_d == 3) term from pmp_allow_new computation unless there is a documented, secure use case.",
+        "Audit all we_flag inputs across peripheral wrappers for similar bypass patterns.",
+        "Add formal assertions to verify that PMP decisions are never overridden by sideband signals."
+      ]
+    },
+    {
+      "finding_id": "FINDING-002",
+      "status": "confirmed_finding",
+      "summary": "Missing `priv_lvl_i` port connection in PMP instantiation inside DMA causes undefined privilege-level enforcement",
+      "vulnerability_category": "Missing Permission Check / Undefined Security Behavior",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma.sv",
+          "line_start": 348,
+          "line_end": 360,
+          "module": "dma",
+          "signal_or_register": "i_pmp_data instantiation (missing .priv_lvl_i)"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/pmp/pmp.sv",
+          "line_start": 21,
+          "line_end": 22,
+          "module": "pmp",
+          "signal_or_register": "priv_lvl_i"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/dma/dma.sv",
+          "line_start": 348,
+          "line_end": 360,
+          "module": "dma",
+          "object": "pmp instantiation i_pmp_data",
+          "evidence_type": "source_code",
+          "description": "The PMP module instantiation connects: .addr_i, .access_type_i, .conf_addr_i, .conf_i, .allow_o — but omits .priv_lvl_i. This port is a required input on the pmp module (declared at pmp.sv line 21-22) and determines whether the access is treated as M-mode (bypasses non-locked PMP entries) or U/S-mode (enforces PMP).",
+          "supports_claim": "The unconnected priv_lvl_i port leads to synthesis-dependent behavior in a security-critical path."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/pmp/pmp.sv",
+          "line_start": 50,
+          "line_end": 63,
+          "module": "pmp",
+          "object": "always_comb block for allow_o",
+          "evidence_type": "source_code",
+          "description": "The PMP logic uses priv_lvl_i to decide: (1) whether to apply PMP entry checks (line 53: priv_lvl_i != PRIV_LVL_M || locked), and (2) the default allow policy when no entries match (line 61-62: M-mode allowed, others denied). Without a connected value, this policy is unpredictable.",
+          "supports_claim": "The PMP decision critically depends on priv_lvl_i; its absence means the DMA's effective privilege level is undefined."
+        }
+      ],
+      "reasoning_summary": "The PMP module requires a priv_lvl_i input to distinguish between Machine-mode accesses (which bypass non-locked PMP entries) and lower-privilege accesses (which must obey all PMP entries). The DMA controller instantiates the PMP without connecting this port. In SystemVerilog, unconnected input ports may be tied to default values (typically 0) or left floating depending on synthesis/simulation tools. If priv_lvl_i resolves to M-mode, the DMA will bypass all non-locked PMP entries (treating them as OFF). If it resolves to U-mode, the DMA may be denied access to memory regions that should be accessible. Either outcome represents a security vulnerability: unauthorized access or denial of service. The RISC-V privileged specification requires that bus masters like DMA operate with a defined privilege mode for PMP enforcement.",
+      "security_impact": "HIGH - Depending on synthesis behavior, the DMA may either: (a) operate as M-mode and ignore all non-locked PMP entries, allowing DMA to read/write any memory not protected by a locked PMP entry; or (b) operate as U-mode and be blocked from accessing memory it legitimately needs. Both violate the security model. Scenario (a) allows arbitrary memory access through DMA.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact synthesized value of an unconnected input port is tool-dependent. Without running synthesis, we cannot determine which privilege level the DMA effectively gets. Simulation may show 'X' propagation, which synthesis tools typically resolve to 0. The fix (explicitly connecting a defined privilege level) is clear regardless.",
+      "recommended_follow_up": [
+        "Connect priv_lvl_i in the DMA's PMP instantiation to a defined privilege level (likely M-mode, replicating the CPU's behavior for trusted bus masters).",
+        "Review all other PMP instantiations in the SoC for missing port connections.",
+        "Add lint rules to flag unconnected input ports on security-critical modules."
+      ]
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "The analysis is limited to the source files under the provided scope. The top-level integration and control of `we_flag` signals, the `acct_ctrl_i` gating, and the reset controller logic are not fully visible. The software files (ariane_api.c, using_api1.c) do not directly reveal exploitation of these vulnerabilities but show that DMA transfers are available to user-space code via system calls, making the attack surface relevant."
+}

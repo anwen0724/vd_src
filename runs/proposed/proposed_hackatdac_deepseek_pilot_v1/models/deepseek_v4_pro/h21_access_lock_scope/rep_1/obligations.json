@@ -1,0 +1,241 @@
+{
+  "scope_id": "riscv_peripherals_wrappers",
+  "obligations": [
+    {
+      "obligation_id": "OBL-001",
+      "reason": "Debug/test paths must not bypass access control or lock protections for protected assets.",
+      "subject": "Debug/test interface (SimDTM / dmi_jtag / testmode_i)",
+      "operation": "read/write",
+      "object": "Access-control matrix (acc_ctrl/acc_ctrl_c) and lock control (reglk_ctrl)",
+      "expected_guard": "Debug access to system bus peripherals is disabled (dm_master signals tied off) but DMI slave accesses may still reach configuration registers. The access-control matrix should require explicit debug authorization (e.g. authenticated jtag_unlock) and not inherit privileges from other modes unconditionally.",
+      "candidate_path": "debug_req_bits_op -> dmi_req -> dm_slave (dm_slave_req, dm_slave_we…) or acc_ctrl_c assignment combining j=5 with another master’s rights.",
+      "state_conditions_to_check": [
+        "testmode_i asserted",
+        "debug_mode_i active",
+        "jtag_unlock state",
+        "acc_ctrl contents for master 4 and master 5",
+        "reglk_ctrl initial/reset value"
+      ],
+      "required_evidence_slots": [
+        "Reachability of reglk_ctrl or HMAC/PKT/ACCT register writes from debug DMI slave",
+        "Effect of acc_ctrl_c[j]==5 on boot ROM and peripheral access",
+        "Whether jtag_unlock overrides lock without cryptographic proof"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv",
+        "reglk_wrapper.sv",
+        "hmac_wrapper.sv",
+        "pkt_wrapper.sv",
+        "acct_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm if dm_slave can write to peripheral register space and if jtag_unlock bypasses lock."
+    },
+    {
+      "obligation_id": "OBL-002",
+      "reason": "Lock register state must have a secure reset default and must not be clearable by debug/test/privilege escalation.",
+      "subject": "Any bus master (CPU, debug)",
+      "operation": "clear or override",
+      "object": "reglk_ctrl lock bits (peripheral write protection)",
+      "expected_guard": "Lock bits default to locked (write-protected) after reset. Unlock requires a specific sequence (e.g. authenticated JTAG or secure privileged write) and debug/test modes cannot force unlock without authentication.",
+      "candidate_path": "reglk_ctrl_i in reglk_wrapper driven from riscv_peripherals’ reglk_ctrl; that signal is generated from AXI wrapper logic possibly inflenced by JTAG unlock or testmode.",
+      "state_conditions_to_check": [
+        "Reset value of reglk_ctrl in riscv_peripherals",
+        "Any write path to reglk_ctrl during debug_mode or testmode",
+        "jtag_unlock influence on reglk_ctrl"
+      ],
+      "required_evidence_slots": [
+        "RTL showing reglk_ctrl reset assignment",
+        "Any path setting reglk_ctrl directly from debug_req or test signals",
+        "Connection between jtag_unlock and reglk_ctrl"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv",
+        "reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to see how reglk_ctrl is driven; suspect debug/test override."
+    },
+    {
+      "obligation_id": "OBL-003",
+      "reason": "Cryptographic key material must not be observable or modifiable from less-privileged contexts or debug interfaces.",
+      "subject": "Debug interface / unprivileged CPU mode",
+      "operation": "read/write",
+      "object": "HMAC keys (key0, key), hash state, bigData, HMAC_IN/HMAC_OUT registers",
+      "expected_guard": "HMAC key registers are only accessible from a trusted/privileged CPU mode (e.g. M-mode) and are masked when debug_mode_i is active. The debug_mode_i port should force all HMAC register accesses to return zero or cause an error.",
+      "candidate_path": "hmac_wrapper has debug_mode_i input. The AXI slave inside hmac_wrapper connects to address/en/we/rdata/wdata. Is debug_mode_i used to block or redirect reads/writes?",
+      "state_conditions_to_check": [
+        "usage of debug_mode_i in hmac_wrapper",
+        "address mapping of key registers",
+        "acct_ctrl_i/peripheral lock state"
+      ],
+      "required_evidence_slots": [
+        "RTL code in hmac_wrapper showing how debug_mode_i affects access",
+        "Whether key reads return actual key or zero/debug value",
+        "Signal tracing of key to read mux"
+      ],
+      "files_or_modules_to_inspect": [
+        "hmac_wrapper.sv",
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "The presence of debug_mode_i suggests awareness; must verify it actually gates access."
+    },
+    {
+      "obligation_id": "OBL-004",
+      "reason": "Fuse values represent immutable security-critical data and must not be readable by untrusted agents.",
+      "subject": "Any AXI master or debug interface",
+      "operation": "read",
+      "object": "Fuse data (read via fuse_rdata_i in pkt_wrapper)",
+      "expected_guard": "Fuse read requests are only accepted from secure boot code (privileged, authenticated). The pkt_wrapper must check acc_ctrl and lock state before issuing fuse_req_o, and fuse_rdata must not be visible to debug/test modes.",
+      "candidate_path": "pkt_wrapper receives AXI requests (address, en, we, rdata). If a valid address range hits, it may assert fuse_req_o and return fuse_rdata_i to the master. Need to check that access control (acct_ctrl_i) and lock (reglk_ctrl_i) are applied before responding.",
+      "state_conditions_to_check": [
+        "acct_ctrl_i handling inside pkt_wrapper",
+        "reglk_ctrl_i use for fuse read gating",
+        "debug_mode influence (if any)"
+      ],
+      "required_evidence_slots": [
+        "RTL show that pkt_wrapper’s transaction decode includes acc_ctrl check",
+        "Evidence that fuse_rdata_i is not passed through when the enable is not from a trusted source",
+        "Absence of direct debug path to fuse_rdata"
+      ],
+      "files_or_modules_to_inspect": [
+        "pkt_wrapper.sv",
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / PMP",
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "The fuse interface may only allow reads after a special write, but must double-check wrapper logic."
+    },
+    {
+      "obligation_id": "OBL-005",
+      "reason": "Test mode should not allow disabling security-critical path protections or leaking protected state.",
+      "subject": "testmode_i signal",
+      "operation": "override access control or expose state",
+      "object": "Access control matrix (acc_ctrl), lock (reglk_ctrl), HMAC/PKT internal state",
+      "expected_guard": "When testmode_i is active, at minimum all security-critical outputs (fuse_rdata, HMAC key, hash) are zeroed or become non-functional, and writes to lock/access registers are ignored.",
+      "candidate_path": "testmode_i is an input to riscv_peripherals; how is it used? Possibly connects to muxes, forces acc_ctrl or lock bypass. The assignment for acc_ctrl_c uses j==5 which might be test-mode enabled.",
+      "state_conditions_to_check": [
+        "Any reference to testmode_i in riscv_peripherals or wrappers",
+        "Whether testmode_i is decoded as master j=5 in acc_ctrl_c logic",
+        "Impact on reglk_ctrl"
+      ],
+      "required_evidence_slots": [
+        "RTL showing testmode_i connectivity",
+        "Any logic that forces unlock or open access under test",
+        "Verification that test mode does not propagate to peripheral AXI outputs"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv",
+        "all wrappers"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "No direct signal mapping provided; must inspect full RTL for testmode_i usage."
+    },
+    {
+      "obligation_id": "OBL-006",
+      "reason": "Privilege level for boot ROM access must be correctly enforced without bypass.",
+      "subject": "Any bus master with lower privilege",
+      "operation": "read",
+      "object": "Boot ROM (bootrom)",
+      "expected_guard": "Only access requests with appropriate priv_lvl_i (e.g., machine mode) and matching acc_ctrl permission are granted; debug/test cannot override the privilege check.",
+      "candidate_path": "rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]",
+      "state_conditions_to_check": [
+        "Possible values of priv_lvl_i during debug/test",
+        "Whether debug/test can force priv_lvl_i to a higher value",
+        "acc_ctrl_c computation when j=5"
+      ],
+      "required_evidence_slots": [
+        "Signal tracing for priv_lvl_i generation",
+        "Demonstration that debug cannot raise privilege",
+        "Access test for master j=5 to boot ROM"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "medium",
+      "uncertainty": "Depends on how priv_lvl_i is driven; if debug can set it to M-mode, ROM read becomes trivial."
+    },
+    {
+      "obligation_id": "OBL-007",
+      "reason": "JTAG unlock mechanism must rely on strong authentication and not be bypassable by simple pattern or single-cycle assertion.",
+      "subject": "JTAG interface (dmi_jtag, SimJTAG)",
+      "operation": "assert jtag_unlock",
+      "object": "jtag_unlock signal that grants privileged access (likely unlocks lock bits or debug visibility)",
+      "expected_guard": "jtag_unlock is asserted only after a successful challenge-response involving jtag_hash (256-bit comparison) and possibly a write sequence. It should not be controllable by a simple single-write or via JTAG IR scan without authentication.",
+      "candidate_path": "jtag_hash (256-bit) and jtag_unlock are generated somewhere in riscv_peripherals; how does JTAG FSM produce unlock? Need to trace from JTAG logic.",
+      "state_conditions_to_check": [
+        "Sequence to set jtag_unlock",
+        "Whether jtag_unlock persists after JTAG disconnect",
+        "Reset value of jtag_hash comparison logic"
+      ],
+      "required_evidence_slots": [
+        "RTL implementing jtag_unlock logic",
+        "Comparison logic for jtag_hash",
+        "Any bypass (e.g., hard-coded unlock) in SimJTAG or SimDTM"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv",
+        "SimJTAG (if visible) and SimDTM references"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to see JTAG authentication logic; SimJTAG may be a simulation model with known unlock code."
+    },
+    {
+      "obligation_id": "OBL-008",
+      "reason": "Access control matrix combination logic must not create unintended privilege inheritance.",
+      "subject": "Any master with index j=5 (likely debug/monitor)",
+      "operation": "obtain same permissions as master 4",
+      "object": "acc_ctrl_c access rights for j=5",
+      "expected_guard": "Each master's access permissions are independently defined; no master obtains the permissions of another without explicit justification and proper isolation.",
+      "candidate_path": "assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]). When j=5, an extra term ORs acc_ctrl[4*4+i] (master 4’s permission bit i). This grants master 5 the same permissions as master 4 for every protected resource.",
+      "state_conditions_to_check": [
+        "Value of acc_ctrl[4*4+i] (permissions of master 4)",
+        "Whether master 4 is a privileged, secure master"
+      ],
+      "required_evidence_slots": [
+        "Definition of master indices (0-?; what is master 4 and master 5?)",
+        "Proof that master 5 should not inherit master 4’s rights",
+        "Impact on boot ROM access via acc_ctrl_c[priv_lvl_i][0] when j=5 overrides priv check"
+      ],
+      "files_or_modules_to_inspect": [
+        "riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm that j=5 corresponds to debug/test and that the OR is a vulnerability rather than intended delegation."
+    }
+  ]
+}

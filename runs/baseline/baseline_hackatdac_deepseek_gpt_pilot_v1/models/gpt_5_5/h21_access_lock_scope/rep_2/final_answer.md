@@ -1,134 +1,16 @@
 {
-  "analysis_summary": "Inspected the RTL/source files under the provided input scope only. The design implements a privilege-indexed access-control matrix `acc_ctrl_c[priv_lvl_i][peripheral_index]` and passes per-peripheral permission bits into wrappers as `acct_ctrl_i`. The main confirmed permission issue is in `riscv_peripherals.sv`: the HMAC access-control bit for peripheral index 5 is explicitly ORed with the SHA256 access-control bit for peripheral index 4, so a privilege level granted SHA256 access is also granted HMAC access even if its HMAC-specific bit is not set. HMAC is security-sensitive because its wrapper exposes key-related registers behind this gate.",
+  "analysis_summary": "Inspected the RTL/source files under the provided scope, focusing on permission enforcement, access-control register generation, register locking, privilege-level gating, and sensitive key/fuse related reads. The design implements per-privilege access checks through acc_ctrl_c[priv_lvl_i][peripheral], but the access-control state resets permissive and the ACCT/REGLK control peripherals are themselves gated by the same mutable access-control table. Register locks reset unlocked. The ACCT implementation also appears inconsistent with the configured number of peripherals, which can lead to incomplete or incorrect permission mapping. PKT key/fuse-related reads are protected only by access-control and default-unlocked lock bits. Overall, the visible RTL contains permission-related security vulnerabilities or insecure defaults.",
   "findings": [
     {
-      "finding_id": "FINDING-001",
+      "finding_id": "PERM-001",
       "status": "confirmed_finding",
-      "summary": "HMAC access is incorrectly granted by SHA256 permission due to an OR term in the top-level access-control matrix.",
-      "vulnerability_category": "Permission/authorization bypass due to access-control bit aliasing",
-      "affected_locations": [
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 222,
-          "line_end": 222,
-          "module": "riscv_peripherals",
-          "signal_or_register": "acc_ctrl_c"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1536,
-          "line_end": 1536,
-          "module": "riscv_peripherals / i_hmac_wrapper wiring",
-          "signal_or_register": "acct_ctrl_i"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
-          "line_start": 80,
-          "line_end": 80,
-          "module": "hmac_wrapper",
-          "signal_or_register": "en"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
-          "line_start": 37,
-          "line_end": 179,
-          "module": "hmac_wrapper",
-          "signal_or_register": "key0"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 216,
-          "line_end": 216,
-          "module": "riscv_peripherals",
-          "object": "acc_ctrl_c",
-          "evidence_type": "source_line",
-          "description": "The privilege/peripheral access-control matrix is declared as `logic [3:0][NB_PERIPHERALS-1:0] acc_ctrl_c;`.",
-          "supports_claim": "Shows that `acc_ctrl_c` is the top-level privilege/peripheral permission matrix."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 222,
-          "line_end": 222,
-          "module": "riscv_peripherals",
-          "object": "acc_ctrl_c assignment",
-          "evidence_type": "source_line",
-          "description": "The access-control matrix assignment is `assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]);`.",
-          "supports_claim": "For peripheral index `j == 5`, access is granted if either the index-5 permission bit or the index-4 permission bit is set."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1627,
-          "line_end": 1627,
-          "module": "riscv_peripherals / i_hmac_wrapper wiring",
-          "object": "acct_ctrl_i",
-          "evidence_type": "source_line",
-          "description": "The HMAC wrapper receives `.acct_ctrl_i ( acc_ctrl_c[priv_lvl_i][5])`.",
-          "supports_claim": "Shows HMAC is controlled by access-control index 5."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1536,
-          "line_end": 1536,
-          "module": "riscv_peripherals / i_sha256_wrapper wiring",
-          "object": "acct_ctrl_i",
-          "evidence_type": "source_line",
-          "description": "The SHA256 wrapper receives `.acct_ctrl_i ( acc_ctrl_c[priv_lvl_i][4])`.",
-          "supports_claim": "Shows access-control index 4 is used for a separate SHA256 peripheral."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
-          "line_start": 80,
-          "line_end": 80,
-          "module": "hmac_wrapper",
-          "object": "en",
-          "evidence_type": "source_line",
-          "description": "The HMAC wrapper gates internal AXI-lite enable with `assign en = en_acct && acct_ctrl_i;`.",
-          "supports_claim": "Shows that the top-level `acct_ctrl_i` signal is the permission gate for HMAC register access."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
-          "line_start": 37,
-          "line_end": 54,
-          "module": "hmac_wrapper",
-          "object": "key0/key",
-          "evidence_type": "source_line",
-          "description": "The HMAC wrapper declares `logic [31:0] key0 [0:7];` and constructs the HMAC key from it when not in debug mode.",
-          "supports_claim": "Shows HMAC contains key-related state, making unauthorized HMAC access security-sensitive."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
-          "line_start": 165,
-          "line_end": 179,
-          "module": "hmac_wrapper",
-          "object": "key0 write cases",
-          "evidence_type": "source_lines",
-          "description": "The HMAC key registers are writable through the AXI-lite map when access is enabled and lock bit `reglk_ctrl_i[5]` permits writes, e.g. `key0[7] <= reglk_ctrl_i[5] ? key0[7] : wdata;` through `key0[0] <= ...`.",
-          "supports_claim": "Shows that unauthorized HMAC access can potentially affect key material if register locks are not set."
-        }
-      ],
-      "reasoning_summary": "The design appears to intend independent per-peripheral authorization. SHA256 uses index 4 and HMAC uses index 5. However, the access-control matrix assignment explicitly computes `acc_ctrl_c[i][5]` as `acc_ctrl[5*4+i] | acc_ctrl[4*4+i]`. Therefore, a privilege level with SHA256 permission but without HMAC permission will still get HMAC `acct_ctrl_i` asserted. Since `hmac_wrapper` uses `acct_ctrl_i` as its AXI-lite access gate, this creates an authorization bypass from SHA256 permission to HMAC permission.",
-      "security_impact": "A lower-privileged or less-authorized context that is granted SHA256 access may also access the HMAC peripheral without having the HMAC-specific permission bit set. Because HMAC contains key-related registers and keyed authentication functionality, this can allow unauthorized HMAC operations and potentially unauthorized key register writes if the HMAC register-lock bit is not set. This can undermine authentication, attestation, firmware verification, key-derivation, or other security flows relying on HMAC separation.",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "The inspected source does not include the full security policy or all software initialization behavior, so intent cannot be proven from documentation. However, the distinct SHA256 and HMAC wrapper mappings and the HMAC key state make the permission aliasing security-relevant and strongly indicate an unintended authorization bypass.",
-      "recommended_follow_up": [
-        "Remove the SHA256-to-HMAC OR term unless there is a documented, security-reviewed policy requiring SHA256 permission to imply HMAC permission.",
-        "Add an assertion or test that `acc_ctrl_c[priv][5]` depends only on the intended HMAC permission bit for every privilege level.",
-        "Review all other `acc_ctrl_c` derivations and wrapper index mappings for unintended permission aliasing.",
-        "Review HMAC register-lock initialization and software sequencing to ensure HMAC key registers cannot be written by unauthorized contexts."
-      ]
-    },
-    {
-      "finding_id": "FINDING-002",
-      "status": "potential_warning",
-      "summary": "Access-control registers reset to all ones, which appears to be a permissive default.",
-      "vulnerability_category": "Permissive default access-control configuration",
+      "summary": "Access-control registers reset to allow-all, and ACCT/REGLK control peripherals are themselves accessible through those default-allowed mutable permission bits.",
+      "vulnerability_category": "Insecure default permissions / mutable permission-control bypass",
       "affected_locations": [
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 71,
-          "line_end": 75,
+          "line_start": 84,
+          "line_end": 84,
           "module": "acct_wrapper",
           "signal_or_register": "acct_mem"
         },
@@ -138,41 +20,357 @@
           "line_end": 49,
           "module": "acct_wrapper",
           "signal_or_register": "acc_ctrl_o"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 73,
+          "line_end": 73,
+          "module": "acct_wrapper",
+          "signal_or_register": "en/acct_ctrl_i"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 222,
+          "line_end": 222,
+          "module": "riscv_peripherals",
+          "signal_or_register": "acc_ctrl_c"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1729,
+          "line_end": 1729,
+          "module": "riscv_peripherals",
+          "signal_or_register": "ACCT acct_ctrl_i"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1819,
+          "line_end": 1819,
+          "module": "riscv_peripherals",
+          "signal_or_register": "REGLK acct_ctrl_i"
         }
       ],
       "evidence": [
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 49,
-          "line_end": 49,
+          "line_start": 84,
+          "line_end": 84,
           "module": "acct_wrapper",
-          "object": "acc_ctrl_o",
+          "object": "acct_mem[j] <= 32'hffffffff",
           "evidence_type": "source_line",
-          "description": "The access-control output is derived from `acct_mem`: `assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};`.",
-          "supports_claim": "Shows `acct_mem` contents drive the exported access-control permissions."
+          "description": "Access-control memory is initialized to all ones on reset, making permission bits default to enabled/allowed.",
+          "supports_claim": "Shows insecure default allow-all permission initialization."
         },
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 71,
-          "line_end": 75,
+          "line_start": 49,
+          "line_end": 49,
           "module": "acct_wrapper",
-          "object": "acct_mem reset",
-          "evidence_type": "source_lines",
-          "description": "On reset, every `acct_mem` entry is initialized to `32'hffffffff`.",
-          "supports_claim": "If permission bits are active-high, reset initializes permissions to an all-allowed state."
+          "object": "assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};",
+          "evidence_type": "source_line",
+          "description": "Access-control output is directly derived from acct_mem entries.",
+          "supports_claim": "Shows reset values in acct_mem propagate to the access-control policy output."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 222,
+          "line_end": 222,
+          "module": "riscv_peripherals",
+          "object": "assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]);",
+          "evidence_type": "source_line",
+          "description": "Per-privilege/per-peripheral access matrix is generated from acc_ctrl.",
+          "supports_claim": "Shows access decisions are derived directly from acc_ctrl bits."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1729,
+          "line_end": 1729,
+          "module": "riscv_peripherals",
+          "object": ".acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][6]),",
+          "evidence_type": "source_line",
+          "description": "ACCT wrapper access is gated by current privilege's access-control bit for peripheral index 6.",
+          "supports_claim": "Shows the permission-control peripheral is itself controlled by the mutable permission table."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1819,
+          "line_end": 1819,
+          "module": "riscv_peripherals",
+          "object": ".acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][9]),",
+          "evidence_type": "source_line",
+          "description": "REGLK wrapper access is gated by current privilege's access-control bit for peripheral index 9.",
+          "supports_claim": "Shows register-lock control is also governed by the mutable permission table."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 73,
+          "line_end": 73,
+          "module": "acct_wrapper",
+          "object": "assign en = en_acct && acct_ctrl_i;",
+          "evidence_type": "source_line",
+          "description": "ACCT wrapper enables register access when en_acct and acct_ctrl_i are asserted.",
+          "supports_claim": "Shows software-visible ACCT register access depends only on the access-control gate once an AXI transaction targets it."
         }
       ],
-      "reasoning_summary": "The access-control registers reset to all ones and directly feed the exported `acc_ctrl_o` permission vector. The rest of the design uses asserted access-control bits as access grants, for example `rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]` and wrapper gates such as `en = en_acct && acct_ctrl_i`. Therefore, the reset value appears permissive. This may create a boot/reset window where peripherals are accessible before trusted software restricts permissions.",
-      "security_impact": "If untrusted software or bus masters can access the peripheral fabric before trusted initialization completes, reset may temporarily grant broad peripheral access. This could allow unauthorized reads/writes to security-sensitive peripherals during boot or after partial resets.",
-      "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The source scope does not show full boot sequencing, reset isolation, or the complete security policy. Therefore exploitability depends on whether untrusted access is possible before the access-control registers are reprogrammed.",
+      "reasoning_summary": "The permission bits come from acct_mem. On reset, acct_mem entries are initialized to 32'hffffffff, so generated acc_ctrl/acc_ctrl_c bits default to allowed. The ACCT peripheral, which controls the permission policy, is itself gated by acc_ctrl_c[priv_lvl_i][6], and the REGLK peripheral is gated by acc_ctrl_c[priv_lvl_i][9]. Because those bits are also default-allowed, lower-privilege software that can reach these MMIO windows before secure initialization can potentially modify permissions and lock state. This creates a circular and insecure default trust model.",
+      "security_impact": "Unauthorized or less-privileged software may modify access-control and register-lock policy, enable access to sensitive peripherals, bypass intended isolation between privilege levels, and potentially escalate privileges through peripheral misuse.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Firmware/boot sequencing is not included. Trusted immutable firmware might configure and lock these registers before untrusted code runs, reducing practical exploitability, but the RTL hardware default is visibly permissive.",
       "recommended_follow_up": [
-        "Confirm whether access-control bits are intentionally active-high grants throughout the design.",
-        "Review reset and boot sequencing to determine whether untrusted masters can issue transactions before access-control registers are configured.",
-        "Consider resetting access-control registers to a deny-by-default state and requiring trusted firmware to explicitly enable permitted accesses."
+        "Change hardware reset defaults to deny access for non-root/non-machine privilege levels, especially for ACCT and REGLK.",
+        "Make ACCT/REGLK configuration accessible only through an immutable trusted hardware path or machine-mode-only gate independent of the mutable access-control table.",
+        "Require one-way hardware lock bits or secure boot sequencing before releasing untrusted execution.",
+        "Add assertions/formal checks that user/supervisor privilege cannot write ACCT/REGLK unless explicitly authorized by immutable policy."
+      ]
+    },
+    {
+      "finding_id": "PERM-002",
+      "status": "confirmed_finding",
+      "summary": "Register-lock controls reset unlocked and are software accessible through mutable access-control gates.",
+      "vulnerability_category": "Insecure register-lock default / lock policy tampering",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 83,
+          "line_end": 83,
+          "module": "reglk_wrapper",
+          "signal_or_register": "reglk_mem"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 72,
+          "line_end": 72,
+          "module": "reglk_wrapper",
+          "signal_or_register": "en/acct_ctrl_i"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1819,
+          "line_end": 1819,
+          "module": "riscv_peripherals",
+          "signal_or_register": "REGLK acct_ctrl_i"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 83,
+          "line_end": 83,
+          "module": "reglk_wrapper",
+          "object": "reglk_mem[j] <= 'h0;",
+          "evidence_type": "source_line",
+          "description": "Register-lock memory resets to zero.",
+          "supports_claim": "Shows lock controls default to an unlocked state if zero means lock bits are clear, as implied by write/read guards using set bits to block access."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 72,
+          "line_end": 72,
+          "module": "reglk_wrapper",
+          "object": "assign en = en_acct && acct_ctrl_i;",
+          "evidence_type": "source_line",
+          "description": "REGLK wrapper uses access-control gate for MMIO enable.",
+          "supports_claim": "Shows REGLK register access is allowed whenever the access-control bit permits it."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1819,
+          "line_end": 1819,
+          "module": "riscv_peripherals",
+          "object": ".acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][9]),",
+          "evidence_type": "source_line",
+          "description": "Integration connects REGLK access to acc_ctrl_c for current privilege level.",
+          "supports_claim": "Shows privilege-specific but mutable access-control determines access to register-lock configuration."
+        }
+      ],
+      "reasoning_summary": "The register-lock subsystem is intended to prevent later modification/readout of sensitive registers, but its memory resets to zero. The surrounding code uses lock bits as guards where set bits prevent writes/reads, so reset zero means protections start disabled. Because REGLK is accessible through the same access-control table that resets permissive, software may be able to program or leave locks in an insecure state before trusted configuration.",
+      "security_impact": "Attackers may alter or prevent proper lock configuration, leave sensitive registers writable/readable, or cause denial of service by locking attacker-chosen values.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact intended polarity of every lock bit is inferred from visible guards where a set bit preserves old values or returns zero. External firmware may configure locks early, but that is not visible in this source scope.",
+      "recommended_follow_up": [
+        "Use secure reset defaults for lock bits protecting sensitive registers, or require immutable root authorization to clear them.",
+        "Separate REGLK access authorization from software-programmable access-control state.",
+        "Implement irreversible lock semantics for security-critical registers after trusted initialization.",
+        "Verify boot sequence guarantees REGLK is configured before any untrusted master can issue MMIO accesses."
+      ]
+    },
+    {
+      "finding_id": "PERM-003",
+      "status": "potential_warning",
+      "summary": "Access-control storage and register map appear inconsistent with the configured number of peripherals, risking incorrect permission coverage.",
+      "vulnerability_category": "Incorrect permission mapping / access-control coverage bug",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 211,
+          "line_end": 212,
+          "module": "riscv_peripherals",
+          "signal_or_register": "NB_SLAVE/NB_PERIPHERALS"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 215,
+          "line_end": 216,
+          "module": "riscv_peripherals",
+          "signal_or_register": "acc_ctrl/acc_ctrl_c"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 49,
+          "line_end": 49,
+          "module": "acct_wrapper",
+          "signal_or_register": "acc_ctrl_o"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 120,
+          "line_end": 92,
+          "module": "acct_wrapper",
+          "signal_or_register": "acct_mem index map"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 211,
+          "line_end": 212,
+          "module": "riscv_peripherals",
+          "object": "parameter NB_SLAVE = 1; parameter NB_PERIPHERALS = 14;",
+          "evidence_type": "source_line",
+          "description": "Integration-level parameters set NB_SLAVE to 1 and NB_PERIPHERALS to 14.",
+          "supports_claim": "Shows the integrated configuration expects permission coverage for 14 peripherals while NB_SLAVE is 1."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 215,
+          "line_end": 216,
+          "module": "riscv_peripherals",
+          "object": "logic [4*NB_PERIPHERALS-1 :0] acc_ctrl; logic [3:0][NB_PERIPHERALS-1:0] acc_ctrl_c;",
+          "evidence_type": "source_line",
+          "description": "Integration declares access-control vector and matrix sized for NB_PERIPHERALS.",
+          "supports_claim": "Shows the top-level policy needs 4 privilege bits per 14 peripherals, i.e. 56 bits."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 49,
+          "line_end": 49,
+          "module": "acct_wrapper",
+          "object": "assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};",
+          "evidence_type": "source_line",
+          "description": "ACCT output for all access-control bits is generated from only three acct_mem words.",
+          "supports_claim": "Shows policy output construction is not clearly aligned to NB_PERIPHERALS and relies on only acct_mem[0..2]."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 92,
+          "line_end": 120,
+          "module": "acct_wrapper",
+          "object": "case(address[10:3]) entries writing acct_mem[00] through acct_mem[09]",
+          "evidence_type": "source_range",
+          "description": "ACCT write map includes acct_mem indices 0 through 9, while AcCt_MEM_SIZE is NB_SLAVE*3. With NB_SLAVE=1 this only allocates entries 0 through 2.",
+          "supports_claim": "Shows apparent out-of-bounds or mismatched permission register map for the integrated NB_SLAVE value."
+        }
+      ],
+      "reasoning_summary": "The top level configures 14 peripherals and declares acc_ctrl as 4*NB_PERIPHERALS bits. However, acct_wrapper sizes its internal memory by NB_SLAVE*3, and NB_SLAVE is 1 in the integration, yielding only three 32-bit entries. The case map references entries up to acct_mem[9], and acc_ctrl_o is formed from only the first three entries. This mismatch can cause incomplete, truncated, aliased, or tool-dependent permission behavior, undermining reliable enforcement of access policy.",
+      "security_impact": "Some peripheral permissions may not be programmable as intended, may remain stuck at default values, or may map to the wrong privilege/peripheral entries. This can leave sensitive peripherals accessible even after software attempts to restrict them.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "No lint, elaboration, synthesis, or simulation was run. Exact tool behavior for out-of-bounds indices and width truncation is not confirmed. The static RTL, however, shows a clear dimensional inconsistency.",
+      "recommended_follow_up": [
+        "Resize ACCT storage based on NB_PERIPHERALS and privilege count, not NB_SLAVE*3 unless that mapping is formally justified.",
+        "Remove out-of-bounds acct_mem references and add compile-time assertions for expected dimensions.",
+        "Define explicit bit mapping from ACCT registers to acc_ctrl_c and verify all 14 peripherals are covered.",
+        "Run lint/elaboration checks and add RTL assertions for permission bit coverage."
+      ]
+    },
+    {
+      "finding_id": "PERM-004",
+      "status": "potential_warning",
+      "summary": "PKT exposes key/fuse-related reads using default-unlocked lock bits and default-permissive access control.",
+      "vulnerability_category": "Sensitive data exposure due to default-open permissions",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": 68,
+          "line_end": 68,
+          "module": "pkt_wrapper",
+          "signal_or_register": "en/acct_ctrl_i"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": 100,
+          "line_end": 94,
+          "module": "pkt_wrapper",
+          "signal_or_register": "pkey_loc/fuse_rdata_i read mux"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 83,
+          "line_end": 83,
+          "module": "reglk_wrapper",
+          "signal_or_register": "reglk_mem"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 84,
+          "line_end": 84,
+          "module": "acct_wrapper",
+          "signal_or_register": "acct_mem"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": 68,
+          "line_end": 68,
+          "module": "pkt_wrapper",
+          "object": "assign en = en_acct && acct_ctrl_i;",
+          "evidence_type": "source_line",
+          "description": "PKT wrapper enables MMIO register access using only the access-control gate.",
+          "supports_claim": "Shows PKT access depends on access-control state."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": 94,
+          "line_end": 100,
+          "module": "pkt_wrapper",
+          "object": "rdata = reglk_ctrl_i[4] ? 'b0 : pkey_loc[63:32]; rdata = reglk_ctrl_i[5] ? 'b0 : pkey_loc[31:0]; rdata = reglk_ctrl_i[6] ? 'b0 : fuse_rdata_i;",
+          "evidence_type": "source_range",
+          "description": "PKT read path exposes pkey_loc and fuse_rdata_i when corresponding reglk_ctrl_i bits are clear.",
+          "supports_claim": "Shows key/fuse-related data can be read unless lock bits are set."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 83,
+          "line_end": 83,
+          "module": "reglk_wrapper",
+          "object": "reglk_mem[j] <= 'h0;",
+          "evidence_type": "source_line",
+          "description": "Register locks reset to zero, which leaves these read-protection bits clear by default.",
+          "supports_claim": "Shows PKT read locks default to disabled if sourced from reglk_mem."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 84,
+          "line_end": 84,
+          "module": "acct_wrapper",
+          "object": "acct_mem[j] <= 32'hffffffff;",
+          "evidence_type": "source_line",
+          "description": "Access-control memory resets to all ones, making PKT likely accessible by default through acc_ctrl_c.",
+          "supports_claim": "Shows the outer PKT access gate defaults permissive."
+        }
+      ],
+      "reasoning_summary": "PKT key/fuse-related data reads are guarded by reglk_ctrl_i bits, but those lock bits originate from register-lock state that resets to zero/unlocked. PKT MMIO access is also governed by the access-control system that resets permissive. Therefore, before secure configuration, software may read pkey_loc or fuse_rdata_i through PKT registers.",
+      "security_impact": "Potential disclosure of key-location or fuse-derived security data, which may compromise provisioning state, cryptographic identity, or assist follow-on attacks.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The underlying pkt module and actual fuse contents are not visible in this source view. The sensitivity of pkey_loc/fuse_rdata_i is inferred from signal names and usage. External interconnect or boot firmware could reduce practical exposure, but is not shown.",
+      "recommended_follow_up": [
+        "Default-lock PKT key/fuse readout paths in hardware.",
+        "Require immutable privileged authorization for PKT fuse/key reads independent of software-programmable lock bits.",
+        "Ensure fuse/key read lock bits are one-way set before any untrusted execution.",
+        "Add checks that non-machine privilege cannot read pkey_loc or fuse_rdata_i after reset."
       ]
     }
   ],
   "no_finding_reason": "",
-  "global_uncertainty": "Analysis was limited to visible source files under the input scope and did not use simulation, formal tools, synthesis, external documentation, or files outside the scope. Some module definitions and full SoC boot/reset sequencing were not visible. The HMAC/SHA256 permission aliasing is directly supported by source evidence; the permissive reset issue depends on system initialization assumptions."
+  "global_uncertainty": "The analysis is based only on visible source files in the provided scope. Firmware, boot ROM behavior, full interconnect policy, PMP enforcement details, synthesis/elaboration behavior, and omitted peripheral internals were not available. Therefore, practical exploitability depends on system boot ordering and external enforcement not visible here. No code execution, simulation, lint, formal analysis, or synthesis was performed."
 }

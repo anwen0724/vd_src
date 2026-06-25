@@ -1,0 +1,234 @@
+{
+  "scope_id": "riscv_peripherals_scope",
+  "obligations": [
+    {
+      "obligation_id": "O01",
+      "reason": "The debug slave interface (dm_slave) provides a path to on-chip peripherals that may bypass privilege checks (priv_lvl_i) and peripheral lock bits (reglk_ctrl), allowing an external debugger to access protected assets without proper authentication.",
+      "subject": "Debug module slave (dm_slave)",
+      "operation": "read/write",
+      "object": "Boot ROM, cryptographic accelerators (AES, SHA, HMAC), fuse data, peripheral control registers",
+      "expected_guard": "All dm_slave transactions must be subject to the same access-control matrix (acc_ctrl_c) and lock-bit mediation as CPU-originated transactions; debug access should be enabled only after successful JTAG authentication (jtag_unlock) and/or DM active state.",
+      "candidate_path": "dm_slave_req/we/addr/wdata → internal bus fabric/decode → target peripheral; debug requests flow from JTAG DTM/DMI (dmi_req, debug_req_bits_op) and may initiate dm_slave operations.",
+      "state_conditions_to_check": [
+        "After reset (debug authentication incomplete)",
+        "Before jtag_unlock is asserted",
+        "After jtag_unlock is asserted",
+        "When peripheral lock bits are set via reglk_ctrl",
+        "When priv_lvl_i indicates unprivileged mode"
+      ],
+      "required_evidence_slots": [
+        "dm_slave address decode and routing in riscv_peripherals.sv",
+        "Any conditional gates on dm_slave_we or dm_slave_req using lock/auth signals",
+        "Integration of dm_slave into the bus fabric with access-control wrappers (acct/reglk)"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "The exact routing of dm_slave requests to peripherals and whether they traverse access-control checks is unclear from this fact layer."
+    },
+    {
+      "obligation_id": "O02",
+      "reason": "The JTAG unlock signal (jtag_unlock) is used to override peripheral locks (reglk_wrapper), but it must be generated only after a successful cryptographic challenge (jtag_hash). If the check is bypassed or the unlock can be set by other means (e.g., debug mode, test mode, or unprivileged writes), it would defeat lock protection.",
+      "subject": "JTAG debug bridge / unlock logic",
+      "operation": "set/clear jtag_unlock",
+      "object": "Peripheral lock state (reglk_ctrl_o)",
+      "expected_guard": "jtag_unlock must be asserted solely after the JTAG password hash (jtag_hash) matches an expected value, and must be cleared on reset or when authentication expires. No other path (debug_mode_i, testmode_i, bus master writes) should be able to influence jtag_unlock.",
+      "candidate_path": "JTAG → dmi_jtag → internal unlock logic → jtag_unlock → reglk_wrapper (reglk_ctrl_i) → reglk_ctrl_o.",
+      "state_conditions_to_check": [
+        "After power-on reset",
+        "During active debug/testmode_i",
+        "When a bus master writes to registers that might alias the unlock control"
+      ],
+      "required_evidence_slots": [
+        "Generation logic of jtag_unlock in riscv_peripherals.sv",
+        "Connection to reglk_wrapper.jtag_unlock port",
+        "Influence (if any) of testmode_i or debug_mode_i on unlock"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer shows jtag_hash and jtag_unlock signals but not the comparison logic; verify that the unlock depends solely on a secure hash."
+    },
+    {
+      "obligation_id": "O03",
+      "reason": "The fuse read interface (fuse_req, fuse_addr, fuse_rdata) provides a path to potentially sensitive key material or security configuration. Without access control, any bus master (CPU, DMA, debug) could read fuse values, defeating hardware-enforced confidentiality.",
+      "subject": "Any bus master",
+      "operation": "read",
+      "object": "Fuse data (key, lifecycle state, debug authorization)",
+      "expected_guard": "Fuse reads must be gated such that only trusted initiators (e.g., a privileged CPU core during boot, or a secure hardware block) can access them; the read path must be blocked or filtered based on requester ID, privilege level, or a dedicated lock bit that is set early in boot.",
+      "candidate_path": "AXI/NoC request → address decode → fuse_req/addr → fuse_rdata → response back; fuse interface signals are directly visible in riscv_peripherals.sv.",
+      "state_conditions_to_check": [
+        "During normal operation after boot",
+        "When a lock bit (reglk) for the fuse region is set",
+        "When the request comes from a non-privileged master or DMA"
+      ],
+      "required_evidence_slots": [
+        "Decode logic that generates fuse_req from bus transactions",
+        "Any lock gate or privilege check on fuse_req/fuse_addr"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "The specific decode and protection mechanism for fuses is not provided; need to confirm whether a permission guard exists."
+    },
+    {
+      "obligation_id": "O04",
+      "reason": "The reset wrapper (rst_wrapper) produces per‑peripheral resets (rst_1…rst_13). If debug mode (debug_mode_i) or an unauthenticated bus write can trigger a reset to a security-critical peripheral (e.g., AES, boot ROM, lock logic), it may clear locks, erase key material in an uncontrolled way, or leave the system in an insecure state.",
+      "subject": "Debug mode / bus master",
+      "operation": "write / reset trigger",
+      "object": "Peripheral reset lines (rst_1…rst_13), including those for crypto engines or lock state.",
+      "expected_guard": "Reset assertion to locked/security-sensitive peripherals should be disallowed while the peripheral is locked or should require a higher privilege level than normal write; debug_mode_i alone should not be sufficient to override lock protections without explicit authentication.",
+      "candidate_path": "rst_wrapper takes debug_mode_i, acct_ctrl_i, reglk_ctrl_i and controls rst_n outputs; any accessible register that controls rst_wrapper’s state could initiate a reset.",
+      "state_conditions_to_check": [
+        "When a peripheral lock bit is set",
+        "When debug_mode_i is active but JTAG is not authenticated",
+        "When an unprivileged bus write targets the reset control register"
+      ],
+      "required_evidence_slots": [
+        "Logic inside rst_wrapper that generates individual resets (rst_1…rst_13)",
+        "Dependencies on debug_mode_i, reglk_ctrl_i, and bus writes",
+        "Any protection that prevents reset of locked peripherals"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/rst_ctrl/rst_wrapper.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "The precise reset conditions and the effect of debug_mode_i inside rst_wrapper need to be examined in the actual RTL."
+    },
+    {
+      "obligation_id": "O05",
+      "reason": "The DMA interface (buf_ariane_dma_*) allows high‑throughput data movement. If DMA reads or writes to protected peripherals (e.g., AES key registers, lock control registers, fuse area) are not subject to the same access‑control checks as CPU accesses, an attacker could use DMA to copy secrets or disable locks.",
+      "subject": "DMA engine",
+      "operation": "read/write",
+      "object": "All on‑chip mapped peripherals, especially those with lock or key storage",
+      "expected_guard": "DMA transactions must be tagged with a privilege level or a security attribute that is checked against acc_ctrl_c and reglk_ctrl before granting access to locked/peripheral regions; DMA should not be able to bypass the access‑control matrix.",
+      "candidate_path": "DMA NoC master interface → peripheral interconnect → target peripheral.",
+      "state_conditions_to_check": [
+        "During a DMA transfer while the destination peripheral is locked",
+        "When the DMA descriptor is configured by an unprivileged CPU"
+      ],
+      "required_evidence_slots": [
+        "Connection from DMA bus to the address decode and access‑control logic",
+        "Any privilege/lock check on DMA read/write channels"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "DMA submodule (if present)"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "The fact layer shows only the DMA bus port; the actual integration with access‑control wrappers is not shown."
+    },
+    {
+      "obligation_id": "O06",
+      "reason": "Write‑enable flags (we_flag_0 … we_flag_4) appear to control write access to different address regions or peripherals. If these flags can be set by an unprivileged master or remain sticky after a reset that does not properly clear them, privileged write‑protection can be bypassed.",
+      "subject": "Any bus master (CPU, debug, DMA) that controls we_flag inputs",
+      "operation": "write to we_flag registers or signals",
+      "object": "Write‑protection state for protected peripherals",
+      "expected_guard": "The we_flag signals must only be assertable under strict conditions, e.g., after a privileged write, during a secure boot phase, or after lock release; they must be cleared by system reset or a lock event.",
+      "candidate_path": "Inputs riscv_peripherals.we_flag_0…we_flag_4 → internal use in access control (possibly acc_ctrl logic) → enabling writes to protected regions.",
+      "state_conditions_to_check": [
+        "After any reset (cold/warm)",
+        "When the corresponding lock bit is set",
+        "When the requestor privilege is insufficient"
+      ],
+      "required_evidence_slots": [
+        "RTL that drives we_flag_i from external logic",
+        "Usage of we_flag in write‑enabling peripheral decoders",
+        "Reset/default value of we_flag"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "The exact role of we_flag and its persistence across resets needs verification in the RTL."
+    },
+    {
+      "obligation_id": "O07",
+      "reason": "The CPU privilege level (priv_lvl_i) is used in the ROM access check (rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0]). If this same privilege input is not consistently applied to all other peripheral access paths (e.g., CLINT, cryptographic accelerators, debug registers), then a lower‑privilege master may access functions intended only for higher privilege modes.",
+      "subject": "Any bus master that does not carry priv_lvl_i",
+      "operation": "read/write",
+      "object": "Peripherals that are supposed to be privilege‑restricted (CLINT, PLIC, crypto CSRs, lock registers)",
+      "expected_guard": "Every transaction to a protected peripheral address range must be accompanied by a valid privilege level that is checked against an access‑control table (acc_ctrl_c); requests without such a level (e.g., from DMA or debug) must either be treated as highest privilege only if explicitly authorized, or must be blocked.",
+      "candidate_path": "Various NoC interfaces (clint, plic, aes, sha, hmac, etc.) → internal decode → privilege check (or lack thereof).",
+      "state_conditions_to_check": [
+        "Transaction initiated by a non‑CPU master (debug, DMA)",
+        "When priv_lvl_i indicates user‑mode but the master is not the CPU"
+      ],
+      "required_evidence_slots": [
+        "Mapping from NoC requester ID to priv_lvl_i",
+        "Usage of priv_lvl_i in the decode/access logic of each peripheral",
+        "Access‑control array acc_ctrl_c generation and usage"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer shows that priv_lvl_i is used only for ROM; we need to check whether other peripheral accesses are also gated by privilege."
+    },
+    {
+      "obligation_id": "O08",
+      "reason": "Crypto accelerators (AES0/1/2, SHA256, HMAC) output data back to the bus (ariane_aesN_buf_noc3_data_o etc.). If their internal state registers (keys, intermediate ciphertext, plaintext) are readable under the normal read‑response path without an explicit lock or privilege check, secret material may leak to any bus master.",
+      "subject": "Any bus master reading from crypto accelerator memory‑mapped registers",
+      "operation": "read",
+      "object": "Crypto accelerator internal state registers (key, plaintext, hash state)",
+      "expected_guard": "Read access to any register that could expose secret data must be conditionally allowed only when the peripheral is unlocked and the reader has sufficient privilege; alternatively, such registers should be readable only if explicitly enabled by a lock‑protected control bit.",
+      "candidate_path": "AXI read request → crypto wrapper → internal register mux → ariane_aesN_buf_noc3_data_o → bus response.",
+      "state_conditions_to_check": [
+        "After key material has been loaded",
+        "When the crypto unit is in a locked state",
+        "During or immediately after an operation"
+      ],
+      "required_evidence_slots": [
+        "Decode of read‑only register windows inside crypto wrappers",
+        "Lock protection on readable data paths",
+        "Any conditional gate on data output based on lock or privilege"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "Crypto accelerator submodules (AES, SHA, HMAC)"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "The internal implementation of the accelerators is not provided; we must verify whether secret‑sensitive registers are exposed in the bus read path."
+    }
+  ]
+}

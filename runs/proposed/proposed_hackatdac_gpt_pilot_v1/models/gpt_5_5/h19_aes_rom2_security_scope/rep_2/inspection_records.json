@@ -1,0 +1,1098 @@
+{
+  "scope_id": "current_rtl_scope_permission_obligations",
+  "obligations": [
+    {
+      "obligation_id": "PERM_AES_READBACK_SECRET_STATE",
+      "reason": "The fact layer shows key_in is assigned to key_big and multiple external_bus_io.rdata cases return key_big slices and inter_state slices. This requires checking whether the visible RTL has any authorization or lock guard on these read addresses and whether the APB path makes them externally readable.",
+      "subject": "software-visible APB/register bus master through ariane_peripherals AES window",
+      "operation": "read/expose",
+      "object": "AES key input key_in/key_big and AES inter_state; also plaintext/state registers if treated as sensitive",
+      "expected_guard": "Key and intermediate AES state readback should be blocked or mediated by an explicit privilege/debug authorization/lock policy; only non-secret status/ciphertext should be software-readable unless the design intentionally exposes keys under a guard.",
+      "candidate_path": "APB/regbus -> aes_wrapper external_bus_io address decode -> external_bus_io.rdata",
+      "state_conditions_to_check": [
+        "reset values of state/start registers",
+        "ct_valid/start relationship if inter_state is read during operation",
+        "whether key_in is constant, fused, debug-only, or externally secret"
+      ],
+      "required_evidence_slots": [
+        "subject/requester on external_bus_io/APB path",
+        "read address decode values for key_big/inter_state cases",
+        "object signal source and sensitivity",
+        "expected guard and observed guard or absence",
+        "reachability from ariane_peripherals AES APB signals",
+        "source line locations for mux assignments"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/aes/aes_wrapper.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control",
+        "evidence closure: subject, operation, object, guard, read mux, source locations"
+      ],
+      "priority": "high",
+      "uncertainty": "Need inspect complete aes_wrapper port/interface declarations and ariane_peripherals AES instantiation/address mapping to confirm external reachability and any upstream privilege filtering."
+    },
+    {
+      "obligation_id": "PERM_AES_CONFIG_TRIGGER_WRITE_GUARD",
+      "reason": "The fact layer shows external_bus_io.wdata writes directly update start, p_c, and state registers. Check whether this control/configuration path is intentionally accessible and whether any privilege/lock/address guard mediates writes.",
+      "subject": "software-visible APB/register bus master",
+      "operation": "write/configure/trigger",
+      "object": "AES control start and data/state input registers p_c[0:3], state[0:3]",
+      "expected_guard": "Writes that configure cryptographic operation state or trigger AES should be limited to authorized software context or protected by peripheral access-control/lock policy, and address decode should prevent unintended writes.",
+      "candidate_path": "APB/regbus -> aes_wrapper external_bus_io write path -> p_c/state/start registers -> AES core",
+      "state_conditions_to_check": [
+        "reset default of start/p_c/state",
+        "whether start self-clears or can remain asserted",
+        "whether writes during active AES operation are blocked"
+      ],
+      "required_evidence_slots": [
+        "write enable and address decode",
+        "subject/requester path from APB bridge",
+        "object registers updated",
+        "guard conditions used in write always block",
+        "impact on AES core inputs/start",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/aes/aes_wrapper.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need complete write-case conditions and interface signals; fact layer indicates assignments but not enclosing if/case guards."
+    },
+    {
+      "obligation_id": "PERM_JTAG_DMI_DEBUG_ACCESS_AUTH",
+      "reason": "The testharness contains SimJTAG, dmi_jtag, SimDTM, debug_req signals, ndmreset, and AXI master debug connections. Check whether the debug subject can reach protected assets and whether authorization or lifecycle/test_en gates the path.",
+      "subject": "JTAG/DMI debug requester",
+      "operation": "read/write/control via debug",
+      "object": "SoC memory/peripheral address space including bootrom, rom2, AES registers, and privileged control state reachable via debug",
+      "expected_guard": "JTAG/DMI debug access to protected memory/peripheral regions should be mediated by debug authentication/authorization, lifecycle/test mode, or access-control policy before issuing core debug requests or AXI master transactions.",
+      "candidate_path": "JTAG/SimDTM/dmi_jtag -> debug module/AXI master connections -> SoC memory/peripheral/ROM address map",
+      "state_conditions_to_check": [
+        "reset and ndmreset behavior",
+        "test_en/init_done conditions",
+        "debug_req_valid/ready and dmi_req_valid reachability",
+        "whether debug remains active in normal mode"
+      ],
+      "required_evidence_slots": [
+        "debug subject source signals/instances",
+        "debug request/response handshake path",
+        "AXI master/slave connection path",
+        "protected object address decode",
+        "authorization/test/lifecycle guard use",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "tb/ariane_peripherals.sv",
+        "bootrom/bootrom.sv",
+        "src/rom2/rom2.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Fabric / Address Map / DMA / PMP",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer does not include full debug module internals; visible wrapper wiring must be inspected for gating and reachability."
+    },
+    {
+      "obligation_id": "PERM_DEBUG_RESET_STATE_RESIDUE",
+      "reason": "The testharness exposes ndmreset/ndmreset_n from debug-related logic, while AES and peripheral state have reset behavior. Check whether debug reset can be asserted without authorization and whether reset clears sensitive state or accidentally enables access paths.",
+      "subject": "JTAG/DMI debug requester or test harness reset logic",
+      "operation": "reset/override",
+      "object": "resettable protected state including AES state registers, key exposure path, debug control, and peripheral configuration",
+      "expected_guard": "Debug-triggered reset should not leave protected security state, keys, or access-control state in an unsafe or observable residue condition; reset assertion should be authorized or limited to debug-enabled lifecycle.",
+      "candidate_path": "Debug ndmreset/test reset path -> SoC/core/peripheral reset -> protected state after reset",
+      "state_conditions_to_check": [
+        "rst_ni and ndmreset_n sequencing",
+        "AES p_c/state/start reset values",
+        "key_in/key_big behavior across reset",
+        "debug_req_core after reset"
+      ],
+      "required_evidence_slots": [
+        "ndmreset source and sink",
+        "authorization guard for reset generation",
+        "list of protected registers reset/retained",
+        "observable outputs after reset",
+        "mode/test conditions",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "src/aes/aes_wrapper.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need inspect reset generator connections and whether key_in is resettable or external."
+    },
+    {
+      "obligation_id": "PERM_AXI_NODE_PRIV_RANGE_MEDIATION",
+      "reason": "The wrapper has priv_lvl_i, connectivity_mapping, multiple master/slave AXI channel valid/ready signals, and pass-through assignments for aw/ar attributes. Check whether routing decisions use privilege and address ranges on both read and write paths and whether any path bypasses connectivity_mapping.",
+      "subject": "AXI manager/master interface requester",
+      "operation": "route/read/write",
+      "object": "AXI subordinate regions and protected peripheral/memory windows routed through axi_node_intf_wrap",
+      "expected_guard": "AXI routing should enforce address-range and privilege/access rules consistently for read and write channels, preserving aw/ar protection attributes and priv_lvl_i decisions before asserting valid to protected subordinates.",
+      "candidate_path": "AXI node wrapper master/slave interface -> subordinate address decode/connectivity_mapping -> protected subordinate ports",
+      "state_conditions_to_check": [
+        "priv_lvl_i values and transitions",
+        "test_en_i effects",
+        "simultaneous read/write channel behavior",
+        "default route/error response for unauthorized addresses"
+      ],
+      "required_evidence_slots": [
+        "requester/master identity",
+        "aw/ar address and prot signal propagation",
+        "connectivity_mapping logic and priv_lvl_i use",
+        "subordinate valid generation guards",
+        "read/write symmetry",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer is truncated for axi node later assignments; complete module must be inspected for actual address decode and privilege checks."
+    },
+    {
+      "obligation_id": "PERM_TEST_ENABLE_BYPASS_CHECK",
+      "reason": "Visible ports/signals include test_en_i in axi_node_intf_wrap and test_en in ariane_testharness. Check if test_en affects access-control decisions, reset, scan/debug routing, or valid/ready gating and whether it is properly constrained.",
+      "subject": "test interface or harness control",
+      "operation": "override/bypass",
+      "object": "AXI routing mediation and debug/test access policy",
+      "expected_guard": "Test enable should only be asserted in authorized test/lifecycle mode and must not bypass normal privilege/range checks or expose protected assets in functional mode.",
+      "candidate_path": "test_en_i/test_en -> axi_node_intf_wrap and test/debug structures -> routing or reset/authorization bypass",
+      "state_conditions_to_check": [
+        "test_en reset/default",
+        "test_en relationship to lifecycle/init_done",
+        "whether test_en can toggle during active transfers"
+      ],
+      "required_evidence_slots": [
+        "test_en source",
+        "test_en sinks",
+        "logic affected by test_en",
+        "protected object reachable under test_en",
+        "normal-mode vs test-mode guard",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Fabric / Address Map / DMA / PMP",
+        "Common false-positive risks"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need full testharness and axi node logic to see if test_en is connected or hardwired."
+    },
+    {
+      "obligation_id": "PERM_ROM2_KEY_LOCATION_READ_WRITE_GUARD",
+      "reason": "The fact layer shows rom2 has req/we/addr/wdata/rdata and ariane_peripherals includes pkey_loc_o and rom2 APB/regbus signals. Check whether protected ROM data or key location is readable by unprivileged software and whether we_i is ignored or guarded.",
+      "subject": "software-visible APB/register bus master",
+      "operation": "read/write/expose",
+      "object": "rom2 contents and pkey_loc_o/key-location output",
+      "expected_guard": "ROM-resident key locations or protected constants should be read-only and only exposed to authorized requesters or through intended non-secret outputs; write inputs to ROM should be ignored or rejected with error.",
+      "candidate_path": "APB/regbus -> rom2 instance -> rom2 rdata_o / pkey_loc_o outputs",
+      "state_conditions_to_check": [
+        "reset behavior of pkey_loc_o if registered",
+        "out-of-range address response",
+        "write request behavior when we_i asserted"
+      ],
+      "required_evidence_slots": [
+        "rom2 address decode and rdata assignments",
+        "pkey_loc_o assignment/use",
+        "we_i handling or rejection",
+        "upstream APB requester path",
+        "expected privilege/lock guard",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need inspect rom2 contents/assignments and ariane_peripherals mapping to know sensitivity and reachability."
+    },
+    {
+      "obligation_id": "PERM_BOOTROM_IMMUTABILITY_AND_RANGE",
+      "reason": "bootrom exposes req_i/we_i/addr_i/wdata_i and rdata_o, with raddr_q derived from addr_i and rdata_o range check. Check whether write enable is ignored or safely handled, whether req_i gates address capture/read, and whether address-range errors are mediated upstream.",
+      "subject": "SoC bus requester via bootrom interface",
+      "operation": "read/write",
+      "object": "bootrom mem contents and rdata_o",
+      "expected_guard": "Boot ROM should be immutable after synthesis and writes through we_i should be ignored/rejected; reads should be limited to intended boot address range and not expose unintended memory outside RomSize.",
+      "candidate_path": "SoC AXI/regbus -> bootrom instance -> bootrom read/write interface",
+      "state_conditions_to_check": [
+        "reset/initial contents",
+        "raddr_q update when req_i low",
+        "out-of-range rdata behavior",
+        "write transaction response"
+      ],
+      "required_evidence_slots": [
+        "we_i usage or non-use",
+        "req_i gating of raddr_q",
+        "rdata range behavior",
+        "upstream requester/address map",
+        "error/ready response for invalid/write access",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "bootrom/bootrom.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need inspect complete bootrom always blocks and testharness connection/adapter behavior."
+    },
+    {
+      "obligation_id": "PERM_APB_PERIPHERAL_WINDOW_ACCESS_CONTROL",
+      "reason": "The peripherals module contains multiple apb_to_reg instances and APB signal sets. Check decode boundaries, psel generation, and whether security-sensitive windows such as interrupt control or AES are behind privilege/range checks.",
+      "subject": "SoC bus requester reaching APB peripherals",
+      "operation": "read/write/configure",
+      "object": "APB-mapped peripheral control/status registers including PLIC, packet, AES, UART",
+      "expected_guard": "Peripheral register windows with security-sensitive controls should have address decode, psel/penable/pwrite correctness, and privilege/range mediation consistent with the SoC policy; protected registers should not be writable/readable by unintended requesters.",
+      "candidate_path": "APB bridges in ariane_peripherals -> PLIC/packet/AES/UART peripheral register windows",
+      "state_conditions_to_check": [
+        "overlapping decode ranges",
+        "default slave/error on unmapped addresses",
+        "read vs write handling differences",
+        "reset defaults of exposed control registers"
+      ],
+      "required_evidence_slots": [
+        "address map constants",
+        "APB psel/penable/pwrite generation",
+        "per-peripheral requester path",
+        "protected register identification",
+        "privilege/range guard evidence",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_peripherals.sv",
+        "tb/ariane_soc_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need inspect ariane_peripherals address decode and package constants."
+    },
+    {
+      "obligation_id": "PERM_EXTERNAL_IO_AXI_WINDOW_GUARD",
+      "reason": "The fact layer shows SPI and Ethernet AXI slave signals and external pins. Check whether these windows are correctly decoded and mediated, especially if they can cause external data exfiltration or network/SPI configuration changes.",
+      "subject": "SoC AXI requester",
+      "operation": "read/write/configure/route",
+      "object": "SPI and Ethernet AXI slave control/data registers and external IO pins",
+      "expected_guard": "DMA-capable or externally observable peripheral register windows should preserve AXI protection attributes and be accessible only through intended ranges/privilege; external IO configuration should not be alterable by unauthorized requesters.",
+      "candidate_path": "AXI clock converter / SPI / Ethernet AXI slave windows -> external IO-capable peripherals",
+      "state_conditions_to_check": [
+        "reset defaults of external IO enables",
+        "active transfer while configuration changes",
+        "address overlap with protected regions"
+      ],
+      "required_evidence_slots": [
+        "AXI address decode for SPI/Ethernet",
+        "aw/ar prot propagation or filtering",
+        "write/read valid gating",
+        "external IO impact path",
+        "error response on unauthorized access",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "low",
+      "uncertainty": "Third-party IP internals may not be visible; focus on wrapper decode and signal mediation."
+    }
+  ],
+  "inspection_records": [
+    {
+      "obligation_id": "PERM_AES_READBACK_SECRET_STATE",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "software-visible APB/register bus master through ariane_peripherals AES window",
+        "operation": "read/expose",
+        "object": "AES key_in/key_big and inter_state; plaintext p_c is also readable",
+        "expected_guard": "Key and intermediate AES state readback should be blocked or mediated by explicit privilege/debug authorization/lock policy; only non-secret status/ciphertext should be software-readable unless intentionally guarded.",
+        "observed_behavior": "aes_wrapper always_comb read mux returns key_big[191:0] in six 32-bit slices and inter_state[127:0] in four 32-bit slices. key_big is directly assigned from key_in. external_bus_io.ready is always 1 and error is always 0. No guard beyond address decode is shown in aes_wrapper. ariane_peripherals connects AES AXI/APB path to aes_wrapper and connects key_in to key_reg_out[0] from rom2.",
+        "path": "AXI/APB -> ariane_peripherals aes AXI port -> axi2apb_64_32 -> apb_to_reg i_apb_to_reg_aes -> aes_wrapper external_bus_io.rdata",
+        "state_condition": "p_c/state/start reset to 0 on rst_ni deassertion path; inter_state is driven by AES core and is read combinationally by address decode; key_in comes from rom2 secure_reg key_reg_out[0] via ariane_peripherals.",
+        "impact": "Any requester able to reach the AES MMIO window can read the AES key and internal AES intermediate state, compromising cryptographic secrecy and potentially enabling extraction of fuse-derived keys.",
+        "rtl_evidence": [
+          {
+            "file": "src/aes/aes_wrapper.sv",
+            "lines": "51-57",
+            "detail": "external_bus_io.ready=1'b1; error=1'b0; key_big=key_in."
+          },
+          {
+            "file": "src/aes/aes_wrapper.sv",
+            "lines": "107-149",
+            "detail": "read case on external_bus_io.addr[6:2] returns p_c, ct_valid, ct, key_big slices at cases corresponding to lines 129-139, inter_state slices at lines 141-147, default 0."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "449-469",
+            "detail": "apb_to_reg i_apb_to_reg_aes connects APB signals to reg_bus_aes; aes_wrapper instantiated with key_in(key_reg_out[0]) and external_bus_io(reg_bus_aes)."
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "18-23",
+            "detail": "mem includes AES key at location 0; secure_reg output contains key material."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Address case numeric values for read mux are inferred from line positions/fact layer but complete non-truncated read case text was not available. Upstream SoC policy may restrict AES window through axi_node access_ctrl; however no guard exists within aes_wrapper itself.",
+      "candidate_finding": "AES key and intermediate state are software-readable through the AES APB/register window without an observed authorization, debug, privilege, or lock guard.",
+      "notes": "High-confidence local RTL exposure at AES wrapper; external exploitability depends on requester access to AESBase 0x1010_0000 through fabric."
+    },
+    {
+      "obligation_id": "PERM_AES_CONFIG_TRIGGER_WRITE_GUARD",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "software-visible APB/register bus master",
+        "operation": "write/configure/trigger",
+        "object": "AES control start and data/state input registers p_c[0:3], state[0:3]",
+        "expected_guard": "Writes configuring cryptographic operation state or triggering AES should be limited to authorized software context or protected by peripheral access-control/lock policy, with address decode preventing unintended writes.",
+        "observed_behavior": "aes_wrapper write always block checks only rst_ni and external_bus_io.write, then decodes external_bus_io.addr[6:2]. Cases 0,1-4,16-19 update start, p_c[3:0], and state[3:0] directly from external_bus_io.wdata. No local privilege, lock, ct_valid/busy, or authorization condition is present. ariane_peripherals wires aes AXI/APB signals into this register bus.",
+        "path": "AXI/APB -> ariane_peripherals AES bridge -> apb_to_reg -> aes_wrapper external_bus_io.write/address decode -> start/p_c/state -> AES core",
+        "state_condition": "On reset, start, p_c[0:3], and state[0:3] reset to 0. Writes occur whenever external_bus_io.write is asserted. No evidence that start self-clears or that writes are blocked while AES is active.",
+        "impact": "Unauthorized software that can reach the AES window can trigger operations or alter plaintext/state inputs, potentially disrupting cryptographic operation or influencing sensitive AES processing.",
+        "rtl_evidence": [
+          {
+            "file": "src/aes/aes_wrapper.sv",
+            "lines": "61-99",
+            "detail": "if reset then clear registers; else if external_bus_io.write, case external_bus_io.addr[6:2] updates start, p_c[3:0], state[3:0]."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "449-469",
+            "detail": "APB-to-reg bridge feeds aes_wrapper through reg_bus_aes."
+          },
+          {
+            "file": "tb/ariane_soc_pkg.sv",
+            "lines": "45,62",
+            "detail": "AESLength=0x1000 and AESBase=0x1010_0000 define software-visible AES window."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "No full evidence for upstream access_ctrl settings or software policy; no complete AES core busy/start behavior was provided.",
+      "candidate_finding": "AES start, plaintext, and state registers are writable from the software-visible AES register bus with no local authorization, lock, busy, or active-operation guard observed.",
+      "notes": "Local peripheral write guard absent; fabric-level access-control may still mediate requester classes."
+    },
+    {
+      "obligation_id": "PERM_JTAG_DMI_DEBUG_ACCESS_AUTH",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "JTAG/DMI debug requester",
+        "operation": "read/write/control via debug",
+        "object": "SoC memory/peripheral address space including bootrom, rom2, AES registers, debug window, and privileged core control state reachable through debug module/fabric",
+        "expected_guard": "JTAG/DMI debug access should be mediated by debug authentication/authorization, lifecycle/test mode, or access-control policy before issuing core debug requests or AXI transactions.",
+        "observed_behavior": "ariane_testharness declares JTAG/DMI handshake signals, instantiates dm_top, and connects dmi_req_valid/debug_req/debug_resp to dm_top. dm_top outputs debug_req_core and ndmreset and has AXI master request/response ports connected to slave[1] via axi_master_connect. No authentication signal, key comparison, lifecycle state, or test_en enable guard is visible in the provided wrapper evidence.",
+        "path": "SimJTAG/dmi_jtag/SimDTM -> DMI request signals -> dm_top -> debug_req_core and dm_axi_m_req -> axi_master_connect -> slave[1] -> axi_node_intf_wrap -> master peripheral/memory windows",
+        "state_condition": "test_en is assigned 1'b0, but dm_top remains instantiated; ndmreset and debug_req_core are outputs from dm_top. dmi_rst_ni uses rst_ni. Debug path presence is not conditioned on init_done in observed wiring.",
+        "impact": "If JTAG/DMI sources are active, debug can request core debug entry/reset and can act as an AXI master into the SoC fabric, potentially reaching protected memory/peripherals depending on downstream access_ctrl.",
+        "rtl_evidence": [
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "32-75",
+            "detail": "test_en declared and assigned 1'b0; JTAG/DMI/debug handshake signals declared."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "185-213",
+            "detail": "dm_top instantiated; testmode_i(test_en), ndmreset_o(ndmreset), debug_req_o(debug_req_core), DMI request/response ports connected."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "215-216",
+            "detail": "dm_top AXI master connected through axi_master_connect to slave[1]; debug slave connection to master[ariane_soc::Debug]."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "454-501",
+            "detail": "axi_node_intf_wrap connects slave array to all master peripheral windows with address map including Debug, ROM, ROM2, AES, DRAM."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "dm_top internals and JTAG/SimDTM connection details were not fully provided; authentication could exist inside uninspected modules, though no wrapper guard is visible.",
+      "candidate_finding": "Visible testharness wires JTAG/DMI debug into dm_top with AXI master connectivity and core debug request, without observed authentication or lifecycle/test-mode guard in the wrapper.",
+      "notes": "Candidate violation based on missing wrapper-level debug authorization and explicit AXI master debug path."
+    },
+    {
+      "obligation_id": "PERM_DEBUG_RESET_STATE_RESIDUE",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "JTAG/DMI debug requester or test harness reset logic",
+        "operation": "reset/override",
+        "object": "resettable protected state including AES state registers, key exposure path, debug control, and peripheral configuration",
+        "expected_guard": "Debug-triggered reset should be authorized or limited to debug lifecycle and should not leave keys/access-control state in unsafe or observable residue condition.",
+        "observed_behavior": "dm_top outputs ndmreset without visible authentication in wrapper. rstgen_main generates ndmreset_n from rst_ni & ~ndmreset. ROM2 secure_reg loads key constants from mem on reset and feeds key_reg_out to AES key input and jtag_key/access_ctrl_reg outputs. AES wrapper exposes key via readback when reset releases.",
+        "path": "DMI/JTAG -> dm_top ndmreset_o -> rstgen rst_ni input rst_ni & ~ndmreset -> ndmreset_n -> core/axi/peripheral reset paths",
+        "state_condition": "test_en=1'b0; rstgen input combines external rst_ni and ~ndmreset. AES p_c/state/start reset to 0. ROM2 secure_reg is loaded from mem on reset, including AES/JTAG/access-control key material. Bootrom/ROM path uses ndmreset_n reset at axi2mem; AES wrapper in peripherals uses rst_ni from peripheral instantiation path, not conclusively ndmreset_n in provided snippets.",
+        "impact": "An unauthenticated debug reset may reset system state and restore/re-expose key material through existing software-visible paths, potentially bypassing runtime clearing or policy state.",
+        "rtl_evidence": [
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "94-99",
+            "detail": "rstgen_main rst_ni input is rst_ni & (~ndmreset), test_mode_i test_en, output ndmreset_n."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "185-213",
+            "detail": "dm_top drives ndmreset_o(ndmreset) and debug_req_o(debug_req_core)."
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "32-40",
+            "detail": "on ~rst_ni, secure_reg <= mem; otherwise writes can update secure_reg."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "204-217",
+            "detail": "rom2 secure_reg key_reg_out feeds jtag_key, access_ctrl_reg, and later AES key input."
+          },
+          {
+            "file": "src/aes/aes_wrapper.sv",
+            "lines": "63-73",
+            "detail": "AES start/p_c/state reset to 0."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Whether ariane_peripherals rst_ni is ndmreset_n in all integration contexts is partially truncated around its instantiation. dm_top internal authorization and reset policy were not inspected.",
+      "candidate_finding": "Debug module can drive ndmreset into main reset generation, and reset behavior leaves ROM2 secure_reg reloaded with key material while AES key readback path remains wired; no wrapper-level authorization for debug reset is observed.",
+      "notes": "Candidate because reset source is debug-controlled and no local authorization is visible; residue concern ties to ROM2 key reload and AES readback."
+    },
+    {
+      "obligation_id": "PERM_AXI_NODE_PRIV_RANGE_MEDIATION",
+      "inspection_status": "obligation_satisfied",
+      "evidence_slots": {
+        "subject": "AXI manager/master interface requester",
+        "operation": "route/read/write",
+        "object": "AXI subordinate regions and protected peripheral/memory windows routed through axi_node_intf_wrap",
+        "expected_guard": "AXI routing should enforce address-range and privilege/access rules consistently for read and write channels, preserving aw/ar protection attributes and priv_lvl_i decisions before asserting valid to protected subordinates.",
+        "observed_behavior": "axi_node_intf_wrap passes start_addr/end_addr rules into axi_node and computes s_connectivity_map via connectivity_mapping. connectivity_mapping uses access_ctrl_i indexed by priv_lvl_i per subordinate/manager pair, with a special case allowing j==6 from access_ctrl_i[i][7]. The wrapper passes AW/AR prot and address attributes through to master ports and supplies read/write channels to axi_node, which receives cfg_START_ADDR_i, cfg_END_ADDR_i, cfg_valid_rule_i, and cfg_connectivity_map_i per fact/tool observations.",
+        "path": "slave[NB_SUBORDINATE] requester ports -> axi_node_intf_wrap -> axi_node -> master[NB_MANAGER] subordinate windows",
+        "state_condition": "priv_lvl_i supplied from testharness priv_lvl; access_ctrl_i supplied from access_ctrl; test_en_i passed through to underlying axi_node. Address ranges supplied from ariane_soc package bases/lengths.",
+        "impact": "The visible wrapper contains privilege/range mediation inputs and propagates address/protection attributes; no direct bypass of s_connectivity_map was identified in the provided evidence.",
+        "rtl_evidence": [
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "lines": "30-35",
+            "detail": "priv_lvl_i, access_ctrl_i, start_addr_i, end_addr_i are explicit inputs."
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "lines": "146-150",
+            "detail": "s_start_addr, s_end_addr, s_valid_rule, s_connectivity_map signals declared for node configuration."
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "lines": "157-183",
+            "detail": "master AW/AR address/prot/valid assignments preserve s_master_aw_prot and s_master_ar_prot to master ports."
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "lines": "266-336",
+            "detail": "axi_node instantiated with slave AW/W/AR/R/B channels and test_en_i."
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "lines": "409-436",
+            "detail": "connectivity_mapping assigns connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i])."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "454-501",
+            "detail": "axi_node_intf_wrap receives priv_lvl_i(priv_lvl), access_ctrl_i(access_ctrl), and start/end address arrays for Debug, ROM, ROM2, PKT, CLINT, PLIC, UART, AES, SPI, Ethernet, GPIO, DRAM."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Underlying axi_node internals and the exact assignments from start_addr_i/end_addr_i into cfg ports were partially truncated, and the semantics of special-case j==6 were not validated. Actual access_ctrl contents depend on ROM2 output.",
+      "candidate_finding": "",
+      "notes": "Satisfied at wrapper-obligation level because visible RTL includes range and privilege connectivity mediation; special-case policy may merit separate review."
+    },
+    {
+      "obligation_id": "PERM_TEST_ENABLE_BYPASS_CHECK",
+      "inspection_status": "obligation_satisfied",
+      "evidence_slots": {
+        "subject": "test interface or harness control",
+        "operation": "override/bypass",
+        "object": "AXI routing mediation and debug/test access policy",
+        "expected_guard": "Test enable should only be asserted in authorized test/lifecycle mode and must not bypass normal privilege/range checks or expose protected assets in functional mode.",
+        "observed_behavior": "ariane_testharness explicitly assigns test_en = 1'b0. The signal is connected to rstgen_main.test_mode_i, dm_top.testmode_i, axi_node_intf_wrap.test_en_i, and clint.testmode_i. ariane_peripherals axi2apb examples tie test_en_i to 1'b0. There is no visible external port or software path to assert test_en.",
+        "path": "test_en in ariane_testharness -> rstgen/dm_top/axi_node_intf_wrap/clint and test_en_i on APB bridges/peripheral wrappers",
+        "state_condition": "test_en is hardwired to 1'b0 in ariane_testharness. axi2apb bridges in ariane_peripherals snippets tie test_en_i to 1'b0. No runtime toggle source is visible.",
+        "impact": "In the observed integration, test mode bypass via test_en is disabled by constant tie-off; no test_en-controlled functional-mode bypass is evidenced.",
+        "rtl_evidence": [
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "32-75",
+            "detail": "test_en declared; assign test_en = 1'b0."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "94-99",
+            "detail": "rstgen_main.test_mode_i(test_en)."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "185-198",
+            "detail": "dm_top.testmode_i(test_en)."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "454-469",
+            "detail": "axi_node_intf_wrap.test_en_i(test_en)."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "512-521",
+            "detail": "clint.testmode_i(test_en)."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "84-88,492-496",
+            "detail": "axi2apb bridge test_en_i tied to 1'b0 in observed PLIC/UART snippets; similar pattern expected for APB bridges."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Complete third-party IP internals not inspected. If synthesized in another top-level with test_en not tied off, this conclusion may not hold.",
+      "candidate_finding": "",
+      "notes": "No candidate bypass in current testharness scope."
+    },
+    {
+      "obligation_id": "PERM_ROM2_KEY_LOCATION_READ_WRITE_GUARD",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "software-visible AXI/register bus master",
+        "operation": "read/write/expose",
+        "object": "rom2 contents, secure_reg key material, jtag_key, access_ctrl_reg/key-location related outputs",
+        "expected_guard": "ROM-resident key locations or protected constants should be read-only and only exposed to authorized requesters; write inputs to ROM should be ignored or rejected with error.",
+        "observed_behavior": "rom2 mem includes AES key, JTAG key, and access-control constants. secure_reg is assigned from mem on reset. Read requests select secure_reg[raddr_q] to rdata_o. Write requests update secure_reg[...] directly with wdata_i. ariane_peripherals connects rom2_fuse AXI through axi2mem to rom2 and assigns jtag_key/access_ctrl_reg from key_reg_out; AES key_in is key_reg_out[0]. No rom2-local authorization, lock, or write rejection is observed.",
+        "path": "AXI requester -> ariane_peripherals rom2_fuse AXI port -> axi2mem i_axi2rom2 -> rom2 req/we/addr/wdata/rdata/secure_reg -> jtag_key/access_ctrl_reg/AES key",
+        "state_condition": "On reset, secure_reg <= mem constants. On req_i and !we_i, raddr_q captures address. On req_i and we_i, secure_reg[index] is overwritten by wdata_i. Out-of-range rdata returns 0 based on raddr_q < RomSize, but write index is not range-guarded beyond sliced bits.",
+        "impact": "A requester with access to ROM2 can read secret keys/access-control configuration and overwrite secure registers, potentially changing AES keys, JTAG key material, or fabric access-control policy.",
+        "rtl_evidence": [
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "17-23",
+            "detail": "const mem includes access-control entries, JTAG key, and AES key."
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "32-47",
+            "detail": "reset loads secure_reg <= mem; req/read captures address; req/write updates secure_reg[index] <= wdata_i; rdata_o returns secure_reg[raddr_q]."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "186-213",
+            "detail": "axi2mem connects rom2_fuse AXI to rom2 req/we/addr/wdata/rdata and secure_reg key_reg_out."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "215-217",
+            "detail": "jtag_key and access_ctrl_reg are directly assigned from key_reg_out entries."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "463-468",
+            "detail": "AES key_in is key_reg_out[0]."
+          },
+          {
+            "file": "tb/ariane_soc_pkg.sv",
+            "lines": "40,57",
+            "detail": "ROM2Length=0x10000 and ROM2Base=0x0021_0000 define a bus window."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Upstream access_ctrl may restrict ROM2 for some privilege/requester combinations, but ROM2 itself does not enforce immutability or authorization.",
+      "candidate_finding": "ROM2 contains key material and access-control constants, is readable and writable through an AXI memory path, and exports key/access-control values to other logic without local privilege or lock guard.",
+      "notes": "Strong candidate: module named ROM/fuse but implements writable secure_reg through we_i."
+    },
+    {
+      "obligation_id": "PERM_BOOTROM_IMMUTABILITY_AND_RANGE",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "SoC bus requester via bootrom interface",
+        "operation": "read/write",
+        "object": "bootrom mem contents and rdata_o",
+        "expected_guard": "Boot ROM should be immutable after synthesis and writes through we_i should be ignored/rejected; reads should be limited to intended boot address range.",
+        "observed_behavior": "bootrom always_ff on clk_i checks req_i. If !we_i, it captures raddr_q from addr_i; else it writes mem[addr slice] <= wdata_i. rdata_o returns mem[raddr_q] if raddr_q < RomSize else 0. testharness connects axi2mem we_o to bootrom we_i; no local write rejection or error signal exists at bootrom.",
+        "path": "SoC AXI/fabric -> master[ROM] -> axi2mem i_axi2rom -> bootrom req_i/we_i/addr_i/wdata_i/rdata_o",
+        "state_condition": "raddr_q updates only when req_i && !we_i. Out-of-range reads return 0 via rdata_o assignment. No reset initialization beyond static mem initialization is shown. Writes occur when req_i && we_i.",
+        "impact": "A requester with write access to the ROM window can modify boot code/data in simulation/RTL, undermining boot immutability and potentially changing trusted boot contents.",
+        "rtl_evidence": [
+          {
+            "file": "bootrom/bootrom.sv",
+            "lines": "258-265",
+            "detail": "if req_i and we_i, mem[addr_i[$clog2(RomSize)-1+3:3]] <= wdata_i."
+          },
+          {
+            "file": "bootrom/bootrom.sv",
+            "lines": "270",
+            "detail": "rdata_o = (raddr_q < RomSize) ? mem[raddr_q] : '0."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "228-252",
+            "detail": "axi2mem i_axi2rom connects rom_we/rom_addr/rom_wdata to bootrom we_i/addr_i/wdata_i."
+          },
+          {
+            "file": "tb/ariane_soc_pkg.sv",
+            "lines": "39,56",
+            "detail": "ROMLength=0x10000 and ROMBase=0x0001_0000 define ROM address window."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Upstream axi_node/access_ctrl may prevent writes by some requesters; axi2mem write response/error behavior not shown. Hardware synthesis treatment of initialized logic array may differ from true ROM macro.",
+      "candidate_finding": "bootrom write enable is not ignored; bus writes through we_i update the bootrom mem array. Reads are range-limited to zero for raddr_q >= RomSize, but writes are not rejected locally.",
+      "notes": "Candidate violation because RTL module labeled bootrom has mutable mem under we_i."
+    },
+    {
+      "obligation_id": "PERM_APB_PERIPHERAL_WINDOW_ACCESS_CONTROL",
+      "inspection_status": "obligation_satisfied",
+      "evidence_slots": {
+        "subject": "SoC bus requester reaching APB peripherals",
+        "operation": "read/write/configure",
+        "object": "APB-mapped peripheral control/status registers including PLIC, packet, AES, UART",
+        "expected_guard": "Peripheral windows should have address decode, psel/penable/pwrite correctness, and privilege/range mediation consistent with SoC policy.",
+        "observed_behavior": "ariane_soc_pkg defines distinct base/length constants for PLIC, PKT, UART, AES and others. ariane_testharness supplies these start/end ranges to axi_node_intf_wrap, whose connectivity_mapping uses access_ctrl_i and priv_lvl_i. ariane_peripherals instantiates separate axi2apb_64_32 bridges and apb_to_reg/APB peripherals for PLIC, PKT, AES, UART, with APB pwrite/psel/penable signals. No overlapping ranges are evident from constants provided.",
+        "path": "axi_node_intf_wrap master windows -> ariane_peripherals AXI ports -> per-peripheral axi2apb_64_32 -> apb_to_reg/APB IP",
+        "state_condition": "Address bases/lengths for PLIC, PKT, UART, AES are supplied to axi_node_intf_wrap. Per-peripheral APB psel/penable/pwrite generated by axi2apb. test_en_i tied to 1'b0 in observed APB bridges.",
+        "impact": "At the window/decode level, APB peripheral access is mediated by fabric range/connectivity and separate APB bridge instances. Individual sensitive registers may still require local guards, as noted for AES.",
+        "rtl_evidence": [
+          {
+            "file": "tb/ariane_soc_pkg.sv",
+            "lines": "38-66",
+            "detail": "Defines non-overlapping Debug, ROM, ROM2, PKT, CLINT, PLIC, UART, AES, SPI, Ethernet, GPIO, DRAM bases and lengths."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "454-501",
+            "detail": "start_addr_i/end_addr_i arrays supply those ranges to axi_node_intf_wrap."
+          },
+          {
+            "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+            "lines": "409-436",
+            "detail": "connectivity_mapping gates manager/subordinate connectivity by access_ctrl_i and priv_lvl_i."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "76-142",
+            "detail": "PLIC AXI-to-APB and apb_to_reg path present in static/tool observations."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "241-319",
+            "detail": "PKT AXI-to-APB and apb_to_reg path present."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "449-469",
+            "detail": "AES apb_to_reg to aes_wrapper path present."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "484-561",
+            "detail": "UART AXI-to-APB and APB UART path present."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Exact psel internals of axi2apb_64_32 and default slave/error handling are not shown; register-level policies are separate obligations.",
+      "candidate_finding": "",
+      "notes": "Satisfied for decode/mediation evidence, not for AES secret readback/write policy."
+    },
+    {
+      "obligation_id": "PERM_EXTERNAL_IO_AXI_WINDOW_GUARD",
+      "inspection_status": "obligation_satisfied",
+      "evidence_slots": {
+        "subject": "SoC AXI requester",
+        "operation": "read/write/configure/route",
+        "object": "SPI and Ethernet AXI slave control/data registers and external IO pins",
+        "expected_guard": "Externally observable peripheral windows should preserve AXI protection attributes and be accessible only through intended ranges/privilege; disabled peripherals should not permit configuration or exfiltration.",
+        "observed_behavior": "testharness sets InclSPI and InclEthernet to 1'b0. For disabled SPI, ariane_peripherals assigns spi_clk_o/mosi/ss low, ready high, write response SLVERR, read response SLVERR with deadbeef. Address ranges for SPI/Ethernet are still defined and mediated by axi_node range/access_ctrl if included. Enabled SPI/Ethernet snippets pass AXI aw/ar prot/cache/addr/valid into Xilinx clock converters/IP; no local authorization is evident, but current scope disables these external IO blocks.",
+        "path": "axi_node_intf_wrap manager windows -> ariane_peripherals spi/ethernet AXI ports -> optional Xilinx clock converters/IP -> external IO pins",
+        "state_condition": "In current testharness, ariane_peripherals is instantiated with InclSPI=1'b0 and InclEthernet=1'b0. Disabled SPI branch drives pins inactive and returns SLVERR/deadbeef. Ethernet inclusion is also false in current instantiation; enabled branch evidence shows AXI protection/address attributes passed into converter/IP.",
+        "impact": "In the observed configuration, SPI/Ethernet external IO cannot be configured because the blocks are not included and disabled response paths return errors/inactive pins. If enabled in another configuration, reliance would be on axi_node access_ctrl/range mediation and IP behavior.",
+        "rtl_evidence": [
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "536-543",
+            "detail": "ariane_peripherals instantiated with InclSPI(1'b0) and InclEthernet(1'b0)."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "766-785",
+            "detail": "Disabled SPI branch drives outputs low and returns SLVERR/deadbeef."
+          },
+          {
+            "file": "tb/ariane_soc_pkg.sv",
+            "lines": "46-47,63-64",
+            "detail": "SPI and Ethernet lengths/bases defined."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "633-705",
+            "detail": "Enabled SPI clock converter passes spi aw/ar prot/address/valid attributes to internal AXI signals."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "828-852,908-918",
+            "detail": "Enabled Ethernet clock converter/IP path passes AXI attributes to Ethernetlite IP."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Complete Ethernet disabled branch and third-party IP internals are truncated/not inspected. Conclusion is for current testharness configuration with InclSPI/InclEthernet false.",
+      "candidate_finding": "",
+      "notes": "No active external IO vulnerability in current scope; re-evaluate if peripheral inclusion parameters are changed."
+    }
+  ],
+  "tool_observations": [
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 1,
+        "path": "src/aes/aes_wrapper.sv"
+      },
+      "status": "ok",
+      "path": "src/aes/aes_wrapper.sv",
+      "error": null,
+      "content": "1: // Usage:\n2: // All signals used in the description are apb_register signals\n3: // 1) writing: First enable write signal\n4: //      1st clock cycle: give start in 0th bit of wdata\n5: //\n6: //      2nd clock cycle: give msb 32 bits of plain text to wdata\n7: //      3rd clock cycle: give next 32 bits of plain text to wdata\n8: //      4th clock cycle: give next 32 bits of plain text to wdata\n9: //      5th clock cycle: give last 32 bits of plain text to wdata i.e., 31:0\n10: //\n11: //      12nd clock cycle: give msb 32 bits of state to wdata\n12: //      13rd clock cycle: give next 32 bits of state to wdata\n13: //      14th clock cycle: give next 32 bits of state to wdata\n14: //      15th clock cycle: give last 32 bits of state to wdata i.e., 31:0\n15: //\n16: // Author: Bhagyaraja \n17: //\n18: \n19: \n20: module aes_wrapper #(\n21:     parameter int ADDR_WIDTH         = 32,   // width of external address bus\n22:     parameter int DATA_WIDTH         = 32   // width of external data bus\n23: )(\n24:            clk_i,\n25:            rst_ni,\n26:            key_in,\n27:            external_bus_io\n28:        );\n29: \n30:     input  logic                   clk_i;\n31:     input  logic                   rst_ni;\n32:     input  logic    [191:0]        key_in;\n33:     REG_BUS.in                     external_bus_io;\n34: \n35: // internal signals\n36: \n37: logic start;\n38: logic [31:0] p_c [0:3];\n39: logic [31:0] state [0:3];\n40: //logic [31:0] key [0:5];\n41: \n42: logic   [127:0] p_c_big   ;   // = {p_c[0], p_c[1], p_c[2], p_c[3]};\n43: logic   [127:0] state_big ;  // = {state[0], state[1], state[2], state[3]};\n44: logic   [191:0] key_big ;  // = {key[0], key[1], key[2], key[3], key[4], key[5]};\n45: logic   [127:0] inter_state; \n46: logic   [127:0] ct;\n47: logic           ct_valid;\n48: const logic   [127:0] state_iv = 127'h3243f6a8_885a308d_00000000_00000001; \n49: \n50: \n51: assign external_bus_io.ready = 1'b1;\n52: assign external_bus_io.error = 1'b0;\n53: \n54: assign p_c_big    = {p_c[0], p_c[1], p_c[2], p_c[3]};\n55: assign state_big  = {state[0], state[1], state[2], state[3]};\n56: //assign key_big    = {key[0], key[1], key[2], key[3], key[4], key[5]};\n57: assign key_big    = key_in;\n58: ///////////////////////////////////////////////////////////////////////////\n59: // Implement APB I/O map to AES interface\n60: // Write side\n61: always @(posedge clk_i)\n62:     begin\n63:         if(~rst_ni)\n64:             begin\n65:                 start <= 0;\n66:                 p_c[0] <= 0;\n67:                 p_c[1] <= 0;\n68:                 p_c[2] <= 0;\n69:                 p_c[3] <= 0;\n70:                 state[0] <= 0;\n71:                 state[1] <= 0;\n72:                 state[2] <= 0;\n73:                 state[3] <= 0;\n74:             end\n75:         else if(external_bus_io.write)\n76:             case(external_bus_io.addr[6:2])\n77:                 0:\n78:                     start <= external_bus_io.wdata[0];\n79:                 1:\n80:                     p_c[3] <= external_bus_io.wdata;\n81:                 2:\n82:                     p_c[2] <= external_bus_io.wdata;\n83:                 3:\n84:                     p_c[1] <= external_bus_io.wdata;\n85:                 4:\n86:                     p_c[0] <= external_bus_io.wdata;\n87: \t\t// no write access to ct registers !!\n88: \n89:                 16:\n90:                     state[3] <= external_bus_io.wdata;\n91:                 17:\n92:                     state[2] <= external_bus_io.wdata;\n93:                 18:\n94:                     state[1] <= external_bus_io.wdata;\n95:                 19:\n96:                     state[0] <= external_bus_io.wdata;\n97:                 default:\n98:                     ;\n99:             endcase\n100:     end // always @ (posedge wb_clk_i)\n101: \n102: // Implement MD5 I/O memory map interface\n103: // Read side\n104: //always @(~external_bus_io.write)\n105: always @(*)\n106:     begin\n107:         case(external_bus_io.addr[6:2])\n108:             0:\n109:                 external_bus_io.rdata = \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 1,
+        "path": "tb/ariane_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: // Xilinx Peripehrals\\n12: module ariane_peripherals #(\\n13:     parameter int AxiAddrWidth = -1,\\n14:     parameter int AxiDataWidth = -1,\\n15:     parameter int AxiIdWidth   = -1,\\n16:     parameter int AxiUserWidth = 1,\\n17:     parameter bit InclUART     = 1,\\n18:     parameter bit InclSPI      = 0,\\n19:     parameter bit InclEthernet = 0,\\n20:     parameter bit InclGPIO     = 0\\n21: ) (\\n22:     input  logic               clk_i           , // Clock\\n23:     input  logic               rst_ni          , // Asynchronous reset active low\\n24:     AXI_BUS.in                 plic            ,\\n25:     AXI_BUS.in                 aes             , \\n26:     AXI_BUS.in                 rom2_fuse       ,\\n27:     AXI_BUS.in                 pkt             ,\\n28:     AXI_BUS.in                 uart            ,\\n29:     AXI_BUS.in                 spi             ,\\n30:     AXI_BUS.in                 ethernet        ,\\n31:     output logic [31:0]        jtag_key        , \\n32:     output logic [1:0][47:0]   access_ctrl_reg , \\n33:     output logic [1:0]         irq_o           ,\\n34:     // UART\\n35:     input  logic               rx_i            ,\\n36:     output logic               tx_o            ,\\n37:     // Ethernet\\n38:     input  wire                eth_txck        ,\\n39:     input  wire                eth_rxck        ,\\n40:     input  wire                eth_rxctl       ,\\n41:     input  wire [3:0]          eth_rxd         ,\\n42:     output wire                eth_rst_n       ,\\n43:     output wire                eth_tx_en       ,\\n44:     output wire [3:0]          eth_txd         ,\\n45:     inout  wire                phy_mdio        ,\\n46:     output logic               eth_mdc         ,\\n47:     // MDIO Interface\\n48:     inout                      mdio            ,\\n49:     output                     mdc             ,\\n50:     // SPI\\n51:     output logic               spi_clk_o       ,\\n52:     output logic               spi_mosi        ,\\n53:     input  logic               spi_miso        ,\\n54:     output logic               spi_ss\\n55: );\\n56: \\n57:     // ---------------\\n58:     // 1. PLIC\\n59:     // ---------------\\n60:     logic [ariane_soc::NumSources-1:0] irq_sources;\\n61: \\n62:     REG_BUS #(\\n63:         .ADDR_WIDTH ( 32 ),\\n64:         .DATA_WIDTH ( 32 )\\n65:     ) reg_bus (clk_i);\\n66: \\n67:     logic         plic_penable;\\n68:     logic         plic_pwrite;\\n69:     logic [31:0]  plic_paddr;\\n70:     logic         plic_psel;\\n71:     logic [31:0]  plic_pwdata;\\n72:     logic [31:0]  plic_prdata;\\n73:     logic         plic_pready;\\n74:     logic         plic_pslverr;\\n75: \\n76:     axi2apb_64_32 #(\\n77:         .AXI4_ADDRESS_WIDTH ( AxiAddrWidth  ),\\n78:         .AXI4_RDATA_WIDTH   ( AxiDataWidth  ),\\n79:         .AXI4_WDATA_WIDTH   ( AxiDataWidth  ),\\n80:         .AXI4_ID_WIDTH      ( AxiIdWidth    ),\\n81:         .AXI4_USER_WIDTH    ( AxiUserWidth  ),\\n82:         .BUFF_DEPTH_SLAVE   ( 2             ),\\n83:         .APB_ADDR_WIDTH     ( 32            )\\n84:     ) i_axi2apb_64_32_plic (\\n85:         .ACLK      ( clk_i          ),\\n86:         .ARESETn   ( rst_ni         ),\\n87:         .test_en_i ( 1'b0           ),\\n88:         .AWID_i    ( plic.aw_id \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 260,
+        "path": "tb/ariane_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"260:         .AWPROT_i  ( pkt.aw_prot   ),\\n261:         .AWREGION_i( pkt.aw_region ),\\n262:         .AWUSER_i  ( pkt.aw_user   ),\\n263:         .AWQOS_i   ( pkt.aw_qos    ),\\n264:         .AWVALID_i ( pkt.aw_valid  ),\\n265:         .AWREADY_o ( pkt.aw_ready  ),\\n266:         .WDATA_i   ( pkt.w_data    ),\\n267:         .WSTRB_i   ( pkt.w_strb    ),\\n268:         .WLAST_i   ( pkt.w_last    ),\\n269:         .WUSER_i   ( pkt.w_user    ),\\n270:         .WVALID_i  ( pkt.w_valid   ),\\n271:         .WREADY_o  ( pkt.w_ready   ),\\n272:         .BID_o     ( pkt.b_id      ),\\n273:         .BRESP_o   ( pkt.b_resp    ),\\n274:         .BVALID_o  ( pkt.b_valid   ),\\n275:         .BUSER_o   ( pkt.b_user    ),\\n276:         .BREADY_i  ( pkt.b_ready   ),\\n277:         .ARID_i    ( pkt.ar_id     ),\\n278:         .ARADDR_i  ( pkt.ar_addr   ),\\n279:         .ARLEN_i   ( pkt.ar_len    ),\\n280:         .ARSIZE_i  ( pkt.ar_size   ),\\n281:         .ARBURST_i ( pkt.ar_burst  ),\\n282:         .ARLOCK_i  ( pkt.ar_lock   ),\\n283:         .ARCACHE_i ( pkt.ar_cache  ),\\n284:         .ARPROT_i  ( pkt.ar_prot   ),\\n285:         .ARREGION_i( pkt.ar_region ),\\n286:         .ARUSER_i  ( pkt.ar_user   ),\\n287:         .ARQOS_i   ( pkt.ar_qos    ),\\n288:         .ARVALID_i ( pkt.ar_valid  ),\\n289:         .ARREADY_o ( pkt.ar_ready  ),\\n290:         .RID_o     ( pkt.r_id      ),\\n291:         .RDATA_o   ( pkt.r_data    ),\\n292:         .RRESP_o   ( pkt.r_resp    ),\\n293:         .RLAST_o   ( pkt.r_last    ),\\n294:         .RUSER_o   ( pkt.r_user    ),\\n295:         .RVALID_o  ( pkt.r_valid   ),\\n296:         .RREADY_i  ( pkt.r_ready   ),\\n297:         .PENABLE   ( pkt_penable   ),\\n298:         .PWRITE    ( pkt_pwrite    ),\\n299:         .PADDR     ( pkt_paddr     ),\\n300:         .PSEL      ( pkt_psel      ),\\n301:         .PWDATA    ( pkt_pwdata    ),\\n302:         .PRDATA    ( pkt_prdata    ),\\n303:         .PREADY    ( pkt_pready    ),\\n304:         .PSLVERR   ( pkt_pslverr   )\\n305:     );\\n306: \\n307:     apb_to_reg i_apb_to_reg_pkt (\\n308:         .clk_i     ( clk_i        ),\\n309:         .rst_ni    ( rst_ni       ),\\n310:         .penable_i ( pkt_penable ),\\n311:         .pwrite_i  ( pkt_pwrite  ),\\n312:         .paddr_i   ( pkt_paddr   ),\\n313:         .psel_i    ( pkt_psel    ),\\n314:         .pwdata_i  ( pkt_pwdata  ),\\n315:         .prdata_o  ( pkt_prdata  ),\\n316:         .pready_o  ( pkt_pready  ),\\n317:         .pslverr_o ( pkt_pslverr ),\\n318:         .reg_o     ( reg_bus_pkt )\\n319:     );\\n320: \\n321:     pkt_wrapper #(\\n322:     ) i_pkt_wrapper (\\n323:         .clk_i              ( clk_i                  ),\\n324:         .rst_ni             ( rst_ni                 ),\\n325:         .pkey_loc_o         ( pkey_loc_o             ),\\n326:         .external_bus_io    ( reg_bus_pkt            )\\n327:     );\\n328: \\n329: /////////////////////////////////////////////////////////////////////////////////////////\\n330: //    // ---------------\\n331: //    // Peripheral Key Table (pkt)\\n332: //    // ---------------\\n333: //    logic                         pkt_req;\\n334: //    logic [AXI_ADDRESS_WIDTH-1:0] pkt_addr;\\n335: //    logic [AXI_DATA_WIDTH-1:0]    pkt_rdata;\\n336: //\\n337: //    axi2mem #(\\n338: //        .AXI_ID_WIDTH   ( AXI_ID_WIDTH_SLAVES ),\\n339: //        .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH   ),\\n340: //        .AXI_DATA_WIDTH ( AXI_DATA_WIDTH      ),\\n341: //        .AXI_USER_WIDTH ( AXI_USER_WIDTH      )\\n342: //    ) i_axi2pkt (\\n343: //        .clk_i  ( clk_i                   ),\\n344: //        .rst_ni ( ndmreset_n              ),\\n345: //        .slave  ( master[ariane_soc::PKT]),\\n346: //        .req_o  ( pkt_req                  ),\\n347: //        .we_o   (                         ),\\n348: //        .addr_o ( pkt_addr                 ),\\n349: //        .be_o   (                         ),\\n350: //        .data_o (                         ),\\n351: //        .data_i ( pkt_rdata        \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 520,
+        "path": "tb/ariane_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"520:         .ARID_i    ( uart.ar_id     ),\\n521:         .ARADDR_i  ( uart.ar_addr   ),\\n522:         .ARLEN_i   ( uart.ar_len    ),\\n523:         .ARSIZE_i  ( uart.ar_size   ),\\n524:         .ARBURST_i ( uart.ar_burst  ),\\n525:         .ARLOCK_i  ( uart.ar_lock   ),\\n526:         .ARCACHE_i ( uart.ar_cache  ),\\n527:         .ARPROT_i  ( uart.ar_prot   ),\\n528:         .ARREGION_i( uart.ar_region ),\\n529:         .ARUSER_i  ( uart.ar_user   ),\\n530:         .ARQOS_i   ( uart.ar_qos    ),\\n531:         .ARVALID_i ( uart.ar_valid  ),\\n532:         .ARREADY_o ( uart.ar_ready  ),\\n533:         .RID_o     ( uart.r_id      ),\\n534:         .RDATA_o   ( uart.r_data    ),\\n535:         .RRESP_o   ( uart.r_resp    ),\\n536:         .RLAST_o   ( uart.r_last    ),\\n537:         .RUSER_o   ( uart.r_user    ),\\n538:         .RVALID_o  ( uart.r_valid   ),\\n539:         .RREADY_i  ( uart.r_ready   ),\\n540:         .PENABLE   ( uart_penable   ),\\n541:         .PWRITE    ( uart_pwrite    ),\\n542:         .PADDR     ( uart_paddr     ),\\n543:         .PSEL      ( uart_psel      ),\\n544:         .PWDATA    ( uart_pwdata    ),\\n545:         .PRDATA    ( uart_prdata    ),\\n546:         .PREADY    ( uart_pready    ),\\n547:         .PSLVERR   ( uart_pslverr   )\\n548:     );\\n549: \\n550:     if (InclUART) begin : gen_uart\\n551:         apb_uart i_apb_uart (\\n552:             .CLK     ( clk_i           ),\\n553:             .RSTN    ( rst_ni          ),\\n554:             .PSEL    ( uart_psel       ),\\n555:             .PENABLE ( uart_penable    ),\\n556:             .PWRITE  ( uart_pwrite     ),\\n557:             .PADDR   ( uart_paddr[4:2] ),\\n558:             .PWDATA  ( uart_pwdata     ),\\n559:             .PRDATA  ( uart_prdata     ),\\n560:             .PREADY  ( uart_pready     ),\\n561:             .PSLVERR ( uart_pslverr    ),\\n562:             .INT     ( irq_sources[2]  ),\\n563:             .OUT1N   (                 ), // keep open\\n564:             .OUT2N   (                 ), // keep open\\n565:             .RTSN    (                 ), // no flow control\\n566:             .DTRN    (                 ), // no flow control\\n567:             .CTSN    ( 1'b0            ),\\n568:             .DSRN    ( 1'b0            ),\\n569:             .DCDN    ( 1'b0            ),\\n570:             .RIN     ( 1'b0            ),\\n571:             .SIN     ( rx_i            ),\\n572:             .SOUT    ( tx_o            )\\n573:         );\\n574:     end else begin\\n575:         /* pragma translate_off */\\n576:         `ifndef VERILATOR\\n577:         mock_uart i_mock_uart (\\n578:             .clk_i     ( clk_i        ),\\n579:             .rst_ni    ( rst_ni       ),\\n580:             .penable_i ( uart_penable ),\\n581:             .pwrite_i  ( uart_pwrite  ),\\n582:             .paddr_i   ( uart_paddr   ),\\n583:             .psel_i    ( uart_psel    ),\\n584:             .pwdata_i  ( uart_pwdata  ),\\n585:             .prdata_o  ( uart_prdata  ),\\n586:             .pready_o  ( uart_pready  ),\\n587:             .pslverr_o ( uart_pslverr )\\n588:         );\\n589:         `endif\\n590:         /* pragma translate_on */\\n591:     end\\n592: \\n593:     // ---------------\\n594:     // 3. SPI\\n595:     // ---------------\\n596:     if (InclSPI) begin : gen_spi\\n597:         logic [31:0] s_axi_spi_awaddr;\\n598:         logic [7:0]  s_axi_spi_awlen;\\n599:         logic [2:0]  s_axi_spi_awsize;\\n600:         logic [1:0]  s_axi_spi_awburst;\\n601:         logic [0:0]  s_axi_spi_awlock;\\n602:         logic [3:0]  s_axi_spi_awcache;\\n603:         logic [2:0]  s_axi_spi_awprot;\\n604:         logic [3:0]  s_axi_spi_awregion;\\n605:         logic [3:0]  s_axi_spi_awqos;\\n606:         logic        s_axi_spi_awvalid;\\n607:         logic        s_axi_spi_awready;\\n608:         logic [31:0] s_axi_spi_wdata;\\n609:         logic [3:0]  s_axi_spi_wstrb;\\n610:         logic        s_axi_spi_wlast;\\n611:         logic        s_axi_spi_wvalid;\\n612:     \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 80,
+        "offset": 170,
+        "path": "tb/ariane_peripherals.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_peripherals.sv",
+      "error": null,
+      "content": "170: ///////////////////////////////////////////////////////////////////////////////////////\n171:     // ---------------\n172:     // ROM2_FUSE peripheral\n173:     // It has all the keys in fuse registers.\n174:     // ---------------\n175:     //logic [63:0]                  rom2_addr;\n176:     //logic [64-1:0]                rom2_rdata;\n177:     logic                         rom2_req;\n178:     logic [AxiAddrWidth-1:0]      rom2_addr;\n179:     logic                         rom2_we;\n180:     logic [31:0]                  pkey_loc_o;\n181:     logic [3:0][191:0]            key_reg_out;\n182:     logic [AxiDataWidth-1:0]    rom2_rdata;\n183:     logic [AxiDataWidth-1:0]    rom2_wdata;\n184: \n185:  \n186:     axi2mem #(\n187:         .AXI_ID_WIDTH   ( AxiIdWidth          ),\n188:         .AXI_ADDR_WIDTH ( AxiAddrWidth        ),\n189:         .AXI_DATA_WIDTH ( AxiDataWidth        ),\n190:         .AXI_USER_WIDTH ( AxiUserWidth        )\n191:     ) i_axi2rom2 (\n192:         .clk_i  ( clk_i                    ),\n193:         .rst_ni ( rst_ni                   ),\n194:         .slave  ( rom2_fuse                ),\n195:         .req_o  ( rom2_req                 ),\n196:         .we_o   ( rom2_we                  ),\n197:         .addr_o ( rom2_addr                ),\n198:         .be_o   (                          ),\n199:         .data_o ( rom2_wdata               ),\n200:         .data_i ( rom2_rdata               )\n201:     );\n202: \n203: \n204:     rom2 i_rom2 (\n205:         .clk_i      ( clk_i      ),\n206:         .rst_ni     ( rst_ni     ),\n207:         .req_i      ( rom2_req   ),\n208:         .we_i       ( rom2_we    ),\n209:         .addr_i     ( rom2_addr  ),\n210:         .wdata_i    ( rom2_wdata ),\n211:         .rdata_o    ( rom2_rdata ), // this will go to peripheral\n212:         .secure_reg ( key_reg_out)\n213:     );\n214:     \n215:     assign jtag_key = key_reg_out[1][31:0];\n216:     assign access_ctrl_reg[0] = key_reg_out[2][47:0];\n217:     assign access_ctrl_reg[1] = key_reg_out[3][47:0];\n218: \n219: \n220: ///////////////////////////////////////////////////////////////////////////////////////\n221:     // ---------------\n222:     // 4. pkt.\n223:     // It is the peripheral key table. It will take peripheral id from the apllication and provide location of key in rom2\n224:     // \n225:     // ---------------\n226: \n227:     REG_BUS #(\n228:         .ADDR_WIDTH ( 32 ),\n229:         .DATA_WIDTH ( 32 )\n230:     ) reg_bus_pkt (clk_i);\n231:     \n232:     logic         pkt_penable;\n233:     logic         pkt_pwrite;\n234:     logic [31:0]  pkt_paddr;\n235:     logic         pkt_psel;\n236:     logic [31:0]  pkt_pwdata;\n237:     logic [31:0]  pkt_prdata;\n238:     logic         pkt_pready;\n239:     logic         pkt_pslverr;\n240: \n241:     axi2apb_64_32 #(\n242:         .AXI4_ADDRESS_WIDTH ( AxiAddrWidth  ),\n243:         .AXI4_RDATA_WIDTH   ( AxiDataWidth  ),\n244:         .AXI4_WDATA_WIDTH   ( AxiDataWidth  ),\n245:         .AXI4_ID_WIDTH      ( AxiIdWidth    ),\n246:         .AXI4_USER_WIDTH    ( AxiUserWidth  ),\n247:         .BUFF_DEPTH_SLAVE   ( 2             ),\n248:         .APB_ADDR_WIDTH     ( 32            )\n249:     ) i_axi2apb_64_32_pkt (",
+      "truncated": false
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 90,
+        "offset": 445,
+        "path": "tb/ariane_peripherals.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_peripherals.sv",
+      "error": null,
+      "content": "445:         .PREADY    ( aes_pready    ),\n446:         .PSLVERR   ( aes_pslverr   )\n447:     );\n448: \n449:     apb_to_reg i_apb_to_reg_aes (\n450:         .clk_i     ( clk_i        ),\n451:         .rst_ni    ( rst_ni       ),\n452:         .penable_i ( aes_penable ),\n453:         .pwrite_i  ( aes_pwrite  ),\n454:         .paddr_i   ( aes_paddr   ),\n455:         .psel_i    ( aes_psel    ),\n456:         .pwdata_i  ( aes_pwdata  ),\n457:         .prdata_o  ( aes_prdata  ),\n458:         .pready_o  ( aes_pready  ),\n459:         .pslverr_o ( aes_pslverr ),\n460:         .reg_o     ( reg_bus_aes )\n461:     );\n462: \n463:     aes_wrapper #(\n464:     ) i_aes_wrapper (\n465:         .clk_i              ( clk_i                  ),\n466:         .rst_ni             ( rst_ni                 ),\n467:         .key_in             (key_reg_out[0]          ),\n468:         .external_bus_io    ( reg_bus_aes            )\n469:     );\n470: \n471: ///////////////////////////////////////////////////////////////////////////////////////\n472:     // ---------------\n473:     // 2. UART\n474:     // ---------------\n475:     logic         uart_penable;\n476:     logic         uart_pwrite;\n477:     logic [31:0]  uart_paddr;\n478:     logic         uart_psel;\n479:     logic [31:0]  uart_pwdata;\n480:     logic [31:0]  uart_prdata;\n481:     logic         uart_pready;\n482:     logic         uart_pslverr;\n483: \n484:     axi2apb_64_32 #(\n485:         .AXI4_ADDRESS_WIDTH ( AxiAddrWidth ),\n486:         .AXI4_RDATA_WIDTH   ( AxiDataWidth ),\n487:         .AXI4_WDATA_WIDTH   ( AxiDataWidth ),\n488:         .AXI4_ID_WIDTH      ( AxiIdWidth   ),\n489:         .AXI4_USER_WIDTH    ( AxiUserWidth ),\n490:         .BUFF_DEPTH_SLAVE   ( 2            ),\n491:         .APB_ADDR_WIDTH     ( 32           )\n492:     ) i_axi2apb_64_32_uart (\n493:         .ACLK      ( clk_i          ),\n494:         .ARESETn   ( rst_ni         ),\n495:         .test_en_i ( 1'b0           ),\n496:         .AWID_i    ( uart.aw_id     ),\n497:         .AWADDR_i  ( uart.aw_addr   ),\n498:         .AWLEN_i   ( uart.aw_len    ),\n499:         .AWSIZE_i  ( uart.aw_size   ),\n500:         .AWBURST_i ( uart.aw_burst  ),\n501:         .AWLOCK_i  ( uart.aw_lock   ),\n502:         .AWCACHE_i ( uart.aw_cache  ),\n503:         .AWPROT_i  ( uart.aw_prot   ),\n504:         .AWREGION_i( uart.aw_region ),\n505:         .AWUSER_i  ( uart.aw_user   ),\n506:         .AWQOS_i   ( uart.aw_qos    ),\n507:         .AWVALID_i ( uart.aw_valid  ),\n508:         .AWREADY_o ( uart.aw_ready  ),\n509:         .WDATA_i   ( uart.w_data    ),\n510:         .WSTRB_i   ( uart.w_strb    ),\n511:         .WLAST_i   ( uart.w_last    ),\n512:         .WUSER_i   ( uart.w_user    ),\n513:         .WVALID_i  ( uart.w_valid   ),\n514:         .WREADY_o  ( uart.w_ready   ),\n515:         .BID_o     ( uart.b_id      ),\n516:         .BRESP_o   ( uart.b_resp    ),\n517:         .BVALID_o  ( uart.b_valid   ),\n518:         .BUSER_o   ( uart.b_user    ),\n519:         .BREADY_i  ( uart.b_ready   ),\n520:         .ARID_i    ( uart.ar_id     ),\n521:         .ARADDR_i  ( uart.ar_addr   ),\n522:         .ARLEN_i   ( uart.ar_len    ),\n523:         .ARSIZE_i  ( uart.ar_size   ),\n524:         .ARBURST_i ( uart.ar_burst  ),\n525:         .ARLOCK_i  ( uart.ar_lock   ),\n526:         .ARCACHE_i ( uart.ar_cache  ),\n527:         .ARPROT_i  ( uart.ar_prot   ),\n528:         .ARREGION_i( uart.ar_region ),\n529:         .ARUSER_i  ( uart.ar_user   ),\n530:         .ARQOS_i   ( uart.ar_qos    ),\n531:         .ARVALID_i ( uart.ar_valid  ),\n532:         .ARREADY_o ( uart.ar_ready  ),\n533:         .RID_o     ( uart.r_id      ),\n534:         .RDATA_o   ( uart.r_data    ),",
+      "truncated": false
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 310,
+        "offset": 1,
+        "path": "tb/ariane_testharness.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: //\\n11: // Author: Florian Zaruba, ETH Zurich\\n12: // Date: 19.03.2017\\n13: // Description: Test-harness for Ariane\\n14: //              Instantiates an AXI-Bus and memories\\n15: \\n16: module ariane_testharness #(\\n17:     parameter int unsigned AXI_ID_WIDTH      = 4,\\n18:     parameter int unsigned AXI_USER_WIDTH    = 1,\\n19:     parameter int unsigned AXI_ADDRESS_WIDTH = 64,\\n20:     parameter int unsigned AXI_DATA_WIDTH    = 64,\\n21:     parameter bit          InclSimDTM        = 1'b1,\\n22:     parameter int unsigned NUM_WORDS         = 2**25,         // memory size\\n23:     parameter bit          StallRandomOutput = 1'b0,\\n24:     parameter bit          StallRandomInput  = 1'b0\\n25: ) (\\n26:     input  logic                           clk_i,\\n27:     input  logic                           rtc_i,\\n28:     input  logic                           rst_ni,\\n29:     output logic [31:0]                    exit_o\\n30: );\\n31: \\n32:     // disable test-enable\\n33:     logic        test_en;\\n34:     logic        ndmreset;\\n35:     logic        ndmreset_n;\\n36:     logic        debug_req_core;\\n37: \\n38:     int          jtag_enable;\\n39:     logic        init_done;\\n40:     logic [31:0] jtag_exit, dmi_exit;\\n41: \\n42:     logic        jtag_TCK;\\n43:     logic        jtag_TMS;\\n44:     logic        jtag_TDI;\\n45:     logic        jtag_TRSTn;\\n46:     logic        jtag_TDO_data;\\n47:     logic        jtag_TDO_driven;\\n48: \\n49:     logic        debug_req_valid;\\n50:     logic        debug_req_ready;\\n51:     logic        debug_resp_valid;\\n52:     logic        debug_resp_ready;\\n53: \\n54:     logic        jtag_req_valid;\\n55:     logic [6:0]  jtag_req_bits_addr;\\n56:     logic [1:0]  jtag_req_bits_op;\\n57:     logic [31:0] jtag_req_bits_data;\\n58:     logic        jtag_resp_ready;\\n59:     logic        jtag_resp_valid;\\n60: \\n61:     logic        dmi_req_valid;\\n62:     logic        dmi_resp_ready;\\n63:     logic        dmi_resp_valid;\\n64: \\n65:     logic [31:0] jtag_key; \\n66:     logic [1:0][47:0]   access_ctrl_reg;\\n67: \\n68:     dm::dmi_req_t  jtag_dmi_req;\\n69:     dm::dmi_req_t  dmi_req;\\n70: \\n71:     dm::dmi_req_t  debug_req;\\n72:     dm::dmi_resp_t debug_resp;\\n73: \\n74:     assign test_en = 1'b0;\\n75: \\n76:     localparam NB_SUBORDINATE = 2;\\n77: \\n78:     localparam AXI_ID_WIDTH_SLAVES = AXI_ID_WIDTH + $clog2(NB_SUBORDINATE);\\n79: \\n80:     AXI_BUS #(\\n81:         .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH ),\\n82:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH    ),\\n83:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH      ),\\n84:         .AXI_USER_WIDTH ( AXI_USER_WIDTH    )\\n85:     ) slave[NB_SUBORDINATE-1:0]();\\n86: \\n87:     AXI_BUS #(\\n88:         .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH   ),\\n89:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH      ),\\n90:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH_SLAVES ),\\n91:         .AXI_USER_WIDTH ( AXI_USER_WIDTH      )\\n92:     ) master[ariane_soc::NB_PERIPHERALS-1:0]();\\n93: \\n94:     rstgen i_rstgen_main (\\n95:         .clk_i        ( clk_i                ),\\n96:         .rst_ni       ( rst_ni & (~ndmreset) ),\\n97:         .test_mode_i  ( test_en              ),\\n98:         .rst_no       ( ndmreset_n           ),\\n99:         .init_no      (                      ) \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 310,
+        "path": "tb/ariane_testharness.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"310:         .r_ready_i  ( master[ariane_soc::DRAM].r_ready  ),\\n311:         .aw_valid_o ( dram.aw_valid                     ),\\n312:         .aw_chan_o  ( aw_chan_o                         ),\\n313:         .aw_ready_i ( dram.aw_ready                     ),\\n314:         .w_valid_o  ( dram.w_valid                      ),\\n315:         .w_chan_o   ( w_chan_o                          ),\\n316:         .w_ready_i  ( dram.w_ready                      ),\\n317:         .b_valid_i  ( dram.b_valid                      ),\\n318:         .b_chan_i   ( b_chan_i                          ),\\n319:         .b_ready_o  ( dram.b_ready                      ),\\n320:         .ar_valid_o ( dram.ar_valid                     ),\\n321:         .ar_chan_o  ( ar_chan_o                         ),\\n322:         .ar_ready_i ( dram.ar_ready                     ),\\n323:         .r_valid_i  ( dram.r_valid                      ),\\n324:         .r_chan_i   ( r_chan_i                          ),\\n325:         .r_ready_o  ( dram.r_ready                      )\\n326:     );\\n327: \\n328:     assign aw_chan_i.atop = '0;\\n329:     assign aw_chan_i.id = master[ariane_soc::DRAM].aw_id;\\n330:     assign aw_chan_i.addr = master[ariane_soc::DRAM].aw_addr;\\n331:     assign aw_chan_i.len = master[ariane_soc::DRAM].aw_len;\\n332:     assign aw_chan_i.size = master[ariane_soc::DRAM].aw_size;\\n333:     assign aw_chan_i.burst = master[ariane_soc::DRAM].aw_burst;\\n334:     assign aw_chan_i.lock = master[ariane_soc::DRAM].aw_lock;\\n335:     assign aw_chan_i.cache = master[ariane_soc::DRAM].aw_cache;\\n336:     assign aw_chan_i.prot = master[ariane_soc::DRAM].aw_prot;\\n337:     assign aw_chan_i.qos = master[ariane_soc::DRAM].aw_qos;\\n338:     assign aw_chan_i.region = master[ariane_soc::DRAM].aw_region;\\n339: \\n340:     assign ar_chan_i.id = master[ariane_soc::DRAM].ar_id;\\n341:     assign ar_chan_i.addr = master[ariane_soc::DRAM].ar_addr;\\n342:     assign ar_chan_i.len = master[ariane_soc::DRAM].ar_len;\\n343:     assign ar_chan_i.size = master[ariane_soc::DRAM].ar_size;\\n344:     assign ar_chan_i.burst = master[ariane_soc::DRAM].ar_burst;\\n345:     assign ar_chan_i.lock = master[ariane_soc::DRAM].ar_lock;\\n346:     assign ar_chan_i.cache = master[ariane_soc::DRAM].ar_cache;\\n347:     assign ar_chan_i.prot = master[ariane_soc::DRAM].ar_prot;\\n348:     assign ar_chan_i.qos = master[ariane_soc::DRAM].ar_qos;\\n349:     assign ar_chan_i.region = master[ariane_soc::DRAM].ar_region;\\n350: \\n351:     assign w_chan_i.data = master[ariane_soc::DRAM].w_data;\\n352:     assign w_chan_i.strb = master[ariane_soc::DRAM].w_strb;\\n353:     assign w_chan_i.last = master[ariane_soc::DRAM].w_last;\\n354: \\n355:     assign master[ariane_soc::DRAM].r_id = r_chan_o.id;\\n356:     assign master[ariane_soc::DRAM].r_data = r_chan_o.data;\\n357:     assign master[ariane_soc::DRAM].r_resp = r_chan_o.resp;\\n358:     assign master[ariane_soc::DRAM].r_last = r_chan_o.last;\\n359: \\n360:     assign master[ariane_soc::DRAM].b_id = b_chan_o.id;\\n361:     assign master[ariane_soc::DRAM].b_resp = b_chan_o.resp;\\n362: \\n363: \\n364:     assign dram.aw_id = aw_chan_o.id;\\n365:     assign dram.aw_addr = aw_chan_o.addr;\\n366:     assign dram.aw_len = aw_chan_o.len;\\n367:     assign dram.aw_size = aw_chan_o.size;\\n368:     assign dram.aw_burst = aw_chan_o.burst;\\n369:     assign dram.aw_lock = aw_chan_o.lock;\\n370:     assign dram.aw_cache = aw_chan_o.cache;\\n371:     assign dram.aw_prot = aw_chan_o.prot;\\n372:     assign dram.aw_qos = aw_chan_o.qos;\\n373:     assign dram.aw_region = aw_chan_o.region;\\n374:     assign dram.aw_user = master[ariane_soc::DRAM].aw_user;\\n375: \\n376:     assign dram.ar_id = ar_chan_o.id;\\n377:     assign dram.ar_addr = ar_chan_o.addr;\\n378:     assign dram.ar_len = ar_chan_o.len;\\n379:     assign dram.ar_size = ar_chan_o.size;\\n380:     assign dram.ar_burst = ar_chan_o.burst;\\n381:     assign dram.ar_lock = ar_chan_o.lock;\\n382:     assign dram.ar_cach\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 110,
+        "offset": 180,
+        "path": "tb/ariane_testharness.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_testharness.sv",
+      "error": null,
+      "content": "180:     end\n181: \n182:     ariane_axi::req_t    dm_axi_m_req,  dm_axi_s_req;\n183:     ariane_axi::resp_t   dm_axi_m_resp, dm_axi_s_resp;\n184: \n185:     // debug module\n186:     dm_top #(\n187:         // current implementation only supports 1 hart\n188:         .NrHarts              ( 1                         ),\n189:         .AxiIdWidth           ( AXI_ID_WIDTH_SLAVES       ),\n190:         .AxiAddrWidth         ( AXI_ADDRESS_WIDTH         ),\n191:         .AxiDataWidth         ( AXI_DATA_WIDTH            ),\n192:         .AxiUserWidth         ( AXI_USER_WIDTH            )\n193:     ) i_dm_top (\n194: \n195:         .clk_i                ( clk_i                ),\n196:         .rst_ni               ( rst_ni               ), // PoR\n197:         .testmode_i           ( test_en              ),\n198:         .ndmreset_o           ( ndmreset             ),\n199:         .dmactive_o           (                      ), // active debug session\n200:         .debug_req_o          ( debug_req_core       ),\n201:         .unavailable_i        ( '0                   ),\n202:         .axi_s_req_i          ( dm_axi_s_req         ),\n203:         .axi_s_resp_o         ( dm_axi_s_resp        ),\n204:         .axi_m_req_o          ( dm_axi_m_req         ),\n205:         .axi_m_resp_i         ( dm_axi_m_resp        ),\n206:         .dmi_rst_ni           ( rst_ni               ),\n207:         .dmi_req_valid_i      ( debug_req_valid      ),\n208:         .dmi_req_ready_o      ( debug_req_ready      ),\n209:         .dmi_req_i            ( debug_req            ),\n210:         .dmi_resp_valid_o     ( debug_resp_valid     ),\n211:         .dmi_resp_ready_i     ( debug_resp_ready     ),\n212:         .dmi_resp_o           ( debug_resp           )\n213:     );\n214: \n215:     axi_master_connect i_axi_master_dm (.axi_req_i(dm_axi_m_req), .axi_resp_o(dm_axi_m_resp), .master(slave[1]));\n216:     axi_slave_connect  i_axi_slave_dm  (.axi_req_o(dm_axi_s_req), .axi_resp_i(dm_axi_s_resp), .slave(master[ariane_soc::Debug]));\n217: \n218: \n219:     // ---------------\n220:     // ROM\n221:     // ---------------\n222:     logic                         rom_req;\n223:     logic [AXI_ADDRESS_WIDTH-1:0] rom_addr;\n224:     logic                         rom_we;\n225:     logic [AXI_DATA_WIDTH-1:0]    rom_rdata;\n226:     logic [AXI_DATA_WIDTH-1:0]    rom_wdata;\n227:  \n228:     axi2mem #(\n229:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH_SLAVES ),\n230:         .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH   ),\n231:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH      ),\n232:         .AXI_USER_WIDTH ( AXI_USER_WIDTH      )\n233:     ) i_axi2rom (\n234:         .clk_i  ( clk_i                   ),\n235:         .rst_ni ( ndmreset_n              ),\n236:         .slave  ( master[ariane_soc::ROM] ),\n237:         .req_o  ( rom_req                 ),\n238:         .we_o   ( rom_we                  ),\n239:         .addr_o ( rom_addr                ),\n240:         .be_o   (                         ),\n241:         .data_o ( rom_wdata               ),\n242:         .data_i ( rom_rdata               )\n243:     );\n244: \n245:     bootrom i_bootrom (\n246:         .clk_i      ( clk_i     ),\n247:         .req_i      ( rom_req   ),\n248:         .we_i       ( rom_we    ),\n249:         .addr_i     ( rom_addr  ),\n250:         .wdata_i    ( rom_wdata ),\n251:         .rdata_o    ( rom_rdata )\n252:     );\n253: \n254:     // ---------------\n255:     // Memory\n256:     // ---------------\n257: \n258:     AXI_BUS #(\n259:         .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH   ),\n260:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH      ),\n261:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH_SLAVES ),\n262:         .AXI_USER_WIDTH ( AXI_USER_WIDTH      )\n263:     ) dram();\n264: \n265:     logic                         req;\n266:     logic                         we;\n267:     logic [AXI_ADDRESS_WIDTH-1:0] addr;\n268:     logic [AXI_DATA_WIDTH/8-1:0]  be;\n269:     logic [AXI_DATA_WIDTH-1:0]    wdata;\n270:     logic [AXI_DATA_WIDTH-1:0]    rdata;\n271: \n272:     axi_pkg::aw_chan_t aw_chan\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 110,
+        "offset": 454,
+        "path": "tb/ariane_testharness.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_testharness.sv",
+      "error": null,
+      "content": "454:     axi_node_intf_wrap #(\n455:         .NB_SUBORDINATE           ( NB_SUBORDINATE                   ),\n456:         .NB_MANAGER          ( ariane_soc::NB_PERIPHERALS ),\n457: \t.NB_PRIV_LVL\t    ( riscv::NB_PRIV_LVL\t ), \n458: \t.PRIV_LVL_WIDTH\t    ( riscv::PRIV_LVL_WIDTH\t ),\n459:         .AXI_ADDR_WIDTH     ( AXI_ADDRESS_WIDTH          ),\n460:         .AXI_DATA_WIDTH     ( AXI_DATA_WIDTH             ),\n461:         .AXI_USER_WIDTH     ( AXI_USER_WIDTH             ),\n462:         .AXI_ID_WIDTH       ( AXI_ID_WIDTH               )\n463:         // .MASTER_SLICE_DEPTH ( 0                          ),\n464:         // .SLAVE_SLICE_DEPTH  ( 0                          )\n465:     ) i_axi_xbar (\n466:         .clk          ( clk_i      ),\n467:         .rst_n        ( ndmreset_n ),\n468:         .test_en_i    ( test_en    ),\n469:         .slave        ( slave      ),\n470:         .master       ( master     ),\n471: \t.priv_lvl_i   ( priv_lvl   ),   \n472: \t.access_ctrl_i( access_ctrl),  \n473:         .start_addr_i ({\n474:             ariane_soc::DebugBase,\n475:             ariane_soc::ROMBase,\n476:             ariane_soc::ROM2Base,\n477:             ariane_soc::PKTBase,\n478:             ariane_soc::CLINTBase,\n479:             ariane_soc::PLICBase,\n480:             ariane_soc::UARTBase,\n481:             ariane_soc::AESBase,\n482:             ariane_soc::SPIBase,\n483:             ariane_soc::EthernetBase,\n484:             ariane_soc::GPIOBase,\n485:             ariane_soc::DRAMBase\n486:         }),\n487:         .end_addr_i   ({\n488:             ariane_soc::DebugBase    + ariane_soc::DebugLength - 1,\n489:             ariane_soc::ROMBase      + ariane_soc::ROMLength - 1,\n490:             ariane_soc::ROM2Base     + ariane_soc::ROM2Length - 1,\n491:             ariane_soc::PKTBase      + ariane_soc::PKTLength - 1, \n492:             ariane_soc::CLINTBase    + ariane_soc::CLINTLength - 1,\n493:             ariane_soc::PLICBase     + ariane_soc::PLICLength - 1,\n494:             ariane_soc::UARTBase     + ariane_soc::UARTLength - 1,\n495:             ariane_soc::AESBase      + ariane_soc::AESLength - 1, \n496:             ariane_soc::SPIBase      + ariane_soc::SPILength - 1,\n497:             ariane_soc::EthernetBase + ariane_soc::EthernetLength -1,\n498:             ariane_soc::GPIOBase     + ariane_soc::GPIOLength - 1,\n499:             ariane_soc::DRAMBase     + ariane_soc::DRAMLength - 1\n500:         })\n501:     );\n502: \n503:     // ---------------\n504:     // CLINT\n505:     // ---------------\n506:     logic ipi;\n507:     logic timer_irq;\n508: \n509:     ariane_axi::req_t    axi_clint_req;\n510:     ariane_axi::resp_t   axi_clint_resp;\n511: \n512:     clint #(\n513:         .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH   ),\n514:         .AXI_DATA_WIDTH ( AXI_DATA_WIDTH      ),\n515:         .AXI_ID_WIDTH   ( AXI_ID_WIDTH_SLAVES ),\n516:         .NR_CORES       ( 1                   )\n517:     ) i_clint (\n518:         .clk_i       ( clk_i          ),\n519:         .rst_ni      ( ndmreset_n     ),\n520:         .testmode_i  ( test_en        ),\n521:         .axi_req_i   ( axi_clint_req  ),\n522:         .axi_resp_o  ( axi_clint_resp ),\n523:         .rtc_i       ( rtc_i          ),\n524:         .timer_irq_o ( timer_irq      ),\n525:         .ipi_o       ( ipi            )\n526:     );\n527: \n528:     axi_slave_connect i_axi_slave_connect_clint (.axi_req_o(axi_clint_req), .axi_resp_i(axi_clint_resp), .slave(master[ariane_soc::CLINT]));\n529: \n530:     // ---------------\n531:     // Peripherals\n532:     // ---------------\n533:     logic tx, rx;\n534:     logic [1:0] irqs;\n535: \n536:     ariane_peripherals #(\n537:       .AxiAddrWidth ( AXI_ADDRESS_WIDTH   ),\n538:       .AxiDataWidth ( AXI_DATA_WIDTH      ),\n539:       .AxiIdWidth   ( AXI_ID_WIDTH_SLAVES ),\n540:       .AxiUserWidth ( AXI_USER_WIDTH      ),\n541:       .InclUART     ( 1'b0                ),\n542:       .InclSPI      ( 1'b0                ),\n543:       .InclEthernet ( 1'b0                )\n544:     ) i_ariane_peripherals (\n545\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 80,
+        "offset": 568,
+        "path": "tb/ariane_testharness.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_testharness.sv",
+      "error": null,
+      "content": "568:       .mdio              ( ),\n569:       .mdc               ( ),\n570:       .spi_clk_o         ( ),\n571:       .spi_mosi          ( ),\n572:       .spi_miso          ( ),\n573:       .spi_ss            ( )\n574:     );\n575: \n576:     uart_bus #(.BAUD_RATE(115200), .PARITY_EN(0)) i_uart_bus (.rx(tx), .tx(rx), .rx_en(1'b1));\n577: \n578:     // ---------------\n579:     // Core\n580:     // ---------------\n581:     ariane_axi::req_t    axi_ariane_req;\n582:     ariane_axi::resp_t   axi_ariane_resp;\n583: \n584: \n585:     ariane #(\n586: `ifdef PITON_ARIANE\n587:         .SwapEndianess ( 0                                               ),\n588:         .CachedAddrEnd ( (ariane_soc::DRAMBase + ariane_soc::DRAMLength) ),\n589: `endif\n590:         .CachedAddrBeg ( ariane_soc::DRAMBase )\n591:     ) i_ariane (\n592:         .clk_i                ( clk_i               ),\n593:         .rst_ni               ( ndmreset_n          ),\n594:         .boot_addr_i          ( ariane_soc::ROMBase ), // start fetching from ROM\n595:         .hart_id_i            ( '0                  ),\n596:         .irq_i                ( irqs                ),\n597:         .ipi_i                ( ipi                 ),\n598:         .time_irq_i           ( timer_irq           ),\n599:         .debug_req_i          ( debug_req_core      ),\n600: \t    .priv_lvl_o\t          ( priv_lvl_processor  ),  \n601:         .axi_req_o            ( axi_ariane_req      ),\n602:         .axi_resp_i           ( axi_ariane_resp     ),\n603: \t.umode_i              ( ariane_umode)            \n604:     );\n605: \n606:     axi_master_connect i_axi_master_connect_ariane (.axi_req_i(axi_ariane_req), .axi_resp_o(axi_ariane_resp), .master(slave[0]));\n607: \n608: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 120,
+        "offset": 1,
+        "path": "src/rom2/rom2.sv"
+      },
+      "status": "ok",
+      "path": "src/rom2/rom2.sv",
+      "error": null,
+      "content": "1:  /*\n2:  * ROM2: Which have all the keys.\n3:  */\n4: \n5: module rom2 (\n6:    input  logic         clk_i,\n7:    input  logic         rst_ni,\n8:    input  logic         req_i,\n9:    input  logic         we_i,\n10:    input  logic [63:0]  addr_i,\n11:    input  logic [63:0]  wdata_i,\n12:    output logic [63:0]  rdata_o,\n13:    output logic [3:0][191:0]  secure_reg // Ideally [1:0] should be [RomSize-1:0]. In this case RomSize is 2.\n14: );\n15:     localparam int RomSize = 4;\n16: \n17: // Store key values here. // Replication of fuse. \n18:     const logic [RomSize-1:0][191:0] mem = {\n19:         192'h00000000_00000000_00000000_00000000_0000f8f8_ff6fe00f, // 3rd location for Access control master 1. First 4 bits for peripheral 0, next 4 for p1 and so on.\n20:         192'h00000000_00000000_00000000_00000000_0000fff8_ff6ff00f, // 2nd location for Access control master 0. First 4 bits for peripheral 0, next 4 for p1 and so on.\n21:         192'h2b7e1516_28aed2a6_abf71588_09cf4f3c_2b7e1516_28aed2a6, // 1st location for JTAG\n22:         192'h55555555_28aed2a6_abf71588_09cf4f3c_2b7e1516_28aed2a6  // oth location for AES\n23:     };\n24: \n25: // Secure registers. Key values copied from fuse to these registers on reset.\n26: //    logic [RomSize-1:0][191:0] secure_reg;\n27: \n28:     logic [$clog2(RomSize)-1:0] raddr_q;\n29: \n30: // We can read and write initial 64 bits.\n31: // On reset, key values will be copied to registers.\n32:     always_ff @ (posedge clk_i) begin\n33:         if (~rst_ni) begin\n34:             secure_reg <= mem;\n35:         end else begin\n36:         if(req_i) begin\n37:             if (!we_i) begin\n38:                 raddr_q <= addr_i[$clog2(RomSize)-1+3:3];\n39:             end else begin\n40:                 secure_reg[addr_i[$clog2(RomSize)-1+3:3]] <= wdata_i;\n41:             end\n42:         end\n43:         end\n44:     end\n45:     // this prevents spurious Xes from propagating into\n46:     // the speculative fetch stage of the core\n47:     assign rdata_o = (raddr_q < RomSize) ? secure_reg[raddr_q] : '0;\n48: \n49: \n50: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 520,
+        "offset": 1,
+        "path": "src/axi_node/src/axi_node_intf_wrap.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1:  // Copyright 2014-2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the “License”); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an “AS IS” BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: module axi_node_intf_wrap #(\\n12:     parameter NB_MANAGER      = 4,\\n13:     parameter NB_SUBORDINATE       = 4,\\n14:     parameter NB_PRIV_LVL    = 4, \\n15:     parameter PRIV_LVL_WIDTH = 4,\\n16:     parameter AXI_ADDR_WIDTH = 32,\\n17:     parameter AXI_DATA_WIDTH = 32,\\n18:     parameter AXI_ID_WIDTH   = 10,\\n19:     parameter AXI_USER_WIDTH = 0\\n20:   )(\\n21:     // Clock and Reset\\n22:     input logic clk,\\n23:     input logic rst_n,\\n24:     input logic test_en_i,\\n25: \\n26:     AXI_BUS.Slave slave[NB_SUBORDINATE-1:0],\\n27: \\n28:     AXI_BUS.Master master[NB_MANAGER-1:0],\\n29:     \\n30:     input logic [PRIV_LVL_WIDTH-1:0]      priv_lvl_i,\\n31:     input logic [NB_SUBORDINATE-1:0][NB_MANAGER-1:0][NB_PRIV_LVL-1:0] access_ctrl_i,\\n32: \\n33:     // Memory map\\n34:     input  logic [NB_MANAGER-1:0][AXI_ADDR_WIDTH-1:0]  start_addr_i,\\n35:     input  logic [NB_MANAGER-1:0][AXI_ADDR_WIDTH-1:0]  end_addr_i\\n36:   );\\n37: \\n38:   localparam AXI_STRB_WIDTH = AXI_DATA_WIDTH/8;\\n39:   localparam NB_REGION      = 1;\\n40: \\n41:   // AXI ID WIDTHs for master and slave IPS\\n42:   localparam AXI_ID_WIDTH_TARG =   AXI_ID_WIDTH;\\n43:   localparam AXI_ID_WIDTH_INIT =   AXI_ID_WIDTH_TARG + $clog2(NB_SUBORDINATE);\\n44: \\n45: \\n46:   // Signals to slave periperhals\\n47:   logic [NB_MANAGER-1:0][AXI_ID_WIDTH_INIT-1:0] s_master_aw_id;\\n48:   logic [NB_MANAGER-1:0][AXI_ADDR_WIDTH-1:0]    s_master_aw_addr;\\n49:   logic [NB_MANAGER-1:0][7:0]                   s_master_aw_len;\\n50:   logic [NB_MANAGER-1:0][2:0]                   s_master_aw_size;\\n51:   logic [NB_MANAGER-1:0][1:0]                   s_master_aw_burst;\\n52:   logic [NB_MANAGER-1:0]                        s_master_aw_lock;\\n53:   logic [NB_MANAGER-1:0][3:0]                   s_master_aw_cache;\\n54:   logic [NB_MANAGER-1:0][2:0]                   s_master_aw_prot;\\n55:   logic [NB_MANAGER-1:0][3:0]                   s_master_aw_region;\\n56:   logic [NB_MANAGER-1:0][AXI_USER_WIDTH-1:0]    s_master_aw_user;\\n57:   logic [NB_MANAGER-1:0][3:0]                   s_master_aw_qos;\\n58:   logic [NB_MANAGER-1:0]                        s_master_aw_valid;\\n59:   logic [NB_MANAGER-1:0]                        s_master_aw_ready;\\n60: \\n61:   logic [NB_MANAGER-1:0][AXI_ID_WIDTH_INIT-1:0] s_master_ar_id;\\n62:   logic [NB_MANAGER-1:0][AXI_ADDR_WIDTH-1:0]    s_master_ar_addr;\\n63:   logic [NB_MANAGER-1:0][7:0]                   s_master_ar_len;\\n64:   logic [NB_MANAGER-1:0][2:0]                   s_master_ar_size;\\n65:   logic [NB_MANAGER-1:0][1:0]                   s_master_ar_burst;\\n66:   logic [NB_MANAGER-1:0]                        s_master_ar_lock;\\n67:   logic [NB_MANAGER-1:0][3:0]                   s_master_ar_cache;\\n68:   logic [NB_MANAGER-1:0][2:0]                   s_master_ar_prot;\\n69:   logic [NB_MANAGER-1:0][3:0]                   s_master_ar_region;\\n70:   logic [NB_MANAGER-1:0][AXI_USER_WIDTH-1:0]    s_master_ar_user;\\n71:   logic [NB_MANAGER-1:0][3:0]                   s_master_ar_qos;\\n72:   logic [NB_MANAGER-1:0]                        s_master_ar_valid;\\n73:   logic [NB_MANAGER-1:0]                        s_master_ar_ready;\\n74: \\n75:   logic [NB_MANAGER-1:0][AXI_DATA_WIDTH-1:0]    s_master_w_data;\\n76:   logic [NB_MANAGER-1:0][\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 320,
+        "offset": 1,
+        "path": "bootrom/bootrom.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: /* Copyright 2018 ETH Zurich and University of Bologna.\\n2:  * Copyright and related rights are licensed under the Solderpad Hardware\\n3:  * License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4:  * compliance with the License.  You may obtain a copy of the License at\\n5:  * http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6:  * or agreed to in writing, software, hardware and materials distributed under\\n7:  * this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8:  * CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9:  * specific language governing permissions and limitations under the License.\\n10:  *\\n11:  * File: $filename.v\\n12:  *\\n13:  * Description: Auto-generated bootrom\\n14:  */\\n15: \\n16: // Auto-generated code\\n17: module bootrom (\\n18:    input  logic         clk_i,\\n19:    input  logic         req_i,\\n20:    input  logic         we_i,\\n21:    input  logic [63:0]  addr_i,\\n22:    input  logic [63:0]  wdata_i,\\n23:    output logic [63:0]  rdata_o\\n24: );\\n25:     localparam int RomSize = 226;\\n26: \\n27:     logic [RomSize-1:0][63:0] mem = {\\n28:         64'h00006874_6469772d,\\n29:         64'h6f692d67_65720074,\\n30:         64'h66696873_2d676572,\\n31:         64'h00737470_75727265,\\n32:         64'h746e6900_746e6572,\\n33:         64'h61702d74_70757272,\\n34:         64'h65746e69_00646565,\\n35:         64'h70732d74_6e657272,\\n36:         64'h75630076_65646e2c,\\n37:         64'h76637369_72007974,\\n38:         64'h69726f69_72702d78,\\n39:         64'h616d2c76_63736972,\\n40:         64'h0073656d_616e2d67,\\n41:         64'h65720064_65646e65,\\n42:         64'h7478652d_73747075,\\n43:         64'h72726574_6e690073,\\n44:         64'h65676e61_7200656c,\\n45:         64'h646e6168_702c7875,\\n46:         64'h6e696c00_72656c6c,\\n47:         64'h6f72746e_6f632d74,\\n48:         64'h70757272_65746e69,\\n49:         64'h00736c6c_65632d74,\\n50:         64'h70757272_65746e69,\\n51:         64'h23007469_6c70732d,\\n52:         64'h626c7400_65707974,\\n53:         64'h2d756d6d_00617369,\\n54:         64'h2c766373_69720073,\\n55:         64'h75746174_73006765,\\n56:         64'h72006570_79745f65,\\n57:         64'h63697665_64007963,\\n58:         64'h6e657571_6572662d,\\n59:         64'h6b636f6c_63007963,\\n60:         64'h6e657571_6572662d,\\n61:         64'h65736162_656d6974,\\n62:         64'h006c6564_6f6d0065,\\n63:         64'h6c626974_61706d6f,\\n64:         64'h6300736c_6c65632d,\\n65:         64'h657a6973_2300736c,\\n66:         64'h6c65632d_73736572,\\n67:         64'h64646123_09000000,\\n68:         64'h02000000_02000000,\\n69:         64'h02000000_04000000,\\n70:         64'h2e010000_04000000,\\n71:         64'h03000000_02000000,\\n72:         64'h24010000_04000000,\\n73:         64'h03000000_01000000,\\n74:         64'h19010000_04000000,\\n75:         64'h03000000_02000000,\\n76:         64'h08010000_04000000,\\n77:         64'h03000000_00c20100,\\n78:         64'hfa000000_04000000,\\n79:         64'h03000000_80f0fa02,\\n80:         64'h3f000000_04000000,\\n81:         64'h03000000_00100000,\\n82:         64'h00000000_00000010,\\n83:         64'h00000000_5b000000,\\n84:         64'h10000000_03000000,\\n85:         64'h00303537_3631736e,\\n86:         64'h1b000000_08000000,\\n87:         64'h03000000_00000030,\\n88:         64'h30303030_30303140,\\n89:         64'h74726175_01000000,\\n90:         64'h02000000_006c6f72,\\n91:         64'h746e6f63_d2000000,\\n92:         64'h08000000_03000000,\\n93:         64'h00100000_00000000,\\n94:         64'h00000000_00000000,\\n95:         64'h5b000000_10000000,\\n96:         64'h03000000_ffff0000,\\n97:         64'h01000000_be000000,\\n98:         64'h08000000_03000000,\\n99:         64'h00333130_2d677562,\\n100:         64'h65642c76_63736972,\\n101:         64'h1b000000_10000000,\\n102:         64'h03000000_00003040,\\n103:         64'h72656c6c_6f72746e,\\n104:         64'h6f632d67_75626564,\\n\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 120,
+        "offset": 1,
+        "path": "tb/ariane_soc_pkg.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_soc_pkg.sv",
+      "error": null,
+      "content": "1: // Copyright 2018 ETH Zurich and University of Bologna.\n2: // Copyright and related rights are licensed under the Solderpad Hardware\n3: // License, Version 0.51 (the \"License\"); you may not use this file except in\n4: // compliance with the License.  You may obtain a copy of the License at\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n6: // or agreed to in writing, software, hardware and materials distributed under\n7: // this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\n9: // specific language governing permissions and limitations under the License.\n10: //\n11: // Author: Florian Zaruba, ETH Zurich\n12: // Description: Contains SoC information as constants\n13: package ariane_soc;\n14:     // M-Mode Hart, S-Mode Hart\n15:     localparam NumTargets = 2;\n16:     // Uart, SPI, Ethernet and AES\n17:     localparam NumSources = 4;\n18:     localparam PLICIdWidth = 3;\n19:     localparam ParameterBitwidth = PLICIdWidth;\n20: \n21:     typedef enum int unsigned {\n22:         DRAM     = 0,\n23:         GPIO     = 1,\n24:         Ethernet = 2,\n25:         SPI      = 3,\n26:         AES      = 4,    \n27:         UART     = 5,   \n28:         PLIC     = 6,  \n29:         CLINT    = 7, \n30:         PKT      = 8,\n31:         ROM2     = 9,\n32:         ROM      = 10, \n33:         Debug    = 11\n34:     } axi_slaves_t;\n35: \n36:     localparam NB_PERIPHERALS = Debug + 1;\n37: \n38:     localparam logic[63:0] DebugLength    = 64'h1000;\n39:     localparam logic[63:0] ROMLength      = 64'h10000;\n40:     localparam logic[63:0] ROM2Length     = 64'h10000;\n41:     localparam logic[63:0] PKTLength      = 64'h10000;\n42:     localparam logic[63:0] CLINTLength    = 64'hC0000;\n43:     localparam logic[63:0] PLICLength     = 64'h3FF_FFFF;\n44:     localparam logic[63:0] UARTLength     = 64'h111000; \n45:     localparam logic[63:0] AESLength      = 64'h1000;\n46:     localparam logic[63:0] SPILength      = 64'h800000;\n47:     localparam logic[63:0] EthernetLength = 64'h10000;\n48:     localparam logic[63:0] GPIOLength     = 64'h1000;\n49:     localparam logic[63:0] DRAMLength     = 64'h8000000; // 128 MByte of DDR\n50:     localparam logic[63:0] SRAMLength     = 64'h1800000;  // 24 MByte of SRAM\n51:     // Instantiate AXI protocol checkers\n52:     localparam bit GenProtocolChecker = 1'b0;\n53: \n54:     typedef enum logic [63:0] {\n55:         DebugBase    = 64'h0000_0000,\n56:         ROMBase      = 64'h0001_0000,\n57:         ROM2Base     = 64'h0021_0000, \n58:         PKTBase      = 64'h0041_0000, \n59:         CLINTBase    = 64'h0200_0000,\n60:         PLICBase     = 64'h0C00_0000,\n61:         UARTBase     = 64'h1000_0000,\n62:         AESBase      = 64'h1010_0000,  \n63:         SPIBase      = 64'h2000_0000,\n64:         EthernetBase = 64'h3000_0000,\n65:         GPIOBase     = 64'h4000_0000,\n66:         DRAMBase     = 64'h8000_0000\n67:     } soc_bus_start_t;\n68: \n69:     // Different AES Key ID's this information is public.\n70:     localparam logic[63:0] AESKey_0    = 64'h0000;\n71:     localparam logic[63:0] AESKey_1    = 64'h1000;\n72:     localparam logic[63:0] AESKey_2    = 64'h2000;\n73:     localparam logic[63:0] AESKey_3    = 64'h3000;\n74:     localparam logic[63:0] AESKey_4    = 64'h4000;\n75:     localparam logic[63:0] AESKey_5    = 64'h5000;\n76: endpackage",
+      "truncated": false
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 633,
+        "path": "tb/ariane_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"633:         xlnx_axi_clock_converter i_xlnx_axi_clock_converter_spi (\\n634:             .s_axi_aclk     ( clk_i              ),\\n635:             .s_axi_aresetn  ( rst_ni             ),\\n636: \\n637:             .s_axi_awid     ( spi.aw_id          ),\\n638:             .s_axi_awaddr   ( spi.aw_addr[31:0]  ),\\n639:             .s_axi_awlen    ( spi.aw_len         ),\\n640:             .s_axi_awsize   ( spi.aw_size        ),\\n641:             .s_axi_awburst  ( spi.aw_burst       ),\\n642:             .s_axi_awlock   ( spi.aw_lock        ),\\n643:             .s_axi_awcache  ( spi.aw_cache       ),\\n644:             .s_axi_awprot   ( spi.aw_prot        ),\\n645:             .s_axi_awregion ( spi.aw_region      ),\\n646:             .s_axi_awqos    ( spi.aw_qos         ),\\n647:             .s_axi_awvalid  ( spi.aw_valid       ),\\n648:             .s_axi_awready  ( spi.aw_ready       ),\\n649:             .s_axi_wdata    ( spi.w_data         ),\\n650:             .s_axi_wstrb    ( spi.w_strb         ),\\n651:             .s_axi_wlast    ( spi.w_last         ),\\n652:             .s_axi_wvalid   ( spi.w_valid        ),\\n653:             .s_axi_wready   ( spi.w_ready        ),\\n654:             .s_axi_bid      ( spi.b_id           ),\\n655:             .s_axi_bresp    ( spi.b_resp         ),\\n656:             .s_axi_bvalid   ( spi.b_valid        ),\\n657:             .s_axi_bready   ( spi.b_ready        ),\\n658:             .s_axi_arid     ( spi.ar_id          ),\\n659:             .s_axi_araddr   ( spi.ar_addr[31:0]  ),\\n660:             .s_axi_arlen    ( spi.ar_len         ),\\n661:             .s_axi_arsize   ( spi.ar_size        ),\\n662:             .s_axi_arburst  ( spi.ar_burst       ),\\n663:             .s_axi_arlock   ( spi.ar_lock        ),\\n664:             .s_axi_arcache  ( spi.ar_cache       ),\\n665:             .s_axi_arprot   ( spi.ar_prot        ),\\n666:             .s_axi_arregion ( spi.ar_region      ),\\n667:             .s_axi_arqos    ( spi.ar_qos         ),\\n668:             .s_axi_arvalid  ( spi.ar_valid       ),\\n669:             .s_axi_arready  ( spi.ar_ready       ),\\n670:             .s_axi_rid      ( spi.r_id           ),\\n671:             .s_axi_rdata    ( spi.r_data         ),\\n672:             .s_axi_rresp    ( spi.r_resp         ),\\n673:             .s_axi_rlast    ( spi.r_last         ),\\n674:             .s_axi_rvalid   ( spi.r_valid        ),\\n675:             .s_axi_rready   ( spi.r_ready        ),\\n676: \\n677:             .m_axi_awaddr   ( s_axi_spi_awaddr   ),\\n678:             .m_axi_awlen    ( s_axi_spi_awlen    ),\\n679:             .m_axi_awsize   ( s_axi_spi_awsize   ),\\n680:             .m_axi_awburst  ( s_axi_spi_awburst  ),\\n681:             .m_axi_awlock   ( s_axi_spi_awlock   ),\\n682:             .m_axi_awcache  ( s_axi_spi_awcache  ),\\n683:             .m_axi_awprot   ( s_axi_spi_awprot   ),\\n684:             .m_axi_awregion ( s_axi_spi_awregion ),\\n685:             .m_axi_awqos    ( s_axi_spi_awqos    ),\\n686:             .m_axi_awvalid  ( s_axi_spi_awvalid  ),\\n687:             .m_axi_awready  ( s_axi_spi_awready  ),\\n688:             .m_axi_wdata    ( s_axi_spi_wdata    ),\\n689:             .m_axi_wstrb    ( s_axi_spi_wstrb    ),\\n690:             .m_axi_wlast    ( s_axi_spi_wlast    ),\\n691:             .m_axi_wvalid   ( s_axi_spi_wvalid   ),\\n692:             .m_axi_wready   ( s_axi_spi_wready   ),\\n693:             .m_axi_bresp    ( s_axi_spi_bresp    ),\\n694:             .m_axi_bvalid   ( s_axi_spi_bvalid   ),\\n695:             .m_axi_bready   ( s_axi_spi_bready   ),\\n696:             .m_axi_araddr   ( s_axi_spi_araddr   ),\\n697:             .m_axi_arlen    ( s_axi_spi_arlen    ),\\n698:             .m_axi_arsize   ( s_axi_spi_arsize   ),\\n699:             .m_axi_arburst  ( s_axi_spi_arburst  ),\\n700:             .m_axi_arlock   ( s_axi_spi_arlock   ),\\n701:             .m_axi_arcache  ( s_axi_spi_arcache  ),\\n702:             .m_axi_arprot   ( s\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "limit": 310,
+        "offset": 140,
+        "path": "src/axi_node/src/axi_node_intf_wrap.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"140:   logic [NB_SUBORDINATE-1:0][1:0]                   s_slave_r_resp;\\n141:   logic [NB_SUBORDINATE-1:0]                        s_slave_r_last;\\n142:   logic [NB_SUBORDINATE-1:0][AXI_USER_WIDTH-1:0]    s_slave_r_user;\\n143:   logic [NB_SUBORDINATE-1:0]                        s_slave_r_valid;\\n144:   logic [NB_SUBORDINATE-1:0]                        s_slave_r_ready;\\n145: \\n146:   // Signals Used to configure the AXI node\\n147:   logic [NB_REGION-1:0][NB_MANAGER-1:0][AXI_ADDR_WIDTH-1:0] s_start_addr;\\n148:   logic [NB_REGION-1:0][NB_MANAGER-1:0][AXI_ADDR_WIDTH-1:0] s_end_addr;\\n149:   logic [NB_REGION-1:0][NB_MANAGER-1:0]                     s_valid_rule;\\n150:   logic [NB_SUBORDINATE-1:0][NB_MANAGER-1:0]                      s_connectivity_map;\\n151: \\n152: \\n153:   generate\\n154:     genvar i;\\n155:     for(i = 0; i < NB_MANAGER; i++)\\n156:     begin\\n157:       assign                        master[i].aw_id[AXI_ID_WIDTH_INIT-1:0] = s_master_aw_id[i];\\n158:       assign                        master[i].aw_addr                      = s_master_aw_addr[i];\\n159:       assign                        master[i].aw_len                       = s_master_aw_len[i];\\n160:       assign                        master[i].aw_size                      = s_master_aw_size[i];\\n161:       assign                        master[i].aw_burst                     = s_master_aw_burst[i];\\n162:       assign                        master[i].aw_lock                      = s_master_aw_lock[i];\\n163:       assign                        master[i].aw_cache                     = s_master_aw_cache[i];\\n164:       assign                        master[i].aw_prot                      = s_master_aw_prot[i];\\n165:       assign                        master[i].aw_region                    = s_master_aw_region[i];\\n166:       assign                        master[i].aw_user                      = s_master_aw_user[i];\\n167:       assign                        master[i].aw_qos                       = s_master_aw_qos[i];\\n168:       assign                        master[i].aw_valid                     = s_master_aw_valid[i];\\n169:       assign s_master_aw_ready[i] = master[i].aw_ready;\\n170: \\n171:       assign                        master[i].ar_id[AXI_ID_WIDTH_INIT-1:0] = s_master_ar_id[i];\\n172:       assign                        master[i].ar_addr                      = s_master_ar_addr[i];\\n173:       assign                        master[i].ar_len                       = s_master_ar_len[i];\\n174:       assign                        master[i].ar_size                      = s_master_ar_size[i];\\n175:       assign                        master[i].ar_burst                     = s_master_ar_burst[i];\\n176:       assign                        master[i].ar_lock                      = s_master_ar_lock[i];\\n177:       assign                        master[i].ar_cache                     = s_master_ar_cache[i];\\n178:       assign                        master[i].ar_prot                      = s_master_ar_prot[i];\\n179:       assign                        master[i].ar_region                    = s_master_ar_region[i];\\n180:       assign                        master[i].ar_user                      = s_master_ar_user[i];\\n181:       assign                        master[i].ar_qos                       = s_master_ar_qos[i];\\n182:       assign                        master[i].ar_valid                     = s_master_ar_valid[i];\\n183:       assign s_master_ar_ready[i] = master[i].ar_ready;\\n184: \\n185:       assign                        master[i].w_data  = s_master_w_data[i];\\n186:       assign                        master[i].w_strb  = s_master_w_strb[i];\\n187:       assign                        master[i].w_last  = s_master_w_last[i];\\n188:       assign                        master[i].w_user  = s_master_w_user[i];\\n189:       assign                        master[i].w_valid = s_master_w_valid[i];\\n190:       assign s_master_w_ready[\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "limit": 70,
+        "offset": 250,
+        "path": "bootrom/bootrom.sv"
+      },
+      "status": "ok",
+      "path": "bootrom/bootrom.sv",
+      "error": null,
+      "content": "250:         64'h00000000_00000000,\n251:         64'h00008402_07458593,\n252:         64'h00000597_f1402573,\n253:         64'h01f41413_0010041b\n254:     };\n255: \n256:     logic [$clog2(RomSize)-1:0] raddr_q;\n257: \n258:     always_ff @(posedge clk_i) begin\n259:         if (req_i) begin\n260:             if (!we_i) begin\n261:                 raddr_q <= addr_i[$clog2(RomSize)-1+3:3];\n262:             end else begin\n263:                 mem[addr_i[$clog2(RomSize)-1+3:3]] <= wdata_i;\n264:             end\n265:         end\n266:     end\n267: \n268:     // this prevents spurious Xes from propagating into\n269:     // the speculative fetch stage of the core\n270:     assign rdata_o = (raddr_q < RomSize) ? mem[raddr_q] : '0;\n271: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "limit": 210,
+        "offset": 766,
+        "path": "tb/ariane_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"766:     end else begin\\n767:         assign spi_clk_o = 1'b0;\\n768:         assign spi_mosi = 1'b0;\\n769:         assign spi_ss = 1'b0;\\n770: \\n771:         assign irq_sources [1] = 1'b0;\\n772:         assign spi.aw_ready = 1'b1;\\n773:         assign spi.ar_ready = 1'b1;\\n774:         assign spi.w_ready = 1'b1;\\n775: \\n776:         assign spi.b_valid = spi.aw_valid;\\n777:         assign spi.b_id = spi.aw_id;\\n778:         assign spi.b_resp = axi_pkg::RESP_SLVERR;\\n779:         assign spi.b_user = '0;\\n780: \\n781:         assign spi.r_valid = spi.ar_valid;\\n782:         assign spi.r_resp = axi_pkg::RESP_SLVERR;\\n783:         assign spi.r_data = 'hdeadbeef;\\n784:         assign spi.r_last = 1'b1;\\n785:     end\\n786: \\n787: \\n788:     // ---------------\\n789:     // 4. Ethernet\\n790:     // ---------------\\n791:     if (InclEthernet) begin : gen_ethernet\\n792:         wire         mdio_i, mdio_o, mdio_t;\\n793:         logic [3:0]  s_axi_eth_awid;\\n794:         logic [31:0] s_axi_eth_awaddr;\\n795:         logic [7:0]  s_axi_eth_awlen;\\n796:         logic [2:0]  s_axi_eth_awsize;\\n797:         logic [1:0]  s_axi_eth_awburst;\\n798:         logic [3:0]  s_axi_eth_awcache;\\n799:         logic        s_axi_eth_awvalid;\\n800:         logic        s_axi_eth_awready;\\n801:         logic [31:0] s_axi_eth_wdata;\\n802:         logic [3:0]  s_axi_eth_wstrb;\\n803:         logic        s_axi_eth_wlast;\\n804:         logic        s_axi_eth_wvalid;\\n805:         logic        s_axi_eth_wready;\\n806:         logic [3:0]  s_axi_eth_bid;\\n807:         logic [1:0]  s_axi_eth_bresp;\\n808:         logic        s_axi_eth_bvalid;\\n809:         logic        s_axi_eth_bready;\\n810:         logic [3:0]  s_axi_eth_arid;\\n811:         logic [31:0] s_axi_eth_araddr;\\n812:         logic [7:0]  s_axi_eth_arlen;\\n813:         logic [2:0]  s_axi_eth_arsize;\\n814:         logic [1:0]  s_axi_eth_arburst;\\n815:         logic [3:0]  s_axi_eth_arcache;\\n816:         logic        s_axi_eth_arvalid;\\n817:         logic        s_axi_eth_arready;\\n818:         logic [3:0]  s_axi_eth_rid;\\n819:         logic [31:0] s_axi_eth_rdata;\\n820:         logic [1:0]  s_axi_eth_rresp;\\n821:         logic        s_axi_eth_rlast;\\n822:         logic        s_axi_eth_rvalid;\\n823: \\n824:         assign s_axi_eth_awid = '0;\\n825:         assign s_axi_eth_arid = '0;\\n826: \\n827:         // system-bus is 64-bit, convert down to 32 bit\\n828:         xlnx_axi_clock_converter i_xlnx_axi_clock_converter_ethernet (\\n829:             .s_axi_aclk     ( clk_i                  ),\\n830:             .s_axi_aresetn  ( rst_ni                 ),\\n831:             .s_axi_awid     ( ethernet.aw_id         ),\\n832:             .s_axi_awaddr   ( ethernet.aw_addr[31:0] ),\\n833:             .s_axi_awlen    ( ethernet.aw_len        ),\\n834:             .s_axi_awsize   ( ethernet.aw_size       ),\\n835:             .s_axi_awburst  ( ethernet.aw_burst      ),\\n836:             .s_axi_awlock   ( ethernet.aw_lock       ),\\n837:             .s_axi_awcache  ( ethernet.aw_cache      ),\\n838:             .s_axi_awprot   ( ethernet.aw_prot       ),\\n839:             .s_axi_awregion ( ethernet.aw_region     ),\\n840:             .s_axi_awqos    ( ethernet.aw_qos        ),\\n841:             .s_axi_awvalid  ( ethernet.aw_valid      ),\\n842:             .s_axi_awready  ( ethernet.aw_ready      ),\\n843:             .s_axi_wdata    ( ethernet.w_data        ),\\n844:             .s_axi_wstrb    ( ethernet.w_strb        ),\\n845:             .s_axi_wlast    ( ethernet.w_last        ),\\n846:             .s_axi_wvalid   ( ethernet.w_valid       ),\\n847:             .s_axi_wready   ( ethernet.w_ready       ),\\n848:             .s_axi_bid      ( ethernet.b_id          ),\\n849:             .s_axi_bresp    ( ethernet.b_resp        ),\\n850:             .s_axi_bvalid   ( ethernet.b_valid       ),\\n851:             .s_axi_bready   ( ethernet.b_ready       ),\\n852:             .s_axi_arid   \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 6,
+      "tool": "read_file",
+      "args": {
+        "limit": 185,
+        "offset": 259,
+        "path": "src/axi_node/src/axi_node_intf_wrap.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"259:       assign                        slave[j].r_last                      = s_slave_r_last[j];\\n260:       assign                        slave[j].r_user                      = s_slave_r_user[j];\\n261:       assign                        slave[j].r_valid                     = s_slave_r_valid[j];\\n262:       assign s_slave_r_ready[j]   = slave[j].r_ready;\\n263:     end\\n264:   endgenerate\\n265: \\n266:   axi_node\\n267:   #(\\n268:     .AXI_ADDRESS_W      ( AXI_ADDR_WIDTH    ),\\n269:     .AXI_DATA_W         ( AXI_DATA_WIDTH    ),\\n270:     .N_MASTER_PORT      ( NB_MANAGER         ),\\n271:     .N_SLAVE_PORT       ( NB_SUBORDINATE          ),\\n272:     .AXI_ID_IN          ( AXI_ID_WIDTH_TARG ),\\n273:     .AXI_USER_W         ( AXI_USER_WIDTH    ),\\n274:     .N_REGION           ( NB_REGION         )\\n275:   )\\n276:   axi_node_i\\n277:   (\\n278:     .clk                    ( clk                ),\\n279:     .rst_n                  ( rst_n              ),\\n280:     .test_en_i              ( test_en_i          ),\\n281: \\n282:     .slave_awid_i           ( s_slave_aw_id      ),\\n283:     .slave_awaddr_i         ( s_slave_aw_addr    ),\\n284:     .slave_awlen_i          ( s_slave_aw_len     ),\\n285:     .slave_awsize_i         ( s_slave_aw_size    ),\\n286:     .slave_awburst_i        ( s_slave_aw_burst   ),\\n287:     .slave_awlock_i         ( s_slave_aw_lock    ),\\n288:     .slave_awcache_i        ( s_slave_aw_cache   ),\\n289:     .slave_awprot_i         ( s_slave_aw_prot    ),\\n290:     .slave_awregion_i       ( s_slave_aw_region  ),\\n291:     .slave_awqos_i          ( s_slave_aw_qos     ),\\n292:     .slave_awuser_i         ( s_slave_aw_user    ),\\n293:     .slave_awvalid_i        ( s_slave_aw_valid   ),\\n294:     .slave_awready_o        ( s_slave_aw_ready   ),\\n295: \\n296:     .slave_wdata_i          ( s_slave_w_data     ),\\n297:     .slave_wstrb_i          ( s_slave_w_strb     ),\\n298:     .slave_wlast_i          ( s_slave_w_last     ),\\n299:     .slave_wuser_i          ( s_slave_w_user     ),\\n300:     .slave_wvalid_i         ( s_slave_w_valid    ),\\n301:     .slave_wready_o         ( s_slave_w_ready    ),\\n302: \\n303:     .slave_bid_o            ( s_slave_b_id       ),\\n304:     .slave_bresp_o          ( s_slave_b_resp     ),\\n305:     .slave_buser_o          ( s_slave_b_user     ),\\n306:     .slave_bvalid_o         ( s_slave_b_valid    ),\\n307:     .slave_bready_i         ( s_slave_b_ready    ),\\n308: \\n309:     .slave_arid_i           ( s_slave_ar_id      ),\\n310:     .slave_araddr_i         ( s_slave_ar_addr    ),\\n311:     .slave_arlen_i          ( s_slave_ar_len     ),\\n312:     .slave_arsize_i         ( s_slave_ar_size    ),\\n313:     .slave_arburst_i        ( s_slave_ar_burst   ),\\n314:     .slave_arlock_i         ( s_slave_ar_lock    ),\\n315:     .slave_arcache_i        ( s_slave_ar_cache   ),\\n316:     .slave_arprot_i         ( s_slave_ar_prot    ),\\n317:     .slave_arregion_i       ( s_slave_ar_region  ),\\n318:     .slave_aruser_i         ( s_slave_ar_user    ),\\n319:     .slave_arqos_i          ( s_slave_ar_qos     ),\\n320:     .slave_arvalid_i        ( s_slave_ar_valid   ),\\n321:     .slave_arready_o        ( s_slave_ar_ready   ),\\n322: \\n323:     .slave_rid_o            ( s_slave_r_id       ),\\n324:     .slave_rdata_o          ( s_slave_r_data     ),\\n325:     .slave_rresp_o          ( s_slave_r_resp     ),\\n326:     .slave_rlast_o          ( s_slave_r_last     ),\\n327:     .slave_ruser_o          ( s_slave_r_user     ),\\n328:     .slave_rvalid_o         ( s_slave_r_valid    ),\\n329:     .slave_rready_i         ( s_slave_r_ready    ),\\n330: \\n331:     .master_awid_o          ( s_master_aw_id     ),\\n332:     .master_awaddr_o        ( s_master_aw_addr   ),\\n333:     .master_awlen_o         ( s_master_aw_len    ),\\n334:     .master_awsize_o        ( s_master_aw_size   ),\\n335:     .master_awburst_o       ( s_master_aw_burst  ),\\n336:     .master_awlock_o        ( s_master_aw\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 6,
+      "tool": "read_file",
+      "args": {
+        "limit": 65,
+        "offset": 408,
+        "path": "src/axi_node/src/axi_node_intf_wrap.sv"
+      },
+      "status": "ok",
+      "path": "src/axi_node/src/axi_node_intf_wrap.sv",
+      "error": null,
+      "content": "408: \n409: module connectivity_mapping #(\n410:     parameter NB_MANAGER      = 4,\n411:     parameter NB_SUBORDINATE       = 4,\n412:     parameter NB_PRIV_LVL    = 4,   \n413:     parameter PRIV_LVL_WIDTH = 4   \n414:   )(\n415:     input logic [PRIV_LVL_WIDTH-1:0] \t       priv_lvl_i,   \n416:     input logic [NB_SUBORDINATE-1:0][NB_MANAGER-1:0][NB_PRIV_LVL-1:0] access_ctrl_i,  \n417:     \n418:     output logic [NB_SUBORDINATE-1:0][NB_MANAGER-1:0]  connectivity_map_o\n419:   ); \n420: \n421:     \n422:   genvar i,j ; \n423: \n424:   generate\n425:     \n426:     for (i=0; i<NB_SUBORDINATE; i++)\n427:     begin\n428:       \tfor (j=0; j<NB_MANAGER; j++)\n429:       \tbegin\n430: \t  assign connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]) ; \n431:       \tend  \t\t    \t\t      \t\t\n432:     end\n433: \n434:   endgenerate \n435: \n436: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 6,
+      "tool": "read_file",
+      "args": {
+        "limit": 80,
+        "offset": 908,
+        "path": "tb/ariane_peripherals.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_peripherals.sv",
+      "error": null,
+      "content": "908:         xlnx_axi_ethernetlite i_xlnx_axi_ethernetlite (\n909:             .s_axi_aclk    ( clk_i                   ),\n910:             .s_axi_aresetn ( rst_ni                  ),\n911:             .ip2intc_irpt  ( irq_sources[0]          ),\n912:             .s_axi_awid    ( s_axi_eth_awid          ),\n913:             .s_axi_awaddr  ( s_axi_eth_awaddr[12:0]  ),\n914:             .s_axi_awlen   ( s_axi_eth_awlen         ),\n915:             .s_axi_awsize  ( s_axi_eth_awsize        ),\n916:             .s_axi_awburst ( s_axi_eth_awburst       ),\n917:             .s_axi_awcache ( s_axi_eth_awcache       ),\n918:             .s_axi_awvalid ( s_axi_eth_awvalid       ),\n919:             .s_axi_awready ( s_axi_eth_awready       ),\n920:             .s_axi_wdata   ( s_axi_eth_wdata         ),\n921:             .s_axi_wstrb   ( s_axi_eth_wstrb         ),\n922:             .s_axi_wlast   ( s_axi_eth_wlast         ),\n923:             .s_axi_wvalid  ( s_axi_eth_wvalid        ),\n924:             .s_axi_wready  ( s_axi_eth_wready        ),\n925:             .s_axi_bid     ( s_axi_eth_bid           ),\n926:             .s_axi_bresp   ( s_axi_eth_bresp         ),\n927:             .s_axi_bvalid  ( s_axi_eth_bvalid        ),\n928:             .s_axi_bready  ( s_axi_eth_bready        ),\n929:             .s_axi_arid    ( s_axi_eth_arid          ),\n930:             .s_axi_araddr  ( s_axi_eth_araddr[12:0]  ),\n931:             .s_axi_arlen   ( s_axi_eth_arlen         ),\n932:             .s_axi_arsize  ( s_axi_eth_arsize        ),\n933:             .s_axi_arburst ( s_axi_eth_arburst       ),\n934:             .s_axi_arcache ( s_axi_eth_arcache       ),\n935:             .s_axi_arvalid ( s_axi_eth_arvalid       ),\n936:             .s_axi_arready ( s_axi_eth_arready       ),\n937:             .s_axi_rid     ( s_axi_eth_rid           ),\n938:             .s_axi_rdata   ( s_axi_eth_rdata         ),\n939:             .s_axi_rresp   ( s_axi_eth_rresp         ),\n940:             .s_axi_rlast   ( s_axi_eth_rlast         ),\n941:             .s_axi_rvalid  ( s_axi_eth_rvalid        ),\n942:             .s_axi_rready  ( s_axi_eth_rready        ),\n943:             .phy_tx_clk    ( eth_txck                ),\n944:             .phy_rx_clk    ( eth_rxck                ),\n945:             .phy_crs       ( 1'b0                    ),\n946:             .phy_dv        ( eth_rxctl               ),\n947:             .phy_rx_data   ( eth_rxd                 ),\n948:             .phy_col       ( 1'b0                    ),\n949:             .phy_rx_er     ( 1'b0                    ),\n950:             .phy_rst_n     ( eth_rst_n               ),\n951:             .phy_tx_en     ( eth_tx_en               ),\n952:             .phy_tx_data   ( eth_txd                 ),\n953:             .phy_mdio_i    ( mdio_i                  ),\n954:             .phy_mdio_o    ( mdio_o                  ),\n955:             .phy_mdio_t    ( mdio_t                  ),\n956:             .phy_mdc       ( eth_mdc                 )\n957:         );\n958:         IOBUF mdio_io_iobuf (.I (mdio_o), .IO(mdio), .O (mdio_i), .T (mdio_t));\n959:     end else begin\n960:         assign irq_sources [2] = 1'b0;\n961:         assign ethernet.aw_ready = 1'b1;\n962:         assign ethernet.ar_ready = 1'b1;\n963:         assign ethernet.w_ready = 1'b1;\n964: \n965:         assign ethernet.b_valid = ethernet.aw_valid;\n966:         assign ethernet.b_id = ethernet.aw_id;\n967:         assign ethernet.b_resp = axi_pkg::RESP_SLVERR;\n968:         assign ethernet.b_user = '0;\n969: \n970:         assign ethernet.r_valid = ethernet.ar_valid;\n971:         assign ethernet.r_resp = axi_pkg::RESP_SLVERR;\n972:         assign ethernet.r_data = 'hdeadbeef;\n973:         assign ethernet.r_last = 1'b1;\n974:     end\n975: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 7,
+      "tool": "model_message",
+      "args": {},
+      "status": "ok",
+      "content": "```json\n{\n  \"scope_id\": \"current_rtl_scope_permission_obligations\",\n  \"results\": [\n    {\n      \"obligation_id\": \"PERM_AES_READBACK_SECRET_STATE\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"Software-visible AXI/APB/register bus requester reaching the AES window through ariane_peripherals; in the harness this includes the core AXI master and the debug AXI master if permitted by the AXI node.\",\n      \"operation\": \"read/expose\",\n      \"object\": \"AES key_in/key_big, AES inter_state, and readable plaintext/config p_c registers.\",\n      \"expected_guard\": \"Secret key material and intermediate AES state should not be directly software-readable, or should be protected by an explicit privilege/debug/lifecycle/lock authorization policy beyond ordinary address decode.\",\n      \"observed_behavior\": \"aes_wrapper directly maps key_big slices and inter_state slices to external_bus_io.rdata based only on external_bus_io.addr[6:2]. external_bus_io.ready is tied high and error is tied low. No read-enable, privilege, debug, lock, lifecycle, or ct_valid/start guard is used in the read mux. The AES key source is key_reg_out[0] from rom2 via ariane_peripherals, and key_big is assigned directly from key_in.\",\n      \"path\": \"tb/ariane_testharness.sv AXI xbar master[ariane_soc::AES] -> tb/ariane_peripherals.sv aes AXI -> axi2apb_64_32 -> apb_to_reg -> reg_bus_aes -> src/aes/aes_wrapper.sv external_bus_io.rdata\",\n      \"state_condition\": \"AES start, p_c, and state reset to 0 on rst_ni deassertion; key_big is combinationally key_in and is not cleared in aes_wrapper. inter_state is AES-core output and is readable at addresses 22-25 regardless of start/ct_valid. ct_valid is only separately readable at address 11 and does not guard inter_state readback.\",\n      \"impact\": \"A requester able to access the AES MMIO window can read the AES key and intermediate state words, exposing cryptographic secret state.\",\n      \"rtl_evidence\": [\n        \"src/aes/aes_wrapper.sv:51-52 ties external_bus_io.ready=1 and error=0.\",\n        \"src/aes/aes_wrapper.sv:57 assigns key_big = key_in.\",\n        \"src/aes/aes_wrapper.sv:107-149 implements a combinational read case solely on external_bus_io.addr[6:2].\",\n        \"src/aes/aes_wrapper.sv:128-139 return key_big[191:0] in six 32-bit slices at read cases 16-21.\",\n        \"src/aes/aes_wrapper.sv:140-147 return inter_state[127:0] in four 32-bit slices at read cases 22-25.\",\n        \"src/aes/aes_wrapper.sv:153-161 connects key_big to AES core .key and inter_state to AES core output.\",\n        \"tb/ariane_peripherals.sv:449-469 connects aes AXI/APB path to aes_wrapper and passes .key_in(key_reg_out[0]).\",\n        \"tb/ariane_testharness.sv:473-500 maps AESBase/AESLength into the AXI node address map.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM_AES_CONFIG_TRIGGER_WRITE_GUARD\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"Software-visible APB/register bus requester reaching the AES window.\",\n      \"operation\": \"write/configure/trigger\",\n      \"object\": \"AES start register and p_c[0:3] data registers; state[0:3] registers in aes_wrapper are also writable although the instantiated AES core uses constant state_iv instead of state_big.\",\n      \"expected_guard\": \"Writes that configure AES operation or trigger encryption should be limited to authorized software or protected by a lock/access-control policy; writes during active AES operation should be blocked or well-defined.\",\n      \"observed_behavior\": \"aes_wrapper updates start, p_c, and state registers whenever external_bus_io.write is asserted and address matches the case. There is no local privilege, lock, lifecycle, ct_valid/busy, or active-operation guard. Upstream AXI address/privilege mediation may exist in axi_node_intf_wrap, but the AES register block itself accepts writes unconditionally once reached.\",\n      \"path\": \"AXI requester -> ariane_peripherals AES axi2apb_64_32 -> apb_to_reg -> aes_wrapper external_bus_io.write -> start/p_c/state registers -> AES core start/p_c_big/key_big\",\n      \"state_condition\": \"On reset, start, p_c[0:3], and state[0:3] are cleared to 0. start is assigned from external_bus_io.wdata[0] and is not self-cleared in aes_wrapper. No write-during-operation exclusion is visible.\",\n      \"impact\": \"An MMIO requester with access to the AES window can trigger AES operations and overwrite plaintext/configuration inputs, including while the AES core may be active.\",\n      \"rtl_evidence\": [\n        \"src/aes/aes_wrapper.sv:61-74 reset start, p_c, and state registers to 0.\",\n        \"src/aes/aes_wrapper.sv:75-99 writes registers under only else if(external_bus_io.write) and case(external_bus_io.addr[6:2]).\",\n        \"src/aes/aes_wrapper.sv:77-86 write start and p_c[3:0].\",\n        \"src/aes/aes_wrapper.sv:89-96 write state[3:0].\",\n        \"src/aes/aes_wrapper.sv:153-159 connects p_c_big and start into the AES core.\",\n        \"tb/ariane_peripherals.sv:383-469 shows AXI-to-APB-to-regbus AES path and aes_wrapper instantiation.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM_JTAG_DMI_DEBUG_ACCESS_AUTH\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"JTAG/DMI debug requester through SimJTAG/dmi_jtag or SimDTM into dm_top.\",\n      \"operation\": \"read/write/control via debug\",\n      \"object\": \"SoC memory/peripheral address space reachable through the debug module AXI master, plus core debug control via debug_req_core.\",\n      \"expected_guard\": \"Debug access should be mediated by debug authentication, lifecycle/test-mode enable, or explicit access-control policy before core debug requests or debug AXI transactions are issued.\",\n      \"observed_behavior\": \"The harness exposes two debug input paths. SimDTM is instantiated by default when InclSimDTM is 1 and feeds DMI requests directly into dm_top. JTAG path includes dmi_jtag with jtag_key input, but wrapper-level evidence does not show lifecycle/test authorization; test_en is hardwired 0. dm_top produces debug_req_core, ndmreset, and AXI master requests. Debug AXI master is connected as slave[1] to the AXI node, so AXI transactions are at least subject to the same connectivity_map as other requesters. However, the core debug request/reset path is produced directly by dm_top, and the visible wrapper does not show authentication gating for SimDTM or lifecycle limitation.\",\n      \"path\": \"SimJTAG -> dmi_jtag -> debug_req mux -> dm_top DMI; or SimDTM -> debug_req mux -> dm_top DMI; dm_top -> debug_req_core/ndmreset and dm_axi_m_req -> axi_master_connect -> slave[1] -> axi_node_intf_wrap -> SoC masters\",\n      \"state_condition\": \"init_done is assigned rst_ni. test_en is assigned 1'b0. dmi_req_valid from SimDTM is available when InclSimDTM is true. jtag_enable plusarg selects JTAG versus SimDTM. ndmreset is generated by dm_top and feeds reset generation.\",\n      \"impact\": \"In the visible top-level wiring, a debug requester can reach the debug module and potentially control the core and issue bus transactions without an evident lifecycle/debug-authentication gate in the wrapper.\",\n      \"rtl_evidence\": [\n        \"tb/ariane_testharness.sv:74 assigns test_en = 1'b0.\",\n        \"tb/ariane_testharness.sv:112-118 multiplexes JTAG DMI and SimDTM DMI into debug_req/debug_req_valid.\",\n        \"tb/ariane_testharness.sv:121-133 instantiates SimJTAG.\",\n        \"tb/ariane_testharness.sv:135-154 instantiates dmi_jtag with jtag_key, testmode_i(test_en), and outputs jtag_dmi_req/jtag_req_valid.\",\n        \"tb/ariane_testharness.sv:161-175 instantiates SimDTM and connects debug_req_valid/ready, addr, op, data directly to DMI request signals.\",\n        \"tb/ariane_testharness.sv:186-213 instantiates dm_top producing ndmreset_o, debug_req_o, and axi_m_req_o.\",\n        \"tb/ariane_testharness.sv:215 connects dm_axi_m_req through axi_master_connect to slave[1].\",\n        \"tb/ariane_testharness.sv:465-472 connects slave[1] into axi_node_intf_wrap with access_ctrl_i and priv_lvl_i.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM_DEBUG_R\n[TRUNCATED]",
+      "truncated": true
+    }
+  ]
+}

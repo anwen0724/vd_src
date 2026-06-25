@@ -1,0 +1,230 @@
+{
+  "scope_id": "ariane_csr_regfile_integration",
+  "obligations": [
+    {
+      "obligation_id": "OBL-CSR-PRIV-CHK",
+      "reason": "CSR writes must be restricted to the privilege level defined by the CSR address. The csr_regfile module receives csr_addr, csr_wdata, and csr_we but the visible RTL may not include a privilege comparison.",
+      "subject": "CPU pipeline (commit stage after issue and execute)",
+      "operation": "write",
+      "object": "privileged CSRs (MSTATUS, MIE, MEPC, SATP, etc.)",
+      "expected_guard": "current privilege level must be >= required privilege (M-mode for M*; S-mode for S*; U-mode for U-accessible CSRs)",
+      "candidate_path": "commit stage → csr_we / csr_wdata → csr_regfile; csr_addr determines target register; privilege check missing or insufficient",
+      "state_conditions_to_check": [
+        "current privilege mode (mstatus.MPP or equivalent)",
+        "csr_we generation logic",
+        "whether reset forces safe state"
+      ],
+      "required_evidence_slots": [
+        "signal that carries the current privilege level",
+        "comparison logic against required CSR privilege",
+        "bypass paths (debug, traps)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Privilege escalation"
+      ],
+      "priority": "high",
+      "uncertainty": "need to confirm presence of privilege check and scope of mstatus.MPP vs architectural privilege mode"
+    },
+    {
+      "obligation_id": "OBL-DEBUG-WRITE-BYPASS",
+      "reason": "Debug paths often bypass normal access control. The csr_regfile has debug_req_i and debug_mode_q, and can directly assert set_debug_pc_o and dret. A debug request might enable arbitrary CSR writes without privilege checks.",
+      "subject": "debug interface (debug_req_i)",
+      "operation": "write / override",
+      "object": "any CSR (including mstatus, mie, dcsr, dpc)",
+      "expected_guard": "authentication or debug state machine must ensure only authorized external access, and must not bypass privilege locks (TSR, TW, TVM)",
+      "candidate_path": "debug_req_i → debug_mode_q → set_debug_pc_o, or internal csr_we generation bypassing privilege check; debug_req_i may directly influence csr_we or write-enable logic",
+      "state_conditions_to_check": [
+        "debug_req_i assertion",
+        "debug_mode_q activation",
+        "csr_we generation during debug mode",
+        "lock bits (TSR, TW, TVM) state"
+      ],
+      "required_evidence_slots": [
+        "connection from debug_req_i to csr_we or csr_wdata mux",
+        "debug mode state machine",
+        "any auth signal before debug entry"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "unknown if debug_req_i directly drives write enables, or only initiates a sequence"
+    },
+    {
+      "obligation_id": "OBL-LOCK-BIT-ENFORCE",
+      "reason": "The TSR, TW, TVM bits in mstatus (or sstatus) are present as signals in riscv_pkg. They should lock certain supervisor operations. If csr_regfile does not check these bits, supervisor-mode access to protected CSRs could be illegal.",
+      "subject": "supervisor-mode CSR instruction (through commit stage)",
+      "operation": "write / read",
+      "object": "CSRs protected by TSR (e.g., sstatus?), TW (timeout), TVM (virtual memory)",
+      "expected_guard": "when TSR=1, supervisor writes to sstatus.SPP or related bits should be blocked; similarly for TW/TVM",
+      "candidate_path": "csr_regfile case statement for CSR write; csr_we set but no check of tvm_o, tw_o, tsr_o signals",
+      "state_conditions_to_check": [
+        "TSR/TW/TVM bits value",
+        "current privilege mode (should be S-mode)",
+        "whether the write is a CSR write to the relevant register"
+      ],
+      "required_evidence_slots": [
+        "tvm_o, tw_o, tsr_o outputs",
+        "write-enable expressions for target CSRs",
+        "any lock‑bit override during debug"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "exact mapping of TSR/TW/TVM to specific CSR write restrictions needs RISC-V spec confirmation but signals exist"
+    },
+    {
+      "obligation_id": "OBL-DEBUG-CSR-ACCESS-CONDITION",
+      "reason": "Debug CSRs (DCSR, DPC, DSCRATCH0/1) should only be readable/writable when debug mode is active. Otherwise, normal code might read/write them and leak or corrupt debug state.",
+      "subject": "CPU (non-debug mode) attempting to access debug CSRs",
+      "operation": "read/write",
+      "object": "DCSR, DPC, DSCRATCH0/1",
+      "expected_guard": "access only allowed when debug_mode_q is asserted; otherwise raise illegal instruction exception or ignore",
+      "candidate_path": "csr_addr_i matches debug CSR addresses; csr_we/csr_rdata logic does not gate on debug_mode",
+      "state_conditions_to_check": [
+        "debug_mode_q value",
+        "csr_we for debug CSRs",
+        "read mux for csr_rdata"
+      ],
+      "required_evidence_slots": [
+        "debug_mode_q signal",
+        "select lines for CSR read/write in csr_regfile",
+        "exception generation for illegal access"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "unknown if exception is raised; may simply ignore writes"
+    },
+    {
+      "obligation_id": "OBL-RESET-STATE-SECURITY-CSR",
+      "reason": "Security-critical CSRs must have safe reset defaults to prevent unauthorized operations before software configures them. For instance, mstatus.MIE should be 0, lock bits should be 0, SATP should be in bare mode.",
+      "subject": "reset logic",
+      "operation": "reset",
+      "object": "mstatus, mie, satp, pmpcfg, etc.",
+      "expected_guard": "upon reset, machine-mode CSRs must be initialized to a known-secure state (MIE=0, MPRV=0, SATP.MODE=0, PMP entries disabled)",
+      "candidate_path": "rst_ni deassertion sets flip-flops; check initial values in definition of _q regs",
+      "state_conditions_to_check": [
+        "reset value of mstatus_q, mie_q, satp_q, pmpcfg_q",
+        "synchronization of reset deassert with clock"
+      ],
+      "required_evidence_slots": [
+        "flop initial values in RTL",
+        "reset sequencing (rst_ni usage)"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "reset values are not explicitly shown in the fact layer, need RTL inspection"
+    },
+    {
+      "obligation_id": "OBL-PERF-COUNT-ACCESS",
+      "reason": "Performance counters can contain sensitive micro-architectural data. The mcounteren CSR controls access from lower privilege modes. The csr_regfile outputs perf_we_o, perf_data_o, perf_addr_o to the performance counter module, but the privilege check might be bypassed.",
+      "subject": "software (U-mode or S-mode) reading performance counters",
+      "operation": "read",
+      "object": "hardware performance counters (cycles, instret, cache misses)",
+      "expected_guard": "mcounteren bits should gate read access based on current privilege; the CSR access path should enforce this before returning csr_rdata_o",
+      "candidate_path": "csr_rdata_o formation for performance counter CSRs; perf_we_o/perf_data_i path; missing mcounteren check",
+      "state_conditions_to_check": [
+        "mcounteren register value",
+        "current privilege mode",
+        "read enable for performance counter CSR addresses"
+      ],
+      "required_evidence_slots": [
+        "mcounteren bit selection in csr_rdata mux",
+        "privilege level comparison",
+        "perf_we_o/perf_addr_o/perf_data_o signaling"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Side-channel (performance counter leakage)"
+      ],
+      "priority": "medium",
+      "uncertainty": "whether performance counters are internally readable by U-mode is a configuration choice, but default should be secure."
+    },
+    {
+      "obligation_id": "OBL-FLAGS-WRITE-PRIV",
+      "reason": "The floating-point flags (fflags) and rounding mode (frm) can be written via CSR instructions. They should be protected based on the FS field in mstatus. The visible signal csr_write_fflags_i and dirty_fp_state_i suggest a path that might bypass the FS check.",
+      "subject": "any CSR write targeting ffLags/FCSR",
+      "operation": "write",
+      "object": "fflags, frm, fcsr",
+      "expected_guard": "write only allowed if FS != Off; additionally, privilege level restrictions",
+      "candidate_path": "csr_write_fflags_i → control of fflags; does it check FS? Or via csr_regfile case statement without FS condition?",
+      "state_conditions_to_check": [
+        "FS bits (fs) in mstatus",
+        "csr_write_fflags_i assertion",
+        "privilege mode"
+      ],
+      "required_evidence_slots": [
+        "FS selection logic",
+        "write enable for fflags CSR",
+        "csr_write_fflags_i source"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure (floating-point context leakage)"
+      ],
+      "priority": "medium",
+      "uncertainty": "fs field handling may be elsewhere; csr_write_fflags_i is a separate signal possibly from FPU, needs inspection"
+    },
+    {
+      "obligation_id": "OBL-DEBUG-REQ-CSR-WE",
+      "reason": "The debug_req signal (ariane module) is gated with ~amo_valid_commit, but it might directly set a write-enable for CSRs in the csr_regfile without passing through the normal privilege-checked path.",
+      "subject": "external debug request (debug_req_i)",
+      "operation": "write",
+      "object": "CSRs",
+      "expected_guard": "debug_req should only enable CSR accesses after proper debug state machine transitions and authentication, not directly assert csr_we",
+      "candidate_path": "debug_req_i -> debug_req signal -> csr_we generation in csr_regfile; side-channel via set_debug_pc or dret",
+      "state_conditions_to_check": [
+        "debug_req signal generation at ariane top",
+        "csr_we source in csr_regfile (is it purely from commit stage?)"
+      ],
+      "required_evidence_slots": [
+        "signal driving csr_we",
+        "any combinational path from debug_req_i to csr_we"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/ariane.sv",
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "csr_we generation not visible in fact layer; must be verified in RTL"
+    }
+  ]
+}

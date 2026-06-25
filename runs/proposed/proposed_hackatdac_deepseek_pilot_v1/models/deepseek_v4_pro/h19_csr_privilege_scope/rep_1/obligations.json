@@ -1,0 +1,215 @@
+{
+  "scope_id": "ariane_csr_regfile_scope",
+  "obligations": [
+    {
+      "obligation_id": "OBL-001",
+      "reason": "Debug interface can access CSRs; if it bypasses privilege checks without proper authentication, sensitive machine-mode state could be altered by an external debugger.",
+      "subject": "external debugger through debug_req_i",
+      "operation": "write",
+      "object": "machine-mode CSRs (e.g., mstatus, mepc, mcause, mtvec, mie, debug CSRs dcsr, dpc)",
+      "expected_guard": "debug authentication/authorization state (e.g., debug unlock) before granting CSR write access, or privilege-level check even in debug mode for certain CSRs",
+      "candidate_path": "debug_req_i → debug_mode_q → CSR write path in csr_regfile (csr_we, csr_wdata) without privilege check",
+      "state_conditions_to_check": [
+        "debug_mode_q == 1",
+        "absence of debug authentication signal being checked before CSR write",
+        "whether csr_we is qualified by current privilege level when in debug mode"
+      ],
+      "required_evidence_slots": [
+        "subject: debug_req_i / debug_mode_q",
+        "operation: CSR write from debugger",
+        "object: protected CSRs (mstatus, mepc, etc.)",
+        "expected guard: debug authentication or limited access",
+        "observed behavior: write succeeds without authentication",
+        "path: from debug_req_i to csr_we generation in csr_regfile",
+        "state condition: debug_mode_q active, auth state missing",
+        "impact: unauthorized modification of processor security state",
+        "source locations: csr_regfile.sv signals debug_mode_q, csr_we, CSR address decode"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "No debug authentication signal (e.g., debug unlock) visible in fact layer; need to verify if one exists and is used"
+    },
+    {
+      "obligation_id": "OBL-002",
+      "reason": "User-mode code should not be able to directly write to machine-mode CSRs; a missing privilege check would allow privilege escalation.",
+      "subject": "CPU instruction with CSR write (e.g., CSRRW) executed in user mode (umode_i == 1)",
+      "operation": "write",
+      "object": "machine-mode CSRs (mstatus, mepc, mie, etc.) and supervisor-mode CSRs if in user mode",
+      "expected_guard": "privilege-level check: current PRIV_LVL_U must raise illegal instruction exception and prevent write",
+      "candidate_path": "instruction decode → csr_we generation in csr_regfile → write to CSR registers without checking PRIV_LVL_U",
+      "state_conditions_to_check": [
+        "umode_i == 1 or current privilege level is U",
+        "csr_we is asserted for machine-mode CSR address",
+        "read_access_exception or similar exception not generated"
+      ],
+      "required_evidence_slots": [
+        "subject: user-mode CSR instruction",
+        "operation: CSR write (csr_we=1)",
+        "object: machine-mode CSR",
+        "expected guard: privilege-level exception",
+        "observed behavior: write proceeds or exception missing",
+        "path: fu_op/csr_addr_i to csr_we and exception logic",
+        "state condition: U-mode, CSR address >= 0x300",
+        "impact: user code can gain machine-mode control",
+        "source locations: csr_regfile.sv around csr_we, read_access_exception, privilege check"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Privilege check logic for CSR writes not completely visible; need to examine csr_regfile implementation"
+    },
+    {
+      "obligation_id": "OBL-003",
+      "reason": "Debug interface may read CSRs containing sensitive information (e.g., exception PC, trap values) without authentication, leaking state.",
+      "subject": "external debugger through debug_req_i",
+      "operation": "read",
+      "object": "sensitive CSRs (mepc, mcause, mtval, sepc, stval, dpc, debug scratch registers)",
+      "expected_guard": "debug authentication before granting read access to non-debug CSRs, or restriction that debug mode cannot read certain CSRs without proper privilege",
+      "candidate_path": "debug_req_i → debug CSR read mux (csr_rdata_o) → output to debugger without authentication check",
+      "state_conditions_to_check": [
+        "debug_mode_q == 1",
+        "absence of auth check on CSR read path",
+        "csr_rdata_o exposes mepc/mcause values"
+      ],
+      "required_evidence_slots": [
+        "subject: debug_req_i",
+        "operation: CSR read",
+        "object: mepc, mcause, etc.",
+        "expected guard: authentication or access policy",
+        "observed behavior: read returns values",
+        "path: from CSR read mux to csr_rdata_o",
+        "state condition: debug_mode_q, no lock",
+        "impact: information disclosure of processor state",
+        "source locations: csr_regfile.sv CSR read logic"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "It is unclear whether RISC-V debug spec permits unrestricted CSR reads; need to verify desired security policy"
+    },
+    {
+      "obligation_id": "OBL-004",
+      "reason": "The TSR, TW, TVM bits in mstatus enforce hypervisor-like S-mode restrictions; if they can be cleared by lower privilege modes or bypassed by debug, supervisor isolation is broken.",
+      "subject": "supervisor-mode code or debug interface",
+      "operation": "clear/write",
+      "object": "mstatus TSR, TW, TVM bits",
+      "expected_guard": "only machine mode (or trusted firmware) may clear these bits; debug should not bypass without authentication",
+      "candidate_path": "CSR write to mstatus in csr_regfile without checking current privilege mode, or debug path directly writing to these fields",
+      "state_conditions_to_check": [
+        "current privilege level != M",
+        "csr_we to mstatus and write to TSR/TW/TVM fields",
+        "debug_mode_q == 1 and write via debug"
+      ],
+      "required_evidence_slots": [
+        "subject: S-mode or debugger",
+        "operation: write to mstatus.TSR/TW/TVM",
+        "object: mstatus register bits",
+        "expected guard: M-mode only",
+        "observed behavior: write succeeds",
+        "path: csr_we and address decode to mstatus, bit-level update",
+        "state condition: privilege or debug mode",
+        "impact: S-mode control over hypervisor protections",
+        "source locations: csr_regfile.sv mstatus write logic, privilege check"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm if TSR/TW/TVM are write-protected after being set; dependency on mstatus field update mechanism"
+    },
+    {
+      "obligation_id": "OBL-005",
+      "reason": "Performance monitor counters (cycle, instret, etc.) and their enable bits (mcounteren/scounteren) may leak timing information or allow covert channels if user mode can read them without appropriate enable.",
+      "subject": "user-mode software",
+      "operation": "read",
+      "object": "performance counters (cycle, instret) and delegated CSRs (cycle/instret read-only aliases)",
+      "expected_guard": "mcounteren/scounteren bits must be set to allow user-mode read; otherwise illegal instruction exception",
+      "candidate_path": "csr_addr_i decode for cycle/instret CSRs, read mux, and exception logic when mcounteren bit is zero",
+      "state_conditions_to_check": [
+        "umode_i == 1",
+        "mcounteren (or scounteren) respective bit is 0",
+        "csr_rdata_o returns counter value and no exception raised"
+      ],
+      "required_evidence_slots": [
+        "subject: user-mode CSR read",
+        "operation: read cycle/instret",
+        "object: cycle_q, instret_q",
+        "expected guard: counter enable bits",
+        "observed behavior: read succeeds without exception",
+        "path: CSR read logic, counteren check",
+        "state condition: U-mode, counteren=0",
+        "impact: information leakage of system activity",
+        "source locations: csr_regfile.sv counter code, read_access_exception generation"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "include/riscv_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Not all counter enable logic visible; need to inspect mcounteren/scounteren implementation"
+    },
+    {
+      "obligation_id": "OBL-006",
+      "reason": "After reset, critical security state (debug enable, privilege level, lock bits) must be safe; a debug-req immediately after reset could hijack boot if debug mode is not correctly gated.",
+      "subject": "external debugger asserting debug_req_i shortly after reset",
+      "operation": "enter debug mode",
+      "object": "CPU execution flow (PC, privilege state)",
+      "expected_guard": "debug mode should be disabled until a secure boot sequence explicitly enables it, or an authentication handshake is completed",
+      "candidate_path": "debug_req_i → debug_mode_q (and set_debug_pc_o) without a 'debug authorized' state or lifecycle state check",
+      "state_conditions_to_check": [
+        "rst_ni inactive",
+        "debug_req_i active",
+        "debug_mode_q set to 1 before any secure software lock",
+        "no debug unlock or lifecycle fuse check present"
+      ],
+      "required_evidence_slots": [
+        "subject: external debugger",
+        "operation: debug entry via debug_req_i",
+        "object: execution control, PC",
+        "expected guard: debug disable/lock until authorized",
+        "observed behavior: debug mode becomes active immediately",
+        "path: debug_req_i to debug_mode_q transition",
+        "state condition: reset just completed, no firmware lock",
+        "impact: bypass secure boot and gain full control",
+        "source locations: csr_regfile.sv debug_mode_q, set_debug_pc_o"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/ariane.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Debug / JTAG / Test Access"
+      ],
+      "priority": "high",
+      "uncertainty": "No lifecycle state or debug authorization signal visible; core may rely on external pin/permanent disable which is not in this scope"
+    }
+  ]
+}

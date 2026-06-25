@@ -1,0 +1,335 @@
+{
+  "analysis_summary": "The proposed method produced 6 finding(s) from 10 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "potential_warning",
+      "summary": "If any wrapper uses debug_mode_i to bypass lock, it constitutes a lock bypass vulnerability.",
+      "vulnerability_category": "write to locked peripheral register / registers of peripherals protected by reglk_ctrl bits / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: debug interface or CPU in debug mode Operation: write to locked peripheral register Object: registers of peripherals protected by reglk_ctrl bits Expected guard: reglk_ctrl bit must block write unless explicitly unlocked; debug_mode_i must not override. Observed behavior: reglk_ctrl bits are passed to peripheral wrappers (e.g., rst_wrapper, aes_wrapper) via .reglk_ctrl_i, and debug_mode_i is also provided. However, the internal gating logic of these wrapper modules is not available for inspection. Path: reglk_ctrl bit → peripheral wrapper → (unknown logic) → register write enable Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Potential unauthorized write to locked peripherals if wrapper logic ignores lock when debug_mode_i is high.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Source of rst_wrapper, aes_wrapper, hmac_wrapper, etc. not available in the provided files. Cannot determine if debug_mode_i overrides reglk_ctrl.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "potential_warning",
+      "summary": "Potential unauthorized fuse read if pkt_wrapper access control is missing or can be bypassed.",
+      "vulnerability_category": "read fuse_mem contents / fuse_mem internal array / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any bus master targeting fuse_mem address range Operation: read fuse_mem contents Object: fuse_mem internal array Expected guard: fuse read restricted to trusted source (e.g., after unlock, high privilege). Observed behavior: fuse_mem is accessed via pkt_wrapper which receives acct_ctrl_c[priv_lvl_i][5] and reglk_ctrl[5*8+7:5*8]. The pkt_wrapper generates fuse_req and routes rdata back. The internal access control logic of pkt_wrapper is not visible. Path: Bus request → pkt_wrapper (acct_ctrl check) → fuse_req → fuse_mem Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If pkt_wrapper does not enforce privilege/lock, fuse data may be read by unauthorized bus masters.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "pkt_wrapper internal logic not available. Cannot verify that acc_ctrl check is enforced.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "potential_warning",
+      "summary": "acc_ctrl might be writable without sufficient privilege if acct_wrapper does not enforce it.",
+      "vulnerability_category": "write to acc_ctrl configuration bits / acc_ctrl register array / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: CPU store instruction targeting acc_ctrl address range Operation: write to acc_ctrl configuration bits Object: acc_ctrl register array Expected guard: only machine-mode or equivalent privilege can modify acc_ctrl Observed behavior: acc_ctrl is updated by acct_wrapper which receives acc_ctrl_c[priv_lvl_i][6] and we_flag_0. The internal logic of acct_wrapper is not visible. Path: Bus write → acct_wrapper → acc_ctrl register update Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If not properly gated, unprivileged write could change access permissions.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "acct_wrapper source not available.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "potential_warning",
+      "summary": "reglk_ctrl reset value unknown; could be insecure.",
+      "vulnerability_category": "reset of reglk_ctrl and security state / reglk_ctrl register array and security signals / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: system reset Operation: reset of reglk_ctrl and security state Object: reglk_ctrl register array and security signals Expected guard: reglk_ctrl bits should reset to locked (1) for protected peripherals; jtag_unlock reset to 0. Observed behavior: reglk_ctrl is output from reglk_wrapper (i_reglk_wrapper). The reset logic inside reglk_wrapper is not accessible. jtag_unlock in dmi_jtag is driven by pass_check; pass_check defaults to 0, so jtag_unlock resets to 0. Path: Reset → reglk_wrapper internal → reglk_ctrl output; dmi_jtag → pass_check → jtag_unlock. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If reglk_ctrl resets to unlocked, there is a window of vulnerability.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "reglk_wrapper source not available.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "Hardcoded key_hash_bypass_i=1 violates the expected guard; may expose HMAC state. Should be tied to 0 or controlled via secure register.",
+      "vulnerability_category": "assert key_hash_bypass_i=1 / HMAC internal key hash computation / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any source that drives key_hash_bypass_i Operation: assert key_hash_bypass_i=1 Object: HMAC internal key hash computation Expected guard: key_hash_bypass_i must be assertable only by trusted source, tied to 0 in production. Observed behavior: In dmi_jtag, key_hash_bypass_i is hardwired to 1'b1 (line 327). This permanently enables HMAC bypass mode, weakening the HMAC used for JTAG password verification. Path: dmi_jtag → hmac instance with .key_hash_bypass_i(1'h1) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Reduces security of HMAC used in JTAG unlock; may allow offline attacks on the password hash. Bypasses the key hashing step, potentially exposing inner HMAC state.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "debug_mode_i is not locked behind JTAG authentication, allowing potential lock bypass in debug mode.",
+      "vulnerability_category": "assertion of debug_mode_i / write/read access control logic that uses debug_mode_i as permission override / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: source of debug_mode_i Operation: assertion of debug_mode_i Object: write/read access control logic that uses debug_mode_i as permission override Expected guard: debug_mode_i must be gated by jtag_unlock or other authentication signal. Observed behavior: debug_mode_i is directly connected to peripheral wrappers (e.g., rst_wrapper) without any gating by jtag_unlock. The signal is an input port of riscv_peripherals (likely from CPU debug mode). There is no AND gate with jtag_unlock. Path: debug_mode_i → riscv_peripherals input → .debug_mode_i ( wrappers ) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "If wrappers use debug_mode_i to override lock/access controls, unauthenticated debug could bypass security.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Need to inspect wrappers to see if debug_mode_i actually overrides locks; no gating by jtag_unlock seen.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

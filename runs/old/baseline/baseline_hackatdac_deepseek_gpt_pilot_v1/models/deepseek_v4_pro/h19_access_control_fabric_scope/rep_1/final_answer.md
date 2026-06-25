@@ -1,0 +1,155 @@
+{
+  "analysis_summary": "This analysis covers four RTL source files under the hackatdac19 access control fabric scope. The design implements an AXI-based SoC with an access control fabric (axi_node_intf_wrap), a ROM2 module for secure key/configuration storage, and a test harness. Three permission-related security vulnerabilities were identified: (1) ROM2 secure registers are writable at runtime via the bus interface, allowing overwrite of cryptographic keys and access control configuration; (2) a hardcoded connectivity mapping bypass grants PLIC (manager index 6) the access rights of CLINT (manager index 7); (3) the priv_lvl_i signal is used as an index into the access_ctrl array without bounds validation, posing a potential out-of-bounds access risk. The access control configuration itself is stored in ROM2 writable registers, meaning any vulnerability that allows writing to ROM2 can completely subvert the SoC access control policy.",
+  "findings": [
+    {
+      "finding_id": "F-001",
+      "status": "confirmed_finding",
+      "summary": "ROM2 secure registers are writable at runtime via bus interface, allowing overwrite of cryptographic keys and access control configuration",
+      "vulnerability_category": "Insufficient Access Control on Secure Storage",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 33,
+          "line_end": 42,
+          "module": "rom2",
+          "signal_or_register": "secure_reg"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 18,
+          "line_end": 23,
+          "module": "rom2",
+          "object": "mem",
+          "evidence_type": "source_code",
+          "description": "ROM2 stores cryptographic key material including AES and JTAG keys, and access control master configuration values in const mem initialized as fuse replication.",
+          "supports_claim": "Confirms that secure_reg holds highly sensitive material (AES keys, JTAG keys, access control config)"
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 33,
+          "line_end": 42,
+          "module": "rom2",
+          "object": "always_ff block",
+          "evidence_type": "source_code",
+          "description": "The always_ff block shows that on reset secure_reg is loaded from mem, but when req_i && we_i, secure_reg[addr_i[...]] <= wdata_i allows runtime writes to the secure registers.",
+          "supports_claim": "Directly proves that secure registers are writable via the bus interface at runtime"
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 6,
+          "line_end": 13,
+          "module": "rom2",
+          "object": "port declarations",
+          "evidence_type": "source_code",
+          "description": "ROM2 has we_i (write enable), addr_i, and wdata_i inputs, confirming a write path exists from external requestors.",
+          "supports_claim": "Shows the write interface is exposed externally"
+        }
+      ],
+      "reasoning_summary": "ROM2 is designed to hold keys and access control configuration (as noted in comments: '3rd location for Access control master 1', '2nd location for Access control master 0', '1st location for JTAG', '0th location for AES'). The module provides both read and write access to secure_reg via req_i/we_i/addr_i/wdata_i. Since ROM2 is mapped in the SoC memory map at ROM2Base (0x0021_0000, length 0x10000) as defined in ariane_soc_pkg.sv, any bus master with access to this address range can overwrite the cryptographic keys and access control configuration at runtime. This completely undermines the security model.",
+      "security_impact": "HIGH - An attacker who gains write access to ROM2 can overwrite AES keys, JTAG keys, and the access control configuration registers. The access control configuration determines which bus masters can access which peripherals at each privilege level, so overwriting it can grant unauthorized access to any peripheral. Overwriting AES keys compromises all encrypted data. Overwriting JTAG keys can enable unauthorized debug access.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The test harness and full SoC integration are not fully visible. It is unclear whether there are additional protection layers (e.g., bus-level access restrictions to ROM2 itself) that prevent untrusted masters from reaching ROM2. The access control fabric may restrict which masters can access ROM2, but if ROM2 is writable by any master (including software running on the processor), the vulnerability is exploitable.",
+      "recommended_follow_up": [
+        "Verify whether ROM2 write access is restricted by the access control fabric or if it is exposed to software running on the main processor",
+        "Consider making ROM2 secure_reg read-only after initial boot, or implementing a lock-once mechanism",
+        "Add a hardware write-protect mechanism for secure storage that cannot be bypassed by software"
+      ]
+    },
+    {
+      "finding_id": "F-002",
+      "status": "confirmed_finding",
+      "summary": "Hardcoded connectivity mapping bypass grants PLIC (index 6) the access rights of CLINT (index 7)",
+      "vulnerability_category": "Access Control Policy Bypass (Hardcoded Exception)",
+      "affected_locations": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": 430,
+          "line_end": 430,
+          "module": "connectivity_mapping",
+          "signal_or_register": "connectivity_map_o"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": 430,
+          "line_end": 430,
+          "module": "connectivity_mapping",
+          "object": "assign connectivity_map_o",
+          "evidence_type": "source_code",
+          "description": "The connectivity mapping uses: access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]). This hardcodes manager index 6 (PLIC) to also use manager index 7's (CLINT) access control bits.",
+          "supports_claim": "Directly shows the hardcoded bypass logic"
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": 30,
+          "line_end": 42,
+          "module": "ariane_soc",
+          "object": "axi_slaves_t enum",
+          "evidence_type": "source_code",
+          "description": "PLIC = 6 and CLINT = 7 in the peripheral enumeration, confirming indices 6 and 7 refer to PLIC and CLINT.",
+          "supports_claim": "Confirms the identity of manager indices 6 and 7"
+        }
+      ],
+      "reasoning_summary": "Line 430 of axi_node_intf_wrap.sv computes the connectivity map as: connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]). This means for subordinate 'i', manager 'j'=6 (PLIC) gets access if either: (a) PLIC's own access_ctrl bit for the current privilege level is set, OR (b) CLINT's (j=7) access_ctrl bit for the current privilege level is set. This effectively gives PLIC all the access rights of CLINT regardless of PLIC's own configuration. The PLIC is an interrupt controller and CLINT is a core-local interruptor/timer. There is no clear security justification for PLIC to inherit CLINT's access rights. This could allow the PLIC to access peripherals it should not have access to.",
+      "security_impact": "MEDIUM - The PLIC can access any peripheral that CLINT is authorized to access, potentially allowing an attacker who compromises or misconfigures PLIC to escalate access. The PLIC could be used to read/write to CLINT-accessible memory regions.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "It is unclear whether this hardcoded bypass is intentional (e.g., PLIC and CLINT share security domains) or a leftover debug/development artifact. The full AXI node logic downstream is not visible, so the exact effect of connectivity_map on actual bus routing cannot be confirmed from the provided sources. Additionally, PLIC and CLINT are different peripherals, and PLIC inheriting CLINT's access may or may not be by design.",
+      "recommended_follow_up": [
+        "Review whether the PLIC-CLINT access sharing is intentional or a bug",
+        "If unintentional, remove the hardcoded bypass: change line 430 to connect access_ctrl_i[i][j][priv_lvl_i] without the OR condition",
+        "Review whether any other manager indices have similar hardcoded bypasses"
+      ]
+    },
+    {
+      "finding_id": "F-003",
+      "status": "potential_warning",
+      "summary": "priv_lvl_i signal used as array index without bounds validation in access control lookup",
+      "vulnerability_category": "Potential Out-of-Bounds Array Access / Privilege Escalation",
+      "affected_locations": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": 430,
+          "line_end": 430,
+          "module": "connectivity_mapping",
+          "signal_or_register": "priv_lvl_i"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": 412,
+          "line_end": 416,
+          "module": "connectivity_mapping",
+          "object": "module parameters and ports",
+          "evidence_type": "source_code",
+          "description": "NB_PRIV_LVL = 4 and PRIV_LVL_WIDTH = 4. access_ctrl_i is dimensioned [NB_SUBORDINATE-1:0][NB_MANAGER-1:0][NB_PRIV_LVL-1:0] = [NB_SUBORDINATE-1:0][NB_MANAGER-1:0][3:0]. priv_lvl_i is [PRIV_LVL_WIDTH-1:0] = [3:0], so it is 4 bits wide (0-15).",
+          "supports_claim": "Shows the parameters that define array dimensions and signal widths"
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": 430,
+          "line_end": 430,
+          "module": "connectivity_mapping",
+          "object": "assign connectivity_map_o",
+          "evidence_type": "source_code",
+          "description": "access_ctrl_i[i][j][priv_lvl_i] uses priv_lvl_i as index. If priv_lvl_i >= 4, this would access out-of-bounds of the access_ctrl_i third dimension [3:0].",
+          "supports_claim": "Shows the direct use of priv_lvl_i as an index without validation"
+        }
+      ],
+      "reasoning_summary": "The access_ctrl_i array has its third dimension sized [NB_PRIV_LVL-1:0] = [3:0] (size 4). However, priv_lvl_i is a 4-bit signal ([3:0]) that can hold values 0-15. If priv_lvl_i takes values 4-15 (which could happen through bit flips, processor bugs, or malicious privilege escalation), the access control lookup would read out-of-bounds, potentially returning 'x' or '0' depending on simulation vs. synthesis behavior. In simulation, this could yield 'x' propagation. In synthesis, it may be optimized to constant '0', which would deny access - or potentially optimized to read adjacent memory depending on tool behavior. In the ariane_testharness, priv_lvl is derived from ariane processor's priv_lvl_o which is of type riscv::priv_lvl_t (likely an enum with limited values), so normal operation would keep it within range. However, this is a safety- and security-relevant coding practice issue.",
+      "security_impact": "LOW - Under normal operation, the RISC-V privilege level is expected to remain within 0-3. However, if priv_lvl_i is ever corrupted, the out-of-bounds access could lead to unpredictable access control decisions. The severity is low because the processor's privilege level is typically well-constrained.",
+      "confidence": "low",
+      "uncertainty_or_missing_evidence": "The full riscv package defining priv_lvl_t and NB_PRIV_LVL is not available. If riscv::NB_PRIV_LVL matches the parameter's NB_PRIV_LVL=4 exactly and the processor guarantees priv_lvl stays within range, this is primarily a defensive coding concern rather than an exploitable vulnerability. The synthesis/simulation behavior of out-of-bounds reads is implementation-dependent.",
+      "recommended_follow_up": [
+        "Add an assertion or bounds check: assert(priv_lvl_i < NB_PRIV_LVL) else '0",
+        "Consider adding a default safe value if priv_lvl_i exceeds NB_PRIV_LVL-1",
+        "Verify in the riscv package that priv_lvl_t is an enum with exactly 4 values and no possibility of out-of-range"
+      ]
+    }
+  ],
+  "no_finding_reason": "Three permission-related findings were identified, so this field is not applicable.",
+  "global_uncertainty": "The analysis is based on a limited subset of the full SoC design. Key modules such as the AXI node internal logic (axi_node), the processor core (ariane), the debug module (dm_top, dmi_jtag), and the full riscv package are not included. The exact access control enforcement mechanism inside the AXI node (whether it blocks or allows transactions based on connectivity_map) cannot be fully verified. Additionally, ROM2's address mapping and bus accessibility are defined in the test harness but the actual routing through the AXI node is not fully traceable. The hardcoded PLIC/CLINT bypass may be intentional system design rather than a vulnerability. A complete security review would require the full design hierarchy."
+}

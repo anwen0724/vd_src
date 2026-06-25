@@ -1,0 +1,1300 @@
+{
+  "scope_id": "pulp_soc_apb_interconnect_permission_scope",
+  "obligations": [
+    {
+      "obligation_id": "PERM-SOCCTRL-APB-WRITE-GUARD",
+      "reason": "apb_soc_ctrl exposes SoC boot, fetch-enable, reset, power, cluster, mux, and JTAG-related outputs through an APB slave; these are protected control assets if reachable from unprivileged or debug/peripheral bus subjects.",
+      "subject": "APB/peripheral bus requester",
+      "operation": "write/configure/trigger boot and execution-control state",
+      "object": "fc_bootaddr_o, fc_fetchen_o, cluster_boot_addr_o, cluster_fetch_enable_o, cluster_rstn_o, cluster_pow_o, cluster_byp_o, sel_hyper_axi_o, soc_jtag_reg_o",
+      "expected_guard": "writes to SoC control/security-sensitive boot, fetch, reset, power, mux, and JTAG-visible registers should be mediated by an explicit privilege/lock/lifecycle/debug-authorization condition, not only PSEL/PENABLE/PWRITE/address decode",
+      "candidate_path": "APB/peripheral bus decode into soc_ctrl register file",
+      "state_conditions_to_check": [
+        "after reset before trusted firmware lock/setup",
+        "after any lock bit is set, if present",
+        "during cluster reset/power/fetch transitions",
+        "when APB access originates from debug/JTAG/peripheral path if distinguishable"
+      ],
+      "required_evidence_slots": [
+        "subject APB master or bus source reaching s_soc_ctrl_bus",
+        "address decode for each protected register",
+        "write enable condition",
+        "object state update assignment",
+        "presence/absence and placement of privilege lock lifecycle or debug authorization guard",
+        "reset value and post-reset writability",
+        "top-level connectivity/impact of controlled outputs"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "rtl/includes/periph_bus_defines.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection",
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer lists ports and instances but not register decode or access-control expressions; inspect RTL to classify actual guards."
+    },
+    {
+      "obligation_id": "PERM-JTAG-DEBUG-REACHABILITY-AUTHZ",
+      "reason": "Visible RTL has s_apb_debug_bus, s_lint_debug_bus, s_lint_jtag_bus, i_lint_jtag, and soc_jtag_reg ports; debug presence is not itself a bug, so check whether reachable protected objects are guarded by authorization.",
+      "subject": "JTAG/debug interface requester",
+      "operation": "read/write/expose/override through debug or JTAG path",
+      "object": "soc_jtag_reg_i/o, APB debug bus, lint_jtag/debug paths, memory/peripheral targets reachable through interconnect",
+      "expected_guard": "JTAG/debug initiated accesses or register updates should require debug authorization/lifecycle enable and should not bypass normal APB/interconnect access mediation for protected SoC state or memory",
+      "candidate_path": "JTAG/debug buses and JTAG register path into SoC control or local interconnect",
+      "state_conditions_to_check": [
+        "debug disabled vs enabled",
+        "reset/default lifecycle state",
+        "during APB or local interconnect arbitration",
+        "when normal CPU access would be restricted"
+      ],
+      "required_evidence_slots": [
+        "debug/JTAG subject signal/interface",
+        "target object or address range reached",
+        "read/write path through bus/interconnect or soc_ctrl register",
+        "authorization/lifecycle signal if any",
+        "comparison with non-debug path guards",
+        "external observability through PRDATA/JTAG/local bus",
+        "source locations for mux/arbiter/decode decisions"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR/MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer names debug/JTAG buses but omits lint_jtag_wrap internals; inspect available top-level connections and interconnect mediation."
+    },
+    {
+      "obligation_id": "PERM-FLL-LOCK-WRITE-MEDIATION",
+      "reason": "apb_fll_if has three FLL request/data/write channels and lock inputs; verify lock inputs actually mediate APB writes to the associated FLL targets and all decoded write cases.",
+      "subject": "APB requester via s_fll_bus",
+      "operation": "write/configure FLL registers",
+      "object": "fll1_add/data/wrn/req, fll2_add/data/wrn/req, fll3_add/data/wrn/req and associated FLL configuration state",
+      "expected_guard": "FLL configuration writes should be blocked or restricted when the corresponding fll*_lock is asserted and should not allow clearing/bypassing lock-controlled state through alternate request paths",
+      "candidate_path": "FLL APB interface to FLL control registers and lock status",
+      "state_conditions_to_check": [
+        "lock asserted for each FLL",
+        "lock deasserted for normal configuration",
+        "reset and lock transition cycles",
+        "pending request/ack handshake while lock changes"
+      ],
+      "required_evidence_slots": [
+        "APB subject and PSEL/PWRITE/PENABLE condition",
+        "address decode selecting each FLL",
+        "use site of fll1_lock/fll2_lock/fll3_lock",
+        "write request generation fll*_req/fll*_wrn/fll*_add/fll*_data",
+        "behavior for reads of locked state",
+        "any reset/default values controlling access",
+        "absence/presence of alternate writes not covered by lock"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/apb/apb_fll_if/apb_fll_if.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "CSR/MMIO Access Control",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Need RTL decode and handshake review; locks are visible only as ports in facts."
+    },
+    {
+      "obligation_id": "PERM-APB-DECODE-RANGE-ISOLATION",
+      "reason": "apb_node routes a shared APB requester to multiple peripheral slaves; protected APB peripherals such as soc_ctrl/FLL/uDMA require correct range mediation and no unintended aliases.",
+      "subject": "shared APB bus requester",
+      "operation": "route APB read/write to peripheral slaves",
+      "object": "s_fll_bus, s_gpio_bus, s_udma_bus, s_soc_ctrl_bus, s_adv_timer_bus, s_soc_evnt_gen_bus, s_stdout_bus, s_apb_timer_bus",
+      "expected_guard": "slave selection should enforce exact address ranges and prevent overlapping aliases from routing unprivileged/debug APB accesses to protected peripherals",
+      "candidate_path": "APB node/peripheral address decoding from shared bus to slave selects",
+      "state_conditions_to_check": [
+        "unmapped address access",
+        "boundary address at each peripheral range",
+        "overlapping high/low address bits if truncation occurs",
+        "debug APB vs normal APB source if separate"
+      ],
+      "required_evidence_slots": [
+        "input subject bus and address width",
+        "range/base constants",
+        "psel_o generation for each slave",
+        "handling of unmapped addresses and PSLVERR/PRDATA",
+        "overlap/default-slave behavior",
+        "propagation of PWRITE/PENABLE/PWDATA",
+        "top-level mapping of each psel to slave"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/apb/apb_node/apb_node.sv",
+        "ips/apb/apb_node/apb_node_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "rtl/includes/periph_bus_defines.sv",
+        "rtl/includes/pulp_soc_defines.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer is truncated for some ports and does not include parameters/range constants; inspect include files and decode logic."
+    },
+    {
+      "obligation_id": "PERM-SOC-INTERCONNECT-MASTER-RANGE-CHECKS",
+      "reason": "The top-level includes multiple local interconnect masters (debug, JTAG, uDMA TX/RX, FC data/instr) and memory/peripheral targets; permission flaws often arise when one master bypasses range protections applied to another.",
+      "subject": "FC data/instruction, uDMA TX/RX, debug, JTAG local bus masters",
+      "operation": "read/write/route memory and peripheral transactions",
+      "object": "s_mem_rom_bus, s_scm_l2_data_bus, s_scm_l2_instr_bus, peripheral/APB windows, L2/SCM memory regions",
+      "expected_guard": "address decoding and any memory protection/range checks should consistently mediate read and write access for every master, including debug/JTAG and uDMA paths",
+      "candidate_path": "SoC interconnect paths from CPU, debug/JTAG, uDMA, and local buses to ROM/L2/SCM/peripherals",
+      "state_conditions_to_check": [
+        "debug/JTAG master active",
+        "uDMA transfer active",
+        "instruction vs data path access",
+        "boundary and alias addresses",
+        "simultaneous arbitration among masters"
+      ],
+      "required_evidence_slots": [
+        "list of interconnect masters and slave targets",
+        "address decode and region constants",
+        "read and write enable/routing conditions",
+        "master identity preservation or loss",
+        "presence/absence of per-master access matrix/PMP-like checks",
+        "error behavior for disallowed ranges",
+        "data return path to requester"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect_wrap.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+        "rtl/includes/soc_bus_defines.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Debug / JTAG / Test Access",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need RTL inspection to determine whether protection is intended or present; facts only show bus instances."
+    },
+    {
+      "obligation_id": "PERM-UDMA-CONFIG-TRANSFER-BOUNDS",
+      "reason": "uDMA is both APB-configured and an interconnect master; DMA can bypass CPU privilege if address ranges and active-transfer updates are not mediated.",
+      "subject": "APB requester configuring uDMA; uDMA master issuing transfers",
+      "operation": "configure DMA and issue memory reads/writes",
+      "object": "uDMA RX/TX local interconnect buses and APB-configured DMA channel address/size/control state",
+      "expected_guard": "uDMA channel configuration and generated transfers should be restricted by address range/access-policy checks and should not allow configuration updates during active transfers to bypass bounds",
+      "candidate_path": "uDMA subsystem configuration and active transfer address generation",
+      "state_conditions_to_check": [
+        "channel enabled/busy",
+        "mid-transfer configuration write",
+        "zero/overflowing size or address wraparound",
+        "debug/APB requester configuring DMA"
+      ],
+      "required_evidence_slots": [
+        "APB config registers controlling uDMA address/size/enable",
+        "write enable and any privilege/lock guard",
+        "uDMA master address/data request generation",
+        "range/bounds checks before issuing transfers",
+        "behavior when config changes while busy/active",
+        "target memory/peripheral reachability",
+        "error or block behavior for invalid ranges"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Fact layer identifies udma_subsystem and local buses but not channel internals; inspect module RTL."
+    },
+    {
+      "obligation_id": "PERM-GPIO-PAD-CONTROL-GUARD",
+      "reason": "GPIO can externally influence SoC pins and interrupts; if any pins are security-sensitive or reserved, APB writes should be constrained rather than globally writable.",
+      "subject": "APB requester via s_gpio_bus",
+      "operation": "write/configure GPIO external behavior",
+      "object": "gpio_out, gpio_dir, interrupt configuration/state",
+      "expected_guard": "writes that change external pin drive direction/output or interrupt behavior should be mediated by privilege/lock/pad-ownership policy where those pins can affect protected signals",
+      "candidate_path": "GPIO APB register writes to external pin direction/output and interrupt configuration",
+      "state_conditions_to_check": [
+        "after reset default direction/output",
+        "when pin is reserved or assigned to alternate function",
+        "interrupt enable/edge configuration changes"
+      ],
+      "required_evidence_slots": [
+        "APB decode for GPIO control registers",
+        "write enable for gpio_out/gpio_dir/interrupt config",
+        "any pin mask/ownership/lock guard",
+        "top-level mapping of GPIO pins to external/security-sensitive functions",
+        "readback behavior for gpio_in/gpio_in_sync",
+        "reset defaults for direction/output"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/apb/apb_gpio/apb_gpio.sv",
+        "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need top-level pad mapping and register decode; obligation is conditional on protected/reserved GPIO usage."
+    },
+    {
+      "obligation_id": "PERM-CLKRST-POWER-CONTROL-POLICY",
+      "reason": "Clock, reset, FLL, timer, and power controls can affect availability and security lifecycle; verify APB write paths include intended authorization or safe-state conditions.",
+      "subject": "APB requester",
+      "operation": "configure clock/reset/power/timing controls",
+      "object": "cluster_rstn_o, cluster_pow_o, clock divider outputs, FLL control outputs, timer busy/irq/event control",
+      "expected_guard": "software-visible clock, reset, divider, and power control updates should require privilege/lock or safe-state checks when they can disable, reset, or destabilize protected domains",
+      "candidate_path": "clock/reset/power control registers in soc_ctrl, clkdiv, timer and FLL interfaces",
+      "state_conditions_to_check": [
+        "domain active vs reset/powered down",
+        "divider/FLL change while in use",
+        "timer busy while reconfigured",
+        "post-reset default accessibility"
+      ],
+      "required_evidence_slots": [
+        "registers controlling clock/reset/power/divider/timer state",
+        "APB write conditions",
+        "guard/lock/safe-state expressions",
+        "effect on protected domains or outputs",
+        "reset defaults and allowed transitions",
+        "readback/external observability"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+        "ips/pulp_soc/rtl/components/apb_clkdiv.sv",
+        "ips/apb/apb_fll_if/apb_fll_if.sv",
+        "ips/pulp_soc/rtl/components/apb_timer_unit.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Reset / Lifecycle / State Residue",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "This is a policy-oriented obligation; vulnerability depends on whether controlled domains are protected assets in this SoC."
+    },
+    {
+      "obligation_id": "PERM-TEST-DFT-BIST-LIFECYCLE-GUARD",
+      "reason": "Visible interfaces include DFT clock gating, BIST, clock-gate, bypass, and mux controls; test capabilities can bypass normal operation if reachable without lifecycle authorization.",
+      "subject": "test/DFT interface, APB/debug requester if connected",
+      "operation": "enable/override/route test and bypass controls",
+      "object": "dft_cg_enable_i, bist_en, bist_pattern, clkgate_* controls, cluster_byp_o, bbmux_* controls",
+      "expected_guard": "test, DFT clock-gate enable, BIST enable/pattern, and bypass/mux controls should be gated by lifecycle/test-mode authorization and not be writable or asserted from normal APB/debug paths without mediation",
+      "candidate_path": "test/DFT/BIST and clock-gating control signals from interfaces and peripherals",
+      "state_conditions_to_check": [
+        "normal functional mode",
+        "test mode/lifecycle enabled",
+        "reset release",
+        "debug active while test controls asserted"
+      ],
+      "required_evidence_slots": [
+        "source of test/DFT/BIST control signals",
+        "whether APB/JTAG/debug can modify them",
+        "lifecycle/test-mode authorization guard",
+        "fanout to protected clocks/memory/cluster paths",
+        "reset defaults and deassert behavior",
+        "external observability or control impact"
+      ],
+      "files_or_modules_to_inspect": [
+        "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+        "ips/apb/apb_adv_timer/apb_adv_timer.sv",
+        "ips/apb/apb_gpio/apb_gpio.sv",
+        "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+        "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR/MMIO Access Control",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Fact layer shows interfaces and ports, not all signal drivers; trace connectivity in top-level RTL."
+    }
+  ],
+  "inspection_records": [
+    {
+      "obligation_id": "PERM-SOCCTRL-APB-WRITE-GUARD",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "APB/peripheral bus requester reaching s_soc_ctrl_bus through periph_bus_wrap",
+        "operation": "write/configure/trigger boot and execution-control state",
+        "object": "fc_bootaddr_o, fc_fetchen_o, cluster_boot_addr_o, cluster_fetch_enable_o, cluster_rstn_o, cluster_pow_o, cluster_byp_o, sel_hyper_axi_o, soc_jtag_reg_o, pad_cfg/pad_mux",
+        "expected_guard": "explicit privilege/lock/lifecycle/debug-authorization condition in addition to APB handshake and address decode",
+        "observed_behavior": "apb_soc_ctrl defines s_apb_write = PSEL && PENABLE && PWRITE, decodes PADDR[8:2], resets sensitive registers to defaults including r_bootaddr=32'h1A000000 and r_jtag_rego=0, and drives protected outputs directly from internal registers. Tool observations show pad_cfg writes under register cases and no guard beyond APB write/address decode in the visible write path.",
+        "path": "shared APB slave -> periph_bus_wrap -> s_soc_ctrl_bus -> apb_soc_ctrl register file",
+        "state_condition": "post-reset and normal operation; no lock/lifecycle/debug state condition observed",
+        "impact": "Any master that can issue APB writes to the SoC-control address window can alter boot/fetch/reset/power/bypass/mux/JTAG-visible control state, potentially changing execution entry, releasing/resetting domains, powering/bypassing cluster logic, or exposing/modifying JTAG-facing state.",
+        "rtl_evidence": [
+          {
+            "file": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+            "lines": "129-145",
+            "evidence": "s_apb_write is assigned PSEL && PENABLE && PWRITE; fc_bootaddr_o, fc_fetchen_o, cluster_pow_o, sel_hyper_axi_o, cluster_rstn_o, cluster_boot_addr_o, cluster_fetch_enable_o, cluster_byp_o, cluster_irq_o are direct assignments from internal registers."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+            "lines": "157-170",
+            "evidence": "s_apb_addr = PADDR[8:2]; reset initializes r_jtag_rego to 0 and r_bootaddr to 32'h1A000000."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+            "lines": "250-321",
+            "evidence": "Pad configuration registers are assigned from PWDATA in register decode cases; no authorization/lock condition is shown in these cases."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv",
+            "lines": "65-67",
+            "evidence": "soc_ctrl_master is mapped to SOC_CTRL_START_ADDR/SOC_CTRL_END_ADDR."
+          },
+          {
+            "file": "rtl/includes/periph_bus_defines.sv",
+            "lines": "32-34",
+            "evidence": "SOC_CTRL_START_ADDR=32'h1A10_4000 and SOC_CTRL_END_ADDR=32'h1A10_4FFF."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Full apb_soc_ctrl write-case body was truncated, so each individual protected register assignment is not fully enumerated. However the visible common write enable and output assignments show no authorization guard. Top-level APB master trust model is not specified.",
+      "candidate_finding": "apb_soc_ctrl updates SoC boot, fetch, cluster reset/power/bypass, mux, JTAG output, and pad-control state from APB writes gated only by PSEL/PENABLE/PWRITE and register address decode; no privilege, lifecycle, lock, or debug-authorization guard is evident in the provided RTL observations.",
+      "notes": "Classified as candidate violation because the expected explicit guard is absent from observed RTL for a high-impact control register block."
+    },
+    {
+      "obligation_id": "PERM-JTAG-DEBUG-REACHABILITY-AUTHZ",
+      "inspection_status": "inconclusive",
+      "evidence_slots": {
+        "subject": "JTAG/debug interface requester",
+        "operation": "read/write/expose/override through debug or JTAG path",
+        "object": "soc_jtag_reg_i/o, APB debug bus, lint_jtag/debug paths, memory/peripheral targets reachable through interconnect",
+        "expected_guard": "debug authorization/lifecycle enable for debug/JTAG access and no bypass of normal APB/interconnect access mediation",
+        "observed_behavior": "The fact layer identifies s_apb_debug_bus, s_lint_debug_bus, s_lint_jtag_bus, and lint_jtag_wrap instance i_lint_jtag at top level. apb_soc_ctrl has soc_jtag_reg_i and soc_jtag_reg_o ports, with soc_jtag_reg_o driven from r_jtag_rego. A search for 'auth' under ips/pulp_soc/rtl found no authorization signal naming except comments. periph_bus_wrap includes a mmap_debug_master output for DEBUG_START_ADDR..DEBUG_END_ADDR.",
+        "path": "s_apb_debug_bus, s_lint_debug_bus, s_lint_jtag_bus, i_lint_jtag, and soc_jtag_reg_i/o connectivity",
+        "state_condition": "debug/default lifecycle state not established in provided evidence",
+        "impact": "If debug/JTAG paths can reach SoC control or memory/peripheral targets without lifecycle authorization, they may read/write protected state. Provided observations establish presence of debug/JTAG buses but not the complete authorization or target reachability semantics.",
+        "rtl_evidence": [
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+            "lines": "293-356, 737",
+            "evidence": "Fact layer lists s_apb_debug_bus, s_lint_debug_bus, s_lint_jtag_bus, and i_lint_jtag instance."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+            "lines": "86-87, 117-131",
+            "evidence": "soc_jtag_reg_i/o ports exist; soc_jtag_reg_o is assigned from r_jtag_rego."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv",
+            "lines": "93-95",
+            "evidence": "mmap_debug_master is mapped as APB master slot 10 over DEBUG_START_ADDR/DEBUG_END_ADDR."
+          },
+          {
+            "file": "rtl/includes/periph_bus_defines.sv",
+            "lines": "56-57",
+            "evidence": "DEBUG_START_ADDR=32'h1A11_0000 and DEBUG_END_ADDR=32'h1A11_FFFF."
+          },
+          {
+            "file": "ips/pulp_soc/rtl",
+            "lines": "search result",
+            "evidence": "Case-insensitive search for 'auth' only returned an AUTHORS comment."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "lint_jtag_wrap internals and complete top-level debug connectivity were not provided. The observations do not prove that debug/JTAG can reach soc_ctrl or memory targets, nor do they show lifecycle/debug enable signals other than absence of 'auth' naming.",
+      "candidate_finding": "",
+      "notes": "Presence of debug/JTAG interfaces is not sufficient for a violation; retain as inconclusive pending full path and authorization evidence."
+    },
+    {
+      "obligation_id": "PERM-FLL-LOCK-WRITE-MEDIATION",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "APB requester via s_fll_bus",
+        "operation": "write/configure FLL registers",
+        "object": "fll1_add/data/wrn/req, fll2_add/data/wrn/req, fll3_add/data/wrn/req and associated FLL configuration state",
+        "expected_guard": "corresponding fll*_lock asserted should block/restrict writes and prevent alternate write request generation",
+        "observed_behavior": "Write decode under PSEL && PENABLE && PWRITE sets fll1_wr_access/fll2_wr_access/fll3_wr_access based only on PADDR[5:2]. The fll*_wrn/add/data outputs depend on fll*_valid and PWRITE/PADDR/PWDATA. The visible read logic exposes lock state at address 4'b1111, but write logic does not reference fll*_lock_sync. soc_peripherals connects fll*_lock to FLL master lock outputs from soc_clk_rst_gen.",
+        "path": "shared APB -> s_fll_bus -> apb_fll_if -> soc/per/cluster FLL master interfaces",
+        "state_condition": "lock asserted for any FLL; post-reset lock sync defaults to zero; normal APB writes",
+        "impact": "APB software can issue writes to FLL configuration channels even when the target FLL reports lock asserted, potentially modifying clock-generation configuration that should be lock-protected.",
+        "rtl_evidence": [
+          {
+            "file": "ips/apb/apb_fll_if/apb_fll_if.sv",
+            "lines": "70-75, 83-94",
+            "evidence": "fll1_lock_sync/fll2_lock_sync/fll3_lock_sync are declared and synchronized."
+          },
+          {
+            "file": "ips/apb/apb_fll_if/apb_fll_if.sv",
+            "lines": "227-270",
+            "evidence": "Write logic sets fll1_wr_access, fll2_wr_access, and fll3_wr_access solely under PSEL && PENABLE && PWRITE and PADDR[5:2] decode; no lock signal is referenced."
+          },
+          {
+            "file": "ips/apb/apb_fll_if/apb_fll_if.sv",
+            "lines": "316-318",
+            "evidence": "Read address 4'b1111 returns {fll3_lock_sync, fll2_lock_sync, fll1_lock_sync}."
+          },
+          {
+            "file": "ips/apb/apb_fll_if/apb_fll_if.sv",
+            "lines": "330-340",
+            "evidence": "FLL write/read command outputs are driven from fll*_valid, PWRITE, PADDR[3:2], and PWDATA."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+            "lines": "306-341",
+            "evidence": "apb_fll_if_i connects s_fll_bus to soc_fll_master, per_fll_master, and cluster_fll_master lock/req/wrn/add/data ports."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+            "lines": "671-693",
+            "evidence": "soc_clk_rst_gen provides soc/per/cluster FLL lock outputs back to the FLL master interfaces."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "The FSM section generating fll*_valid/fll*_req was partially truncated in initial observations, but the provided complete write/read output section shows no lock use in write decode or command data generation.",
+      "candidate_finding": "apb_fll_if exposes direct APB write accesses to FLL1/FLL2/FLL3 request channels without using fll1_lock/fll2_lock/fll3_lock to block writes; lock bits are synchronized and readable but not included in the write-access conditions shown.",
+      "notes": "This directly violates the expected lock-mediated write policy."
+    },
+    {
+      "obligation_id": "PERM-APB-DECODE-RANGE-ISOLATION",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "shared APB bus requester",
+        "operation": "route APB read/write to peripheral slaves",
+        "object": "s_fll_bus, s_gpio_bus, s_udma_bus, s_soc_ctrl_bus, s_adv_timer_bus, s_soc_evnt_gen_bus, s_stdout_bus, s_apb_timer_bus, debug/HWPE/EU APB masters",
+        "expected_guard": "exact non-overlapping address ranges or priority/error logic preventing aliases to protected peripherals",
+        "observed_behavior": "apb_node assigns psel_o[i] = (paddr_i >= START_ADDR_i[i]) && (paddr_i <= END_ADDR_i[i]) independently for each master. periph_bus_wrap maps the range constants from periph_bus_defines. The constants overlap substantially, including UDMA and SOC_CTRL sharing 0x1A10_4000..0x1A10_4FFF and GPIO covering most other peripheral windows. No exclusive decode or overlap error is shown in the provided apb_node excerpt.",
+        "path": "apb_slave -> periph_bus_wrap -> apb_node_wrap -> apb_node psel_o generation -> per-slave APB buses",
+        "state_condition": "boundary/overlap addresses including 0x1A10_4000..0x1A10_4FFF and GPIO-overlapped peripheral windows",
+        "impact": "A single APB address may drive PSEL/PENABLE/PWRITE/PWDATA to multiple peripherals. For protected regions such as soc_ctrl and FLL/uDMA, overlapping decode can create aliases, unintended side effects, ambiguous PRDATA/PREADY return selection, or access to a protected slave through an apparently different window.",
+        "rtl_evidence": [
+          {
+            "file": "ips/apb/apb_node/apb_node.sv",
+            "lines": "59-64",
+            "evidence": "For every master slot, psel_o[i] is independently asserted when paddr_i is within START_ADDR_i[i]..END_ADDR_i[i]."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv",
+            "lines": "53-95",
+            "evidence": "Slave slots are mapped to FLL, GPIO, UDMA, SOC_CTRL, ADV_TIMER, SOC_EVENT_GEN, EU, TIMER, HWPE, STDOUT, and DEBUG ranges."
+          },
+          {
+            "file": "rtl/includes/periph_bus_defines.sv",
+            "lines": "20-45",
+            "evidence": "FLL=0x1A10_0000..0x0FFF; GPIO=0x1A10_1000..0xAFFF; UDMA=0x1A10_2000..0x4FFF; SOC_CTRL=0x1A10_4000..0x4FFF; ADV_TIMER=0x1A10_5000..0x5FFF; SOC_EVENT_GEN=0x1A10_6000..0x6FFF; EU=0x1A10_9000..0xAFFF."
+          },
+          {
+            "file": "rtl/includes/periph_bus_defines.sv",
+            "lines": "47-57",
+            "evidence": "TIMER, HWPE, STDOUT, and DEBUG windows are also defined."
+          },
+          {
+            "file": "ips/apb/apb_node_wrap.sv",
+            "lines": "55-66, 70-85",
+            "evidence": "Wrapper forwards psel/pwrite/penable/paddr/pwdata to each APB master slot from apb_node."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "The truncated remainder of apb_node may contain return-data selection behavior, but independent overlapping psel generation is explicit. No evidence of overlap assertion/error or priority masking was provided.",
+      "candidate_finding": "Peripheral APB range definitions contain overlapping address windows: GPIO covers 0x1A10_1000..0x1A10_AFFF while UDMA covers 0x1A10_2000..0x1A10_4FFF, SOC_CTRL covers 0x1A10_4000..0x1A10_4FFF, ADV_TIMER covers 0x1A10_5000..0x1A10_5FFF, SOC_EVENT_GEN covers 0x1A10_6000..0x1A10_6FFF, and EU covers 0x1A10_9000..0x1A10_AFFF. apb_node independently asserts psel_o[i] for every matching range, so overlapping addresses can select multiple slaves.",
+      "notes": "This is a strong candidate range-isolation violation because the address-map constants themselves overlap protected and unprotected windows."
+    },
+    {
+      "obligation_id": "PERM-SOC-INTERCONNECT-MASTER-RANGE-CHECKS",
+      "inspection_status": "inconclusive",
+      "evidence_slots": {
+        "subject": "FC data/instruction, uDMA TX/RX, debug, JTAG local bus masters",
+        "operation": "read/write/route memory and peripheral transactions",
+        "object": "s_mem_rom_bus, s_scm_l2_data_bus, s_scm_l2_instr_bus, peripheral/APB windows, L2/SCM memory regions",
+        "expected_guard": "consistent per-master address range checks or access matrix/PMP-like mediation",
+        "observed_behavior": "The fact layer and top-level snippets show multiple local bus masters and slave targets. soc_bus_defines defines cluster, L2, L2 private/SCM alias, SoC APB, FC peripheral, FC APB, and stdout regions. soc_interconnect_wrap exposes lint_fc_data, lint_fc_instr, lint_udma_tx, lint_udma_rx, lint_debug, lint_hwpe, axi_from_cluster, axi_to_cluster, apb_periph_bus, L2/PRI/ROM memory buses. No explicit per-master authorization or protection matrix is visible in the provided excerpts.",
+        "path": "soc_interconnect_wrap/soc_interconnect from local and AXI masters to ROM/L2/peripheral APB",
+        "state_condition": "debug/JTAG active, uDMA active, FC data/instruction access, region boundaries",
+        "impact": "If region decode lacks per-master restrictions, debug/JTAG/uDMA/HWPE paths may access memory/peripheral regions with the same privileges as the FC, but the available observations do not establish whether such unrestricted routing is implemented.",
+        "rtl_evidence": [
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+            "lines": "343-356",
+            "evidence": "Fact layer lists memory buses and local interconnect masters including debug, JTAG, uDMA TX/RX, FC data, and FC instruction."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect_wrap.sv",
+            "lines": "31-42",
+            "evidence": "Wrapper ports include lint_fc_data, lint_fc_instr, lint_udma_tx, lint_udma_rx, lint_debug, lint_hwpe, axi_from_cluster, axi_to_cluster, apb_periph_bus, L2/PRI memory buses, and ROM bus."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+            "lines": "12-64",
+            "evidence": "Interconnect module exposes FC_DATA and FC_INSTR request/address/write channels; additional ports are truncated."
+          },
+          {
+            "file": "rtl/includes/soc_bus_defines.sv",
+            "lines": "20-62",
+            "evidence": "Defines NB_SLAVE/NB_MASTER/NB_REGION and region constants for cluster, L2, private L2/SCM alias, SoC APB, FC peripheral/APB, and stdout."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "The actual decode/arbitration/routing logic in soc_interconnect and soc_interconnect_wrap was not provided beyond module headers and constants. No complete evidence for or against per-master range checks is available.",
+      "candidate_finding": "",
+      "notes": "Cannot classify as violation based only on ports and region constants."
+    },
+    {
+      "obligation_id": "PERM-UDMA-CONFIG-TRANSFER-BOUNDS",
+      "inspection_status": "inconclusive",
+      "evidence_slots": {
+        "subject": "APB requester configuring uDMA; uDMA master issuing transfers",
+        "operation": "configure DMA and issue memory reads/writes",
+        "object": "uDMA RX/TX local interconnect buses and APB-configured DMA channel address/size/control state",
+        "expected_guard": "address range/access-policy checks and active-transfer update restrictions",
+        "observed_behavior": "soc_peripherals instantiates udma_subsystem, connects APB-configured subsystem to s_udma_bus and exposes two L2 master interfaces: L2_ro_* to l2_tx_master and L2_wo_* to l2_rx_master. periph_bus_defines maps UDMA to 0x1A10_2000..0x1A10_4FFF, overlapping SOC_CTRL and GPIO. No uDMA channel register decode, bounds checks, or busy-update logic is present in the provided observations.",
+        "path": "s_udma_bus -> udma_subsystem APB configuration -> l2_tx_master/l2_rx_master local interconnect masters",
+        "state_condition": "channel enabled/busy, mid-transfer updates, size/address wraparound, debug/APB requester configuring DMA",
+        "impact": "uDMA can act as an interconnect master, so missing bounds could bypass CPU privilege; however the evidence does not show whether bounds or active-transfer controls exist.",
+        "rtl_evidence": [
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+            "lines": "384-405",
+            "evidence": "udma_subsystem instance connects L2_ro_req/wen/addr/data/be and L2_wo_req/wen/addr/data/be to l2_tx_master/l2_rx_master interfaces."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+            "lines": "407-411",
+            "evidence": "uDMA receives dft_test_mode_i and clocking; the snippet is truncated before APB s_udma_bus connections."
+          },
+          {
+            "file": "rtl/includes/periph_bus_defines.sv",
+            "lines": "28-34",
+            "evidence": "UDMA range 0x1A10_2000..0x1A10_4FFF overlaps SOC_CTRL range 0x1A10_4000..0x1A10_4FFF and GPIO range 0x1A10_1000..0x1A10_AFFF."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "udma_subsystem internal channel configuration registers, address/size generation, range checks, busy semantics, and error behavior were not provided.",
+      "candidate_finding": "",
+      "notes": "Address-overlap concern is covered by APB decode obligation; uDMA transfer-bounds obligation remains inconclusive."
+    },
+    {
+      "obligation_id": "PERM-GPIO-PAD-CONTROL-GUARD",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "APB requester via s_gpio_bus",
+        "operation": "write/configure GPIO external behavior",
+        "object": "gpio_out, gpio_dir, gpio_padcfg, interrupt configuration/state, gpio enable",
+        "expected_guard": "privilege/lock/pad-ownership policy for writes affecting external pin drive/direction/output/interrupt behavior",
+        "observed_behavior": "apb_gpio defines registers for PADDIR, PADOUT, INTEN, INTTYPE, GPIOEN, PADCFG, PADOUTSET, PADOUTCLR, GPIOLOCK. Reset clears gpio_out, gpio_dir, gpio_en, gpio_lock and initializes padcfg. On APB writes, PADDIR checks r_gpio_lock[0] and PADOUT checks r_gpio_lock[2], but PADOUTSET and PADOUTCLR update r_gpio_out without checking lock. Interrupt enable/type, GPIO enable, GPIOLOCK, and PADCFG writes are also shown without ownership/privilege guard.",
+        "path": "shared APB -> s_gpio_bus -> apb_gpio register file",
+        "state_condition": "post-reset default direction/output; lock register asserted or not; normal APB writes",
+        "impact": "An APB requester can alter external pin outputs using set/clear paths even if direct output writes are locked, and can modify interrupt and pad configuration state. If any GPIO pins are reserved or security-sensitive, this permits unauthorized external behavior changes.",
+        "rtl_evidence": [
+          {
+            "file": "ips/apb/apb_gpio/apb_gpio.sv",
+            "lines": "11-31",
+            "evidence": "Register map includes PADDIR, PADOUT, INTEN, INTTYPE0/1, GPIOEN, PADCFG0-7, PADOUTSET, PADOUTCLR, GPIOLOCK."
+          },
+          {
+            "file": "ips/apb/apb_gpio/apb_gpio.sv",
+            "lines": "282-295",
+            "evidence": "Reset clears interrupt, output, direction, enable, and lock registers; padcfg defaults to 6'b000010."
+          },
+          {
+            "file": "ips/apb/apb_gpio/apb_gpio.sv",
+            "lines": "298-325",
+            "evidence": "APB write case: PADDIR checks r_gpio_lock[0], PADOUT checks r_gpio_lock[2], but PADOUTSET/PADOUTCLR modify r_gpio_out without lock; INTEN/INTTYPE/GPIOEN/GPIOLOCK write directly."
+          },
+          {
+            "file": "ips/apb/apb_gpio/apb_gpio.sv",
+            "lines": "326-344",
+            "evidence": "PADCFG registers are assigned from PWDATA; no lock or ownership guard is shown in the snippet."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv",
+            "lines": "57-59",
+            "evidence": "gpio_master mapped to GPIO_START_ADDR/GPIO_END_ADDR."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Top-level mapping of GPIO pins to reserved/security-sensitive functions is not provided. The finding is conditional on GPIO pins affecting protected signals, but the lock-bypass behavior for gpio_out set/clear is explicit.",
+      "candidate_finding": "apb_gpio includes a GPIOLOCK register, but the observed write logic only applies lock bits to direct PADDIR and PADOUT writes; PADOUTSET/PADOUTCLR, interrupt configuration, GPIO enable, lock register, and pad configuration writes remain writable under PSEL/PENABLE/PWRITE without pin ownership/privilege guard.",
+      "notes": "Candidate violation due to inconsistent lock coverage and lack of privilege/pin-ownership policy."
+    },
+    {
+      "obligation_id": "PERM-CLKRST-POWER-CONTROL-POLICY",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "APB requester",
+        "operation": "configure clock/reset/power/timing controls",
+        "object": "cluster_rstn_o, cluster_pow_o, clock divider outputs, FLL control outputs, timer busy/irq/event control",
+        "expected_guard": "privilege/lock or safe-state checks for changes that can reset, power down, or destabilize protected domains",
+        "observed_behavior": "apb_soc_ctrl drives cluster reset/power/fetch control outputs from APB-programmed registers with common s_apb_write. apb_clkdiv writes divider registers on PSEL && PENABLE && PWRITE and asserts valid pulses. apb_timer_unit writes config, compare, start, reset, and counter-update controls under PSEL && PENABLE && PWRITE. apb_fll_if write logic decodes direct FLL writes without using lock signals.",
+        "path": "APB peripheral windows to soc_ctrl, clkdiv, FLL, and timer register files",
+        "state_condition": "domain active vs reset/powered down; divider/FLL/timer writes during normal operation; post-reset accessibility",
+        "impact": "APB software may alter clocks, resets, power, FLL settings, and timers regardless of domain state or privilege, potentially causing denial of service, unsafe state transitions, or lifecycle/security-domain disruption.",
+        "rtl_evidence": [
+          {
+            "file": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+            "lines": "129-145",
+            "evidence": "s_apb_write is PSEL && PENABLE && PWRITE; cluster power/reset/fetch/bypass outputs are direct register outputs."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/components/apb_clkdiv.sv",
+            "lines": "49-80",
+            "evidence": "Clock divider registers are updated on PSEL && PENABLE && PWRITE and PADDR[3:2] decode, with no guard."
+          },
+          {
+            "file": "ips/apb/apb_fll_if/apb_fll_if.sv",
+            "lines": "227-270",
+            "evidence": "Direct FLL write access is granted by PSEL/PENABLE/PWRITE and PADDR[5:2] decode; no lock condition."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/components/apb_timer_unit.sv",
+            "lines": "106-143",
+            "evidence": "Timer configuration, compare, counter-write, start, and reset controls are driven from APB writes; no privilege or busy/safe-state guard is visible."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/components/apb_timer_unit.sv",
+            "lines": "181-201",
+            "evidence": "Timer registers update sequentially; PREADY=PSEL & PENABLE and PSLVERR=0."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Whether these domains are intended protected assets is a policy question; no design security policy was provided. Complete soc_ctrl write cases are truncated, but common update pattern and output fanout are visible.",
+      "candidate_finding": "Clock/reset/power/timer controls observed in apb_soc_ctrl, apb_clkdiv, apb_fll_if, and apb_timer_unit are writable using APB handshake and address decode with no observed privilege, lock, lifecycle, or safe-state checks; FLL lock is not used to block FLL writes.",
+      "notes": "Classified as candidate violation because observed sensitive controls lack any safe-state/authorization mediation."
+    },
+    {
+      "obligation_id": "PERM-TEST-DFT-BIST-LIFECYCLE-GUARD",
+      "inspection_status": "inconclusive",
+      "evidence_slots": {
+        "subject": "test/DFT interface, APB/debug requester if connected",
+        "operation": "enable/override/route test and bypass controls",
+        "object": "dft_cg_enable_i, bist_en, bist_pattern, clkgate_* controls, cluster_byp_o, bbmux_* controls",
+        "expected_guard": "lifecycle/test-mode authorization and no normal APB/debug assertion of test controls without mediation",
+        "observed_behavior": "Interfaces expose DFT/BIST/clock-gating/bypass/mux signal groups. apb_adv_timer and apb_gpio have dft_cg_enable_i inputs. soc_peripherals ties udma dft_cg_enable_i to 1'b0 and passes dft_test_mode_i to uDMA and soc_clk_rst_gen. apb_soc_ctrl exposes cluster_byp_o as an APB-controlled output. A search for 'auth' found no authorization naming. The provided observations do not trace BIST or bbmux/clkgate control sources or prove APB/debug reachability for test controls.",
+        "path": "test/DFT inputs and peripheral/control signals to clock-gating, BIST, bypass, and mux logic",
+        "state_condition": "normal functional mode, test mode/lifecycle enabled, reset release, debug active",
+        "impact": "If test or bypass controls are reachable from normal APB/debug paths without lifecycle enable, they could bypass normal operation or disrupt protected clocks/memory/cluster paths. Evidence is insufficient to prove such reachability for most test signals.",
+        "rtl_evidence": [
+          {
+            "file": "ips/pulp_soc/rtl/components/pulp_interfaces.sv",
+            "lines": "344-359, 707-724, 784-801",
+            "evidence": "Fact layer lists bbmux, clkgate, and BIST signal groups in interfaces."
+          },
+          {
+            "file": "ips/apb/apb_adv_timer/apb_adv_timer.sv",
+            "lines": "27",
+            "evidence": "apb_adv_timer has dft_cg_enable_i input."
+          },
+          {
+            "file": "ips/apb/apb_gpio/apb_gpio.sv",
+            "lines": "41",
+            "evidence": "apb_gpio has dft_cg_enable_i input."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv",
+            "lines": "407-408",
+            "evidence": "uDMA receives dft_test_mode_i and dft_cg_enable_i is tied to 1'b0 in the visible instance snippet."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+            "lines": "658-669",
+            "evidence": "soc_clk_rst_gen receives test_clk_i and dft_test_mode_i; shift_enable_i is tied to 1'b0."
+          },
+          {
+            "file": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+            "lines": "120, 145",
+            "evidence": "cluster_byp_o is driven from r_cluster_byp, an apb_soc_ctrl register."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Sources and guards for BIST, bbmux, clkgate, and dft_cg_enable_i fanout are not fully traced. Lifecycle/test-mode policy and external test-mode authorization are not provided.",
+      "candidate_finding": "",
+      "notes": "cluster_byp_o APB control is also covered by the SoC-control write-guard obligation; broader test/DFT lifecycle guard remains inconclusive."
+    }
+  ],
+  "tool_observations": [
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 520,
+        "offset": 60,
+        "path": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"60: //`define MSG_VERBOSE\\n61: \\n62: module apb_soc_ctrl\\n63:   #(\\n64:     parameter APB_ADDR_WIDTH = 12,  // APB slaves are 4KB by default\\n65:     parameter NB_CLUSTERS    = 0,   // N_CLUSTERS\\n66:     parameter NB_CORES       = 4,   // N_CORES\\n67:     parameter JTAG_REG_SIZE  = 8\\n68:     )\\n69:    (\\n70:     input  logic                      HCLK,\\n71:     input  logic                      HRESETn,\\n72:     input  logic [APB_ADDR_WIDTH-1:0] PADDR,\\n73:     input  logic               [31:0] PWDATA,\\n74:     input  logic                      PWRITE,\\n75:     input  logic                      PSEL,\\n76:     input  logic                      PENABLE,\\n77:     output logic               [31:0] PRDATA,\\n78:     output logic                      PREADY,\\n79:     output logic                      PSLVERR,\\n80: \\n81:     input  logic                      sel_fll_clk_i,\\n82: \\n83:     output logic         [63:0] [5:0] pad_cfg,\\n84:     output logic         [63:0] [1:0] pad_mux,\\n85: \\n86:     input  logic                [JTAG_REG_SIZE-1:0] soc_jtag_reg_i,\\n87:     output logic                [JTAG_REG_SIZE-1:0] soc_jtag_reg_o,\\n88: \\n89:     output logic               [31:0] fc_bootaddr_o,\\n90: \\n91:     output logic                      fc_fetchen_o,\\n92:     output logic                      sel_hyper_axi_o,\\n93:     output logic                      cluster_pow_o, // power cluster\\n94:     output logic                      cluster_byp_o, // bypass cluster\\n95:     output logic               [63:0] cluster_boot_addr_o,\\n96:     output logic                      cluster_fetch_enable_o,\\n97:     output logic                      cluster_rstn_o,\\n98:     output logic                      cluster_irq_o\\n99:     );\\n100: \\n101:    logic     [31:0] r_pwr_reg;\\n102:    logic     [31:0] r_corestatus;\\n103: \\n104: \\n105:    logic      [6:0] s_apb_addr;\\n106: \\n107:    logic     [15:0] n_cores;\\n108:    logic     [15:0] n_clusters;\\n109: \\n110:    logic     [63:0] r_pad_fun0;\\n111:    logic     [63:0] r_pad_fun1;\\n112: \\n113:    logic     [63:0] r_cluster_boot;\\n114:    logic            r_cluster_fetch_enable;\\n115:    logic            r_cluster_rstn;\\n116: \\n117:    logic      [JTAG_REG_SIZE-1:0] r_jtag_rego;\\n118:    logic      [JTAG_REG_SIZE-1:0] r_jtag_regi_sync[1:0];\\n119: \\n120:    logic            r_cluster_byp;\\n121:    logic            r_cluster_pow;\\n122:    logic     [31:0] r_bootaddr;\\n123:    logic            r_fetchen;\\n124: \\n125:    logic            r_cluster_irq;\\n126: \\n127:    logic            r_sel_hyper_axi;\\n128: \\n129:    logic s_apb_write;\\n130: \\n131:    assign soc_jtag_reg_o = r_jtag_rego;\\n132: \\n133:    assign fc_bootaddr_o = r_bootaddr;\\n134:    assign fc_fetchen_o  = r_fetchen;\\n135: \\n136:    assign cluster_pow_o = r_cluster_pow;\\n137:    assign sel_hyper_axi_o = r_sel_hyper_axi;\\n138: \\n139:    assign s_apb_write = PSEL && PENABLE && PWRITE;\\n140: \\n141:    assign cluster_rstn_o = r_cluster_rstn;\\n142: \\n143:    assign cluster_boot_addr_o = r_cluster_boot;\\n144:    assign cluster_fetch_enable_o = r_cluster_fetch_enable;\\n145:    assign cluster_byp_o = r_cluster_byp;\\n146:    assign cluster_irq_o = r_cluster_irq;\\n147: \\n148:    always_comb begin\\n149:      for (int i=0;i<64;i++)\\n150:      begin\\n151:        pad_mux[i][0]  = r_pad_fun0[i];\\n152:        pad_mux[i][1]  = r_pad_fun1[i];\\n153:      end\\n154:    end\\n155: \\n156: \\n157:    assign s_apb_addr = PADDR[8:2];\\n158: \\n159:     always_ff @(posedge HCLK, negedge HRESETn)\\n160:     begin\\n161:       if(~HRESETn) begin\\n162:         r_corestatus           <= '0;\\n163:         r_pwr_reg              <= '0;\\n164:         r_pad_fun0             <= '0;\\n165:         r_pad_fun1             <= '0;\\n166:         r_jtag_regi_sync[0]    <= 'h0;\\n167:         r_jtag_regi_sync[1]    <= 'h0;\\n168:         r_jtag_rego            <= 'h0;\\n169:         r_bootaddr             <= 32'h1A000000;\\n170:         r_fetchen       \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 360,
+        "offset": 0,
+        "path": "ips/apb/apb_fll_if/apb_fll_if.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: module apb_fll_if\\n12: #(\\n13:     parameter APB_ADDR_WIDTH = 12\\n14: )\\n15: (\\n16:     input  logic                      HCLK,\\n17:     input  logic                      HRESETn,\\n18:     input  logic [APB_ADDR_WIDTH-1:0] PADDR,\\n19:     input  logic               [31:0] PWDATA,\\n20:     input  logic                      PWRITE,\\n21:     input  logic                      PSEL,\\n22:     input  logic                      PENABLE,\\n23:     output logic               [31:0] PRDATA,\\n24:     output logic                      PREADY,\\n25:     output logic                      PSLVERR,\\n26: \\n27:     output logic                      fll1_req,\\n28:     output logic                      fll1_wrn,\\n29:     output logic                [1:0] fll1_add,\\n30:     output logic               [31:0] fll1_data,\\n31:     input  logic                      fll1_ack,\\n32:     input  logic               [31:0] fll1_r_data,\\n33:     input  logic                      fll1_lock,\\n34:     output logic                      fll2_req,\\n35:     output logic                      fll2_wrn,\\n36:     output logic                [1:0] fll2_add,\\n37:     output logic               [31:0] fll2_data,\\n38:     input  logic                      fll2_ack,\\n39:     input  logic               [31:0] fll2_r_data,\\n40:     input  logic                      fll2_lock,\\n41:     output logic                      fll3_req,\\n42:     output logic                      fll3_wrn,\\n43:     output logic                [1:0] fll3_add,\\n44:     output logic               [31:0] fll3_data,\\n45:     input  logic                      fll3_ack,\\n46:     input  logic               [31:0] fll3_r_data,\\n47:     input  logic                      fll3_lock\\n48: );\\n49: \\n50:     logic        fll1_rd_access;\\n51:     logic        fll1_wr_access;\\n52:     logic        fll2_rd_access;\\n53:     logic        fll2_wr_access;\\n54:     logic        fll3_rd_access;\\n55:     logic        fll3_wr_access;\\n56: \\n57:     logic        read_ready;\\n58:     logic        write_ready;\\n59:     logic [31:0] read_data;\\n60: \\n61:     logic        rvalid;\\n62: \\n63:     logic        fll1_ack_sync0;\\n64:     logic        fll1_ack_sync;\\n65:     logic        fll2_ack_sync0;\\n66:     logic        fll2_ack_sync;\\n67:     logic        fll3_ack_sync0;\\n68:     logic        fll3_ack_sync;\\n69: \\n70:     logic        fll1_lock_sync0;\\n71:     logic        fll1_lock_sync;\\n72:     logic        fll2_lock_sync0;\\n73:     logic        fll2_lock_sync;\\n74:     logic        fll3_lock_sync0;\\n75:     logic        fll3_lock_sync;\\n76: \\n77:     logic        fll1_valid;\\n78:     logic        fll2_valid;\\n79:     logic        fll3_valid;\\n80: \\n81:     enum logic [2:0] { IDLE, CVP1_PHASE1, CVP1_PHASE2, CVP2_PHASE1, CVP2_PHASE2, CVP3_PHASE1, CVP3_PHASE2} state,state_next;\\n82: \\n83:     always_ff @(posedge HCLK, negedge HRESETn)\\n84:     begin\\n85:         if (!HRESETn)\\n86:         begin\\n87:             fll1_ack_sync0  <= 1'b0;\\n88:             fll1_ack_sync   <= 1'b0;\\n89:             fll2_ack_sync0  <= 1'b0;\\n90:             fll2_ack_sync   <= 1'b0;\\n91:             fll3_ack_sync0  <= 1'b0;\\n92:             fll3_ack_sync   <= 1'b0;\\n93:             fll1_lock_sync0 <= 1'b0;\\n9\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 0,
+        "path": "ips/apb/apb_node/apb_node.sv"
+      },
+      "status": "ok",
+      "path": "ips/apb/apb_node/apb_node.sv",
+      "error": null,
+      "content": "1: // Copyright 2018 ETH Zurich and University of Bologna.\n2: // Copyright and related rights are licensed under the Solderpad Hardware\n3: // License, Version 0.51 (the “License”); you may not use this file except in\n4: // compliance with the License.  You may obtain a copy of the License at\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n6: // or agreed to in writing, software, hardware and materials distributed under\n7: // this License is distributed on an “AS IS” BASIS, WITHOUT WARRANTIES OR\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\n9: // specific language governing permissions and limitations under the License.\n10: \n11: // ============================================================================= //\n12: // Engineer:       Davide Rossi - davide.rossi@unibo.it                          //\n13: //                                                                               //\n14: // Design Name:    APB BUS                                                       //\n15: // Module Name:    APB_BUS                                                       //\n16: // Project Name:   PULP                                                          //\n17: // Language:       SystemVerilog                                                 //\n18: //                                                                               //\n19: // Description:    This component implements a configurable APB node             //\n20: //                                                                               //\n21: // ============================================================================= //\n22: \n23: module apb_node\n24:   #(\n25:     parameter NB_MASTER = 8,\n26:     parameter APB_DATA_WIDTH = 32,\n27:     parameter APB_ADDR_WIDTH = 32\n28:     )\n29:    (\n30: \n31:     // SLAVE PORT\n32:     input  logic                                     penable_i,\n33:     input  logic                                     pwrite_i,\n34:     input  logic [31:0]                              paddr_i,\n35:     input  logic [31:0]                              pwdata_i,\n36:     output logic [31:0]                              prdata_o,\n37:     output logic                                     pready_o,\n38:     output logic                                     pslverr_o,\n39: \n40:     // MASTER PORTS\n41:     output logic [NB_MASTER-1:0]                     penable_o,\n42:     output logic [NB_MASTER-1:0]                     pwrite_o,\n43:     output logic [NB_MASTER-1:0][31:0]               paddr_o,\n44:     output logic [NB_MASTER-1:0]                     psel_o,\n45:     output logic [NB_MASTER-1:0][31:0]               pwdata_o,\n46:     input  logic [NB_MASTER-1:0][31:0]               prdata_i,\n47:     input  logic [NB_MASTER-1:0]                     pready_i,\n48:     input  logic [NB_MASTER-1:0]                     pslverr_i,\n49: \n50:     // CONFIGURATION PORT\n51:     input  logic [NB_MASTER-1:0][APB_ADDR_WIDTH-1:0] START_ADDR_i,\n52:     input  logic [NB_MASTER-1:0][APB_ADDR_WIDTH-1:0] END_ADDR_i\n53: \n54:     );\n55: \n56:    genvar                              i;\n57:    integer                             s_loop1,s_loop2,s_loop3,s_loop4,s_loop5,s_loop6,s_loop7;\n58: \n59:    // GENERATE SEL SIGNAL FOR MASTER MATCHING THE ADDRESS\n60:    generate\n61:       for(i=0;i<NB_MASTER;i++)\n62:         begin\n63:            assign psel_o[i]  =  (paddr_i >= START_ADDR_i[i]) && (paddr_i <= END_ADDR_i[i]);\n64:         end\n65:    endgenerate\n66: \n67:    always_comb\n68:      begin\n69:         // PENABLE GENERATION\n70:         for ( s_loop1 = 0; s_loop1 < NB_MASTER; s_loop1++ )\n71:           begin\n72:              if( psel_o[s_loop1] == 1'b1 )\n73:                begin\n74:                   penable_o[s_loop1] = penable_i;\n75:                end\n76:              else\n77:                begin\n78:                   penable_o[s_loop1] = '0;\n79:                end\n80:           end\n81:      end\n82: \n83:    // PWRITE GENERATION\n84:    always_\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 120,
+        "offset": 0,
+        "path": "rtl/includes/periph_bus_defines.sv"
+      },
+      "status": "ok",
+      "path": "rtl/includes/periph_bus_defines.sv",
+      "error": null,
+      "content": "1: /*\n2:  * periph_bus_defines.sv\n3:  *\n4:  * Copyright (C) 2013-2018 ETH Zurich, University of Bologna.\n5:  *\n6:  * Copyright and related rights are licensed under the Solderpad Hardware\n7:  * License, Version 0.51 (the \"License\"); you may not use this file except in\n8:  * compliance with the License.  You may obtain a copy of the License at\n9:  * http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n10:  * or agreed to in writing, software, hardware and materials distributed under\n11:  * this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n12:  * CONDITIONS OF ANY KIND, either express or implied. See the License for the\n13:  * specific language governing permissions and limitations under the License.\n14:  *\n15:  */\n16: \n17: // SOC PERIPHERALS APB BUS PARAMETRES\n18: `define NB_MASTER  11\n19: \n20: // MASTER PORT TO FLL\n21: `define FLL_START_ADDR           32'h1A10_0000\n22: `define FLL_END_ADDR             32'h1A10_0FFF\n23: \n24: // MASTER PORT TO GPIO\n25: `define GPIO_START_ADDR          32'h1A10_1000\n26: `define GPIO_END_ADDR            32'h1A10_AFFF\n27: \n28: // MASTER PORT TO SPI MASTER\n29: `define UDMA_START_ADDR          32'h1A10_2000\n30: `define UDMA_END_ADDR            32'h1A10_4FFF\n31: \n32: // MASTER PORT TO SOC CONTROL\n33: `define SOC_CTRL_START_ADDR      32'h1A10_4000\n34: `define SOC_CTRL_END_ADDR        32'h1A10_4FFF\n35: \n36: // MASTER PORT TO ADV TIMER\n37: `define ADV_TIMER_START_ADDR     32'h1A10_5000\n38: `define ADV_TIMER_END_ADDR       32'h1A10_5FFF\n39: \n40: // MASTER PORT TO SOC EVENT GEN\n41: `define SOC_EVENT_GEN_START_ADDR 32'h1A10_6000\n42: `define SOC_EVENT_GEN_END_ADDR   32'h1A10_6FFF\n43: \n44: `define EU_START_ADDR            32'h1A10_9000\n45: `define EU_END_ADDR              32'h1A10_AFFF\n46: \n47: `define TIMER_START_ADDR         32'h1A10_B000\n48: `define TIMER_END_ADDR           32'h1A10_BFFF\n49: \n50: `define HWPE_START_ADDR          32'h1A10_C000\n51: `define HWPE_END_ADDR            32'h1A10_CFFF\n52: \n53: `define STDOUT_START_ADDR        32'h1A10_F000\n54: `define STDOUT_END_ADDR          32'h1A10_FFFF\n55: \n56: `define DEBUG_START_ADDR         32'h1A11_0000\n57: `define DEBUG_END_ADDR           32'h1A11_FFFF\n58: \n59: `define APB_ASSIGN_SLAVE(lhs, rhs)     \\\n60:     assign lhs.paddr    = rhs.paddr;   \\\n61:     assign lhs.pwdata   = rhs.pwdata;  \\\n62:     assign lhs.pwrite   = rhs.pwrite;  \\\n63:     assign lhs.psel     = rhs.psel;    \\\n64:     assign lhs.penable  = rhs.penable; \\\n65:     assign rhs.prdata   = lhs.prdata;  \\\n66:     assign rhs.pready   = lhs.pready;  \\\n67:     assign rhs.pslverr  = lhs.pslverr;\n68: \n69: `define APB_ASSIGN_MASTER(lhs, rhs) `APB_ASSIGN_SLAVE(rhs, lhs)",
+      "truncated": false
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 240,
+        "offset": 250,
+        "path": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"250:                   pad_cfg[17]        <= PWDATA[13:8];  //pad_cam_data7\\n251:                   pad_cfg[18]        <= PWDATA[21:16]; //pad_cam_hsync\\n252:                   pad_cfg[19]        <= PWDATA[29:24]; //pad_cam_vsync\\n253:                 end\\n254:                 `REG_PADCFG5:\\n255:                 begin\\n256:                   pad_cfg[20]        <= PWDATA[5:0];   //pad_cam_miso\\n257:                   pad_cfg[21]        <= PWDATA[13:8];  //pad_cam_mosi\\n258:                   pad_cfg[22]        <= PWDATA[21:16]; //pad_cam_cs\\n259:                   pad_cfg[23]        <= PWDATA[29:24]; //pad_cam_sck\\n260:                 end\\n261:                 `REG_PADCFG6:\\n262:                 begin\\n263:                   pad_cfg[24]        <= PWDATA[5:0];   //pad_i2c0_sda\\n264:                   pad_cfg[25]        <= PWDATA[13:8];  //pad_i2c0_scl\\n265:                   pad_cfg[26]        <= PWDATA[21:16]; //pad_i2c1_sda\\n266:                   pad_cfg[27]        <= PWDATA[29:24]; //pad_i2c1_scl\\n267:                 end\\n268:                 `REG_PADCFG7:\\n269:                 begin\\n270:                   pad_cfg[28]        <= PWDATA[5:0];   //pad_timer0_ch0\\n271:                   pad_cfg[29]        <= PWDATA[13:8];  //pad_timer0_ch1\\n272:                   pad_cfg[30]        <= PWDATA[21:16]; //pad_timer0_ch2\\n273:                   pad_cfg[31]        <= PWDATA[29:24]; //pad_timer0_ch3\\n274:                 end\\n275:                 `REG_PADCFG8:\\n276:                 begin\\n277:                   pad_cfg[32]        <= PWDATA[5:0];   //pad_i2s0_sck\\n278:                   pad_cfg[33]        <= PWDATA[13:8];  //pad_i2s0_ws\\n279:                   pad_cfg[34]        <= PWDATA[21:16]; //pad_i2s0_sdi\\n280:                   pad_cfg[35]        <= PWDATA[29:24]; //pad_i2s1_sck\\n281:                 end\\n282:                 `REG_PADCFG9:\\n283:                 begin\\n284:                   pad_cfg[36]        <= PWDATA[5:0];   //pad_i2s1_ws\\n285:                   pad_cfg[37]        <= PWDATA[13:8];  //pad_i2s1_sdi\\n286:                   pad_cfg[38]        <= PWDATA[21:16]; //pad_uart_rx\\n287:                   pad_cfg[39]        <= PWDATA[29:24]; //pad_uart_tx\\n288:                 end\\n289:                 `REG_PADCFG10:\\n290:                 begin\\n291:                   pad_cfg[40]        <= PWDATA[5:0];   //pad_spim_sdio0\\n292:                   pad_cfg[41]        <= PWDATA[13:8];  //pad_spim_sdio1\\n293:                   pad_cfg[42]        <= PWDATA[21:16]; //pad_spim_sdio2\\n294:                   pad_cfg[43]        <= PWDATA[29:24]; //pad_spim_sdio3\\n295:                 end\\n296:                 `REG_PADCFG11:\\n297:                 begin\\n298:                   pad_cfg[44]        <= PWDATA[5:0];   //pad_spim_csn0\\n299:                   pad_cfg[45]        <= PWDATA[13:8];  //pad_spim_csn1\\n300:                   pad_cfg[46]        <= PWDATA[21:16]; //pad_spim_sck\\n301:                   pad_cfg[47]        <= PWDATA[29:24]; //\\n302:                 end\\n303:                 `REG_PADCFG12:\\n304:                 begin\\n305:                   pad_cfg[48]        <= PWDATA[5:0];   //\\n306:                   pad_cfg[49]        <= PWDATA[13:8];  //\\n307:                   pad_cfg[50]        <= PWDATA[21:16]; //\\n308:                   pad_cfg[51]        <= PWDATA[29:24]; //\\n309:                 end\\n310:                 `REG_PADCFG13:\\n311:                 begin\\n312:                   pad_cfg[52]        <= PWDATA[5:0];   //\\n313:                   pad_cfg[53]        <= PWDATA[13:8];  //\\n314:                   pad_cfg[54]        <= PWDATA[21:16]; //\\n315:                   pad_cfg[55]        <= PWDATA[29:24]; //\\n316:                 end\\n317:                 `REG_PADCFG14:\\n318:                 begin\\n319:                   pad_cfg[56]        <= PWDATA[5:0];   //\\n320:                   pad_cfg[57]        <= PWDATA[13:8];  //\\n321:                   pad_cfg[58]        <= PW\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 140,
+        "offset": 220,
+        "path": "ips/apb/apb_fll_if/apb_fll_if.sv"
+      },
+      "status": "ok",
+      "path": "ips/apb/apb_fll_if/apb_fll_if.sv",
+      "error": null,
+      "content": "220:                 state_next = IDLE;\n221:             else\n222:                 state_next = CVP3_PHASE2;\n223:         end\n224:         endcase\n225:     end\n226: \n227:     // write logic\n228:     always_comb\n229:     begin\n230:       // default assignments\n231:       fll1_wr_access = 1'b0;\n232:       fll2_wr_access = 1'b0;\n233:       fll3_wr_access = 1'b0;\n234: \n235:       write_ready    = 1'b0;\n236: \n237:       if (PSEL && PENABLE && PWRITE) begin\n238:         unique case (PADDR[5:2])\n239:           // Direct access to FLL1\n240:           4'b0000,\n241:           4'b0001,\n242:           4'b0010,\n243:           4'b0011: begin\n244:             fll1_wr_access = 1'b1;\n245:             write_ready    = rvalid;\n246:           end\n247: \n248:           // Direct access to FLL2\n249:           4'b0100,\n250:           4'b0101,\n251:           4'b0110,\n252:           4'b0111: begin\n253:             fll2_wr_access = 1'b1;\n254:             write_ready    = rvalid;\n255:           end\n256: \n257:           // Direct access to FLL3\n258:           4'b1000,\n259:           4'b1001,\n260:           4'b1010,\n261:           4'b1011: begin\n262:             fll3_wr_access = 1'b1;\n263:             write_ready    = rvalid;\n264:           end\n265: \n266:           // There are no additional registers to write\n267:           default: begin\n268:             write_ready = 1'b1;\n269:           end\n270:         endcase\n271:       end\n272:     end\n273: \n274:     // read logic\n275:     always_comb\n276:     begin\n277:       // default assignments\n278:       fll1_rd_access = 1'b0;\n279:       fll2_rd_access = 1'b0;\n280:       fll3_rd_access = 1'b0;\n281:       read_ready     = 1'b0;\n282:       read_data      = '0;\n283: \n284:       if (PSEL && PENABLE && (~PWRITE)) begin\n285:         unique case (PADDR[5:2])\n286:           // Direct FLL access to FLL1\n287:           4'b0000,\n288:           4'b0001,\n289:           4'b0010,\n290:           4'b0011: begin\n291:             fll1_rd_access = 1'b1;\n292:             read_data      = fll1_r_data;\n293:             read_ready     = rvalid;\n294:           end\n295: \n296:           // Direct FLL access to FLL2\n297:           4'b0100,\n298:           4'b0101,\n299:           4'b0110,\n300:           4'b0111: begin\n301:             fll2_rd_access = 1'b1;\n302:             read_data      = fll2_r_data;\n303:             read_ready     = rvalid;\n304:           end\n305: \n306:           // Direct FLL access to FLL3\n307:           4'b1000,\n308:           4'b1001,\n309:           4'b1010,\n310:           4'b1011: begin\n311:             fll3_rd_access = 1'b1;\n312:             read_data      = fll3_r_data;\n313:             read_ready     = rvalid;\n314:           end\n315: \n316:           4'b1111: begin\n317:             read_data[2:0] = {fll3_lock_sync, fll2_lock_sync, fll1_lock_sync};\n318:             read_ready     = 1'b1;\n319:           end\n320: \n321:           // There are no additional registers to read\n322:           default: begin\n323:             read_ready = 1'b1;\n324:           end\n325:         endcase\n326:       end\n327:     end\n328: \n329: \n330:     assign fll1_wrn   = fll1_valid ? ~PWRITE    : 1'b1;\n331:     assign fll1_add   = fll1_valid ? PADDR[3:2] : '0;\n332:     assign fll1_data  = fll1_valid ? PWDATA     : '0;\n333: \n334:     assign fll2_wrn   = fll2_valid ? ~PWRITE    : 1'b1;\n335:     assign fll2_add   = fll2_valid ? PADDR[3:2] : '0;\n336:     assign fll2_data  = fll2_valid ? PWDATA     : '0;\n337: \n338:     assign fll3_wrn   = fll3_valid ? ~PWRITE    : 1'b1;\n339:     assign fll3_add   = fll3_valid ? PADDR[3:2] : '0;\n340:     assign fll3_data  = fll3_valid ? PWDATA     : '0;\n341: \n342:     assign PREADY     = PWRITE ? write_ready : read_ready;\n343:     assign PRDATA     = read_data;\n344:     assign PSLVERR    = 1'b0;\n345: \n346: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 380,
+        "offset": 120,
+        "path": "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"120:     output logic                       fc_event_valid_o,\\n121:     input  logic                       fc_event_ready_i,\\n122: \\n123:     output logic                       cluster_pow_o,\\n124:     output logic                       cluster_byp_o, // bypass cluster\\n125:     output logic                [63:0] cluster_boot_addr_o,\\n126:     output logic                       cluster_fetch_enable_o,\\n127:     output logic                       cluster_rstn_o,\\n128:     output logic                       cluster_irq_o\\n129: );\\n130: \\n131: \\n132:     APB_BUS s_fll_bus ();\\n133: \\n134:     APB_BUS s_gpio_bus ();\\n135:     APB_BUS s_udma_bus ();\\n136:     APB_BUS s_soc_ctrl_bus ();\\n137:     APB_BUS s_adv_timer_bus ();\\n138:     APB_BUS s_soc_evnt_gen_bus ();\\n139:     APB_BUS s_stdout_bus ();\\n140:     APB_BUS s_apb_timer_bus ();\\n141: \\n142:     localparam UDMA_EVENTS = 29;\\n143:     localparam SOC_EVENTS  = 3 ;\\n144: \\n145:     logic [31:0] s_gpio_sync;\\n146:     logic       s_sel_hyper_axi;\\n147: \\n148:     logic       s_gpio_event      ;\\n149:     logic [1:0] s_spim_event      ;\\n150:     logic       s_uart_event      ;\\n151:     logic       s_i2c_event       ;\\n152:     logic       s_i2s_event       ;\\n153:     logic       s_i2s_cam_event   ;\\n154: \\n155:     logic [3:0] s_adv_timer_events;\\n156:     logic [1:0] s_fc_hp_events;\\n157:     logic       s_fc_err_events;\\n158:     logic       s_ref_rise_event;\\n159:     logic       s_ref_fall_event;\\n160:     logic       s_timer_hi_event;\\n161:     logic       s_timer_lo_event;\\n162: \\n163:     logic       s_pr_event_valid;\\n164:     logic [7:0] s_pr_event_data ;\\n165:     logic       s_pr_event_ready;\\n166: \\n167:     logic [UDMA_EVENTS-1:0] s_udma_events;\\n168:     logic [ SOC_EVENTS-1:0] s_soc_events;\\n169:     logic [           47:0] s_events;\\n170: \\n171:     logic s_timer_in_lo_event;\\n172:     logic s_timer_in_hi_event;\\n173: \\n174:     assign s_events[0]  = s_udma_events[5];      //spim0 rx      UDMA EVENT5\\n175:     assign s_events[1]  = s_udma_events[4];      //spim0 tx      UDMA EVENT4\\n176:     assign s_events[2]  = s_udma_events[8];      //spim1 rx      UDMA EVENT8\\n177:     assign s_events[3]  = s_udma_events[7];      //spim1 tx      UDMA EVENT7\\n178:     assign s_events[4]  = s_udma_events[11];     //hyper rx      UDMA EVENT11\\n179:     assign s_events[5]  = s_udma_events[10];     //hyper tx      UDMA EVENT10\\n180:     assign s_events[6]  = s_udma_events[14];     //uart rx       UDMA EVENT14\\n181:     assign s_events[7]  = s_udma_events[13];     //uart tx       UDMA EVENT13\\n182:     assign s_events[8]  = s_udma_events[17];     //i2c0 rx       UDMA EVENT17\\n183:     assign s_events[9]  = s_udma_events[16];     //i2c0 tx       UDMA EVENT16\\n184:     assign s_events[10] = s_udma_events[20];     //i2c1 rx       UDMA EVENT20\\n185:     assign s_events[11] = s_udma_events[19];     //i2c1 tx       UDMA EVENT19\\n186:     assign s_events[12] = s_udma_events[24];     //i2s0 channels UDMA EVENT24\\n187:     assign s_events[13] = s_udma_events[25];     //i2s0 channels UDMA EVENT25\\n188:     assign s_events[14] = s_udma_events[27];     //camera IF     UDMA EVENT27\\n189:     assign s_events[15] = 1'b0;\\n190:     assign s_events[16] = s_udma_events[1];      //TGEN events\\n191:     assign s_events[17] = s_udma_events[0];      //TGEN events\\n192:     assign s_events[18] = s_udma_events[3];      //TGEN events\\n193:     assign s_events[19] = s_udma_events[2];      //TGEN events\\n194:     assign s_events[20] = s_udma_events[23];     //TGEN events\\n195:     assign s_events[21] = s_udma_events[22];     //TGEN events\\n196:     assign s_events[22] = s_udma_events[6];      //spim0 end of transfer UDMA EVENT6\\n197:     assign s_events[23] = s_udma_events[9];      //spim1 end of transfer UDMA EVENT9\\n198:     assign s_events[24] = s_udma_events[12];     //spim2 end of transfer UDMA EVENT12\\n199:     assign s_events[25] = s_udma_events[15]; \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 140,
+        "offset": 0,
+        "path": "rtl/includes/soc_bus_defines.sv"
+      },
+      "status": "ok",
+      "path": "rtl/includes/soc_bus_defines.sv",
+      "error": null,
+      "content": "1: /*\n2:  * soc_bus_defines.sv\n3:  *\n4:  * Copyright (C) 2013-2018 ETH Zurich, University of Bologna.\n5:  *\n6:  * Copyright and related rights are licensed under the Solderpad Hardware\n7:  * License, Version 0.51 (the \"License\"); you may not use this file except in\n8:  * compliance with the License.  You may obtain a copy of the License at\n9:  * http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n10:  * or agreed to in writing, software, hardware and materials distributed under\n11:  * this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n12:  * CONDITIONS OF ANY KIND, either express or implied. See the License for the\n13:  * specific language governing permissions and limitations under the License.\n14:  *\n15:  */\n16: \n17: // SOC BUS PARAMETRES\n18: `include \"pulp_soc_defines.sv\"\n19: \n20: `define NB_SLAVE  4\n21: `define NB_MASTER 4\n22: `define NB_REGION 4\n23: \n24: // MASTER PORT TO CLUSTER(3MB)\n25: `define CLUSTER_DATA_START_ADDR  32'h1000_0000\n26: `define CLUSTER_DATA_END_ADDR    32'h103F_FFFF\n27: \n28: // MASTER PORT TO L2\n29: `define SOC_L2_START_ADDR        32'h1C00_0000\n30: `define SOC_L2_END_ADDR          32'h1FFF_FFFF\n31: \n32: // MASTER PORT TO L2\n33: `define SOC_L2_PRI_CH0_START_ADDR     32'h1C00_0000\n34: `define SOC_L2_PRI_CH0_END_ADDR       32'h1C00_8000\n35: \n36: `define SOC_L2_PRI_CH1_START_ADDR     32'h1C00_8000\n37: `define SOC_L2_PRI_CH1_END_ADDR       32'h1C01_0000\n38: \n39: `define SOC_L2_PRI_CH0_SCM_START_ADDR 32'h1C00_6000\n40: `define SOC_L2_PRI_CH0_SCM_END_ADDR   32'h1C00_8000\n41: \n42: `define ALIAS_SOC_L2_PRI_CH0_SCM_START_ADDR 32'h0000_6000\n43: `define ALIAS_SOC_L2_PRI_CH0_SCM_END_ADDR   32'h0000_8000\n44: \n45: \n46: // MASTER PORT TO SOC APB\n47: \n48: // REGION TO SOC APB PERIPHERALS\n49: `define SOC_APB_START_ADDR       32'h1A10_0000\n50: `define SOC_APB_END_ADDR         32'h1A10_FFFF\n51: \n52: // REGION TO FABRIC CONTROLLER PERIPHERAL INTERCONNECT PERIPHERALS\n53: `define FC_PERIPH_APB_START_ADDR 32'h1B20_0000\n54: `define FC_PERIPH_APB_END_ADDR   32'h1B20_3FFF\n55: \n56: // REGION TO FABRIC CONTROLLER APB PERIPHERALS\n57: `define FC_APB_START_ADDR        32'h1B30_0000\n58: `define FC_APB_END_ADDR          32'h1B3F_FFFF\n59: \n60: // MASTER PORT TO STDOUT(64KB)\n61: `define SOC_STDOUT_START_ADDR    32'h1A11_0000\n62: `define SOC_STDOUT_END_ADDR      32'h1A11_FFFF\n63: \n64: `define AXI_ASSIGN_SLAVE(lhs, rhs)        \\\n65:     assign lhs.aw_id     = rhs.aw_id;     \\\n66:     assign lhs.aw_addr   = rhs.aw_addr;   \\\n67:     assign lhs.aw_len    = rhs.aw_len;    \\\n68:     assign lhs.aw_size   = rhs.aw_size;   \\\n69:     assign lhs.aw_burst  = rhs.aw_burst;  \\\n70:     assign lhs.aw_lock   = rhs.aw_lock;   \\\n71:     assign lhs.aw_cache  = rhs.aw_cache;  \\\n72:     assign lhs.aw_prot   = rhs.aw_prot;   \\\n73:     assign lhs.aw_region = rhs.aw_region; \\\n74:     assign lhs.aw_user   = rhs.aw_user;   \\\n75:     assign lhs.aw_qos    = rhs.aw_qos;    \\\n76:     assign lhs.aw_valid  = rhs.aw_valid;  \\\n77:     assign rhs.aw_ready  = lhs.aw_ready;  \\\n78:                                           \\\n79:     assign lhs.ar_id     = rhs.ar_id;     \\\n80:     assign lhs.ar_addr   = rhs.ar_addr;   \\\n81:     assign lhs.ar_len    = rhs.ar_len;    \\\n82:     assign lhs.ar_size   = rhs.ar_size;   \\\n83:     assign lhs.ar_burst  = rhs.ar_burst;  \\\n84:     assign lhs.ar_lock   = rhs.ar_lock;   \\\n85:     assign lhs.ar_cache  = rhs.ar_cache;  \\\n86:     assign lhs.ar_prot   = rhs.ar_prot;   \\\n87:     assign lhs.ar_region = rhs.ar_region; \\\n88:     assign lhs.ar_user   = rhs.ar_user;   \\\n89:     assign lhs.ar_qos    = rhs.ar_qos;    \\\n90:     assign lhs.ar_valid  = rhs.ar_valid;  \\\n91:     assign rhs.ar_ready  = lhs.ar_ready;  \\\n92:                                           \\\n93:     assign lhs.w_data    = rhs.w_data;    \\\n94:     assign lhs.w_strb    = rhs.w_strb;    \\\n95:     assign lhs.w_last    = rhs.w_last;    \\\n96:     assign lhs.w_user    = rhs.w_user;    \\\n97:     assign lhs.w_valid   = rhs.w_valid;   \\\n98:     assign rh\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 268,
+        "path": "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"268:     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////\\n269:     periph_bus_wrap #(\\n270:         .APB_ADDR_WIDTH ( 32 ),\\n271:         .APB_DATA_WIDTH ( 32 )\\n272:     ) periph_bus_i (\\n273:         .clk_i               ( clk_i              ),\\n274:         .rst_ni              ( rst_ni             ),\\n275: \\n276:         .apb_slave           ( apb_slave          ),\\n277: \\n278:         .fll_master          ( s_fll_bus          ),\\n279:         .gpio_master         ( s_gpio_bus         ),\\n280:         .udma_master         ( s_udma_bus         ),\\n281:         .soc_ctrl_master     ( s_soc_ctrl_bus     ),\\n282:         .adv_timer_master    ( s_adv_timer_bus    ),\\n283:         .soc_evnt_gen_master ( s_soc_evnt_gen_bus ),\\n284:         .eu_master           ( apb_eu_master      ),\\n285:         .mmap_debug_master   ( apb_debug_master   ),\\n286:         .hwpe_master         ( apb_hwpe_master    ),\\n287:         .timer_master        ( s_apb_timer_bus    ),\\n288:         .stdout_master       ( s_stdout_bus       )\\n289:     );\\n290: \\n291:     `ifdef SYNTHESIS\\n292:         assign s_stdout_bus.pready  = 'h0;\\n293:         assign s_stdout_bus.pslverr = 'h0;\\n294:         assign s_stdout_bus.prdata  = 'h0;\\n295:     `endif\\n296: \\n297: \\n298:     /////////////////////////////////////////////////////////////////////////\\n299:     //  █████╗ ██████╗ ██████╗     ███████╗██╗     ██╗         ██╗███████╗ //\\n300:     // ██╔══██╗██╔══██╗██╔══██╗    ██╔════╝██║     ██║         ██║██╔════╝ //\\n301:     // ███████║██████╔╝██████╔╝    █████╗  ██║     ██║         ██║█████╗   //\\n302:     // ██╔══██║██╔═══╝ ██╔══██╗    ██╔══╝  ██║     ██║         ██║██╔══╝   //\\n303:     // ██║  ██║██║     ██████╔╝    ██║     ███████╗███████╗    ██║██║      //\\n304:     // ╚═╝  ╚═╝╚═╝     ╚═════╝     ╚═╝     ╚══════╝╚══════╝    ╚═╝╚═╝      //\\n305:     /////////////////////////////////////////////////////////////////////////\\n306:     apb_fll_if #(.APB_ADDR_WIDTH(APB_ADDR_WIDTH)) apb_fll_if_i (\\n307:         .HCLK        ( clk_i                   ),\\n308:         .HRESETn     ( rst_ni                  ),\\n309: \\n310:         .PADDR       ( s_fll_bus.paddr         ),\\n311:         .PWDATA      ( s_fll_bus.pwdata        ),\\n312:         .PWRITE      ( s_fll_bus.pwrite        ),\\n313:         .PSEL        ( s_fll_bus.psel          ),\\n314:         .PENABLE     ( s_fll_bus.penable       ),\\n315:         .PRDATA      ( s_fll_bus.prdata        ),\\n316:         .PREADY      ( s_fll_bus.pready        ),\\n317:         .PSLVERR     ( s_fll_bus.pslverr       ),\\n318: \\n319:         .fll1_req    ( soc_fll_master.req      ),\\n320:         .fll1_wrn    ( soc_fll_master.wrn      ),\\n321:         .fll1_add    ( soc_fll_master.add[1:0] ),\\n322:         .fll1_data   ( soc_fll_master.data     ),\\n323:         .fll1_ack    ( soc_fll_master.ack      ),\\n324:         .fll1_r_data ( soc_fll_master.r_data   ),\\n325:         .fll1_lock   ( soc_fll_master.lock     ),\\n326: \\n327:         .fll2_req    ( per_fll_master.req      ),\\n328:         .fll2_wrn    ( per_fll_master.wrn      ),\\n329:         .fll2_add    ( per_fll_master.add[1:0] ),\\n330:         .fll2_data   ( per_fll_master.data     ),\\n331:         .fll2_ack    ( per_fll_master.ack      ),\\n332:         .fll2_r_data ( per_fll_master.r_data   ),\\n333:         .fll2_lock   ( per_fll_master.lock     ),\\n334: \\n335:         .fll3_req    ( cluster_fll_master.req      ),\\n336:         .fll3_wrn    ( cluster_fll_master.wrn      ),\\n337:         .fll3_add    ( cluster_fll_master.add[1:0] ),\\n338:         .fll3_data   ( cluster_fll_master.data     ),\\n339:         .fll3_ack    ( cluster_fll_master.ack      ),\\n340:         .fll3_r_data ( cluster_fll_master.r_data   ),\\n341:         .fll3_lock   ( cluster_fll_master.lock     )\\n342:     );\\n343: \\n344:     ///////////////////////////////////////////////////////////////\\n\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 130,
+        "offset": 0,
+        "path": "ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv",
+      "error": null,
+      "content": "1: // Copyright 2018 ETH Zurich and University of Bologna.\n2: // Copyright and related rights are licensed under the Solderpad Hardware\n3: // License, Version 0.51 (the \"License\"); you may not use this file except in\n4: // compliance with the License.  You may obtain a copy of the License at\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n6: // or agreed to in writing, software, hardware and materials distributed under\n7: // this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\n9: // specific language governing permissions and limitations under the License.\n10: \n11: \n12: `include \"periph_bus_defines.sv\"\n13: \n14: module periph_bus_wrap #(\n15:     parameter APB_ADDR_WIDTH = 32,\n16:     parameter APB_DATA_WIDTH = 32\n17: ) (\n18:     input logic    clk_i,\n19:     input logic    rst_ni,\n20:     APB_BUS.Slave  apb_slave,\n21:     APB_BUS.Master fll_master,\n22:     APB_BUS.Master gpio_master,\n23:     APB_BUS.Master udma_master,\n24:     APB_BUS.Master soc_ctrl_master,\n25:     APB_BUS.Master adv_timer_master,\n26:     APB_BUS.Master soc_evnt_gen_master,\n27:     APB_BUS.Master eu_master,\n28:     APB_BUS.Master mmap_debug_master,\n29:     APB_BUS.Master timer_master,\n30:     APB_BUS.Master hwpe_master,\n31:     APB_BUS.Master stdout_master\n32: );\n33: \n34:     localparam NB_MASTER = `NB_MASTER;\n35: \n36:     logic [NB_MASTER-1:0][APB_ADDR_WIDTH-1:0] s_start_addr;\n37:     logic [NB_MASTER-1:0][APB_ADDR_WIDTH-1:0] s_end_addr;\n38: \n39:     APB_BUS\n40:     #(\n41:         .APB_ADDR_WIDTH(APB_ADDR_WIDTH),\n42:         .APB_DATA_WIDTH(APB_DATA_WIDTH)\n43:     )\n44:     s_masters[NB_MASTER-1:0]();\n45: \n46:     APB_BUS #(\n47:         .APB_ADDR_WIDTH ( APB_ADDR_WIDTH ),\n48:         .APB_DATA_WIDTH ( APB_DATA_WIDTH )\n49:     ) s_slave ();\n50: \n51:     `APB_ASSIGN_SLAVE(s_slave, apb_slave);\n52: \n53:     `APB_ASSIGN_MASTER(s_masters[0], fll_master);\n54:     assign s_start_addr[0] = `FLL_START_ADDR;\n55:     assign s_end_addr[0]   = `FLL_END_ADDR;\n56: \n57:     `APB_ASSIGN_MASTER(s_masters[1], gpio_master);\n58:     assign s_start_addr[1] = `GPIO_START_ADDR;\n59:     assign s_end_addr[1]   = `GPIO_END_ADDR;\n60: \n61:     `APB_ASSIGN_MASTER(s_masters[2], udma_master);\n62:     assign s_start_addr[2] = `UDMA_START_ADDR;\n63:     assign s_end_addr[2]   = `UDMA_END_ADDR;\n64: \n65:     `APB_ASSIGN_MASTER(s_masters[3], soc_ctrl_master);\n66:     assign s_start_addr[3] = `SOC_CTRL_START_ADDR;\n67:     assign s_end_addr[3]   = `SOC_CTRL_END_ADDR;\n68: \n69:     `APB_ASSIGN_MASTER(s_masters[4], adv_timer_master);\n70:     assign s_start_addr[4] = `ADV_TIMER_START_ADDR;\n71:     assign s_end_addr[4]   = `ADV_TIMER_END_ADDR;\n72: \n73:     `APB_ASSIGN_MASTER(s_masters[5], soc_evnt_gen_master);\n74:     assign s_start_addr[5] = `SOC_EVENT_GEN_START_ADDR;\n75:     assign s_end_addr[5]   = `SOC_EVENT_GEN_END_ADDR;\n76: \n77:     `APB_ASSIGN_MASTER(s_masters[6], eu_master);\n78:     assign s_start_addr[6] = `EU_START_ADDR;\n79:     assign s_end_addr[6]   = `EU_END_ADDR;\n80: \n81:     `APB_ASSIGN_MASTER(s_masters[7], timer_master);\n82:     assign s_start_addr[7] = `TIMER_START_ADDR;\n83:     assign s_end_addr[7]   = `TIMER_END_ADDR;\n84: \n85:     `APB_ASSIGN_MASTER(s_masters[8], hwpe_master);\n86:     assign s_start_addr[8] = `HWPE_START_ADDR;\n87:     assign s_end_addr[8]   = `HWPE_END_ADDR;\n88: \n89:     `APB_ASSIGN_MASTER(s_masters[9], stdout_master);\n90:     assign s_start_addr[9] = `STDOUT_START_ADDR;\n91:     assign s_end_addr[9]   = `STDOUT_END_ADDR;\n92: \n93:     `APB_ASSIGN_MASTER(s_masters[10], mmap_debug_master);\n94:     assign s_start_addr[10] = `DEBUG_START_ADDR;\n95:     assign s_end_addr[10]   = `DEBUG_END_ADDR;\n96: \n97: \n98:     //********************************************************\n99:     //**************** SOC BUS *******************************\n100:     //********************************************************\n101:     apb_node_wrap #(\n102:         .NB_M\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 170,
+        "offset": 0,
+        "path": "ips/apb/apb_node/apb_node_wrap.sv"
+      },
+      "status": "ok",
+      "path": "ips/apb/apb_node/apb_node_wrap.sv",
+      "error": null,
+      "content": "1: // Copyright 2018 ETH Zurich and University of Bologna.\n2: // Copyright and related rights are licensed under the Solderpad Hardware\n3: // License, Version 0.51 (the “License”); you may not use this file except in\n4: // compliance with the License.  You may obtain a copy of the License at\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n6: // or agreed to in writing, software, hardware and materials distributed under\n7: // this License is distributed on an “AS IS” BASIS, WITHOUT WARRANTIES OR\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\n9: // specific language governing permissions and limitations under the License.\n10: \n11: // =============================================================================== //\n12: // Engineer:       Davide Rossi - davide.rossi@unibo.it                            //\n13: //                                                                                 //\n14: // Design Name:    APB NODE WRAPPER                                                //\n15: // Module Name:    APB_BUS                                                         //\n16: // Project Name:   PULP                                                            //\n17: // Language:       SystemVerilog                                                   //\n18: //                                                                                 //\n19: // Description:    This component implements a wrapper for a configurable APB node //\n20: //                                                                                 //\n21: // =============================================================================== //\n22: \n23: module apb_node_wrap\n24:   #(\n25:     parameter NB_MASTER = 8,\n26:     parameter APB_DATA_WIDTH = 32,\n27:     parameter APB_ADDR_WIDTH = 32\n28:     )\n29:    (\n30:     input logic                                      clk_i,\n31:     input logic                                      rst_ni,\n32: \n33:     // SLAVE PORT\n34:     APB_BUS.Slave                                    apb_slave,\n35: \n36:     // MASTER PORTS\n37:     APB_BUS.Master                                   apb_masters[NB_MASTER-1:0],\n38: \n39:     // CONFIGURATION PORT\n40:     input  logic [NB_MASTER-1:0][APB_ADDR_WIDTH-1:0] start_addr_i,\n41:     input  logic [NB_MASTER-1:0][APB_ADDR_WIDTH-1:0] end_addr_i\n42:     );\n43: \n44:    genvar                              i;\n45: \n46:    logic [NB_MASTER-1:0]               penable;\n47:    logic [NB_MASTER-1:0]               pwrite;\n48:    logic [NB_MASTER-1:0][31:0]         paddr;\n49:    logic [NB_MASTER-1:0]               psel;\n50:    logic [NB_MASTER-1:0][31:0]         pwdata;\n51:    logic [NB_MASTER-1:0][31:0]         prdata;\n52:    logic [NB_MASTER-1:0]               pready;\n53:    logic [NB_MASTER-1:0]               pslverr;\n54: \n55:    // GENERATE SEL SIGNAL FOR MASTER MATCHING THE ADDRESS\n56:    generate\n57:       for(i=0;i<NB_MASTER;i++)\n58:         begin\n59:            assign apb_masters[i].penable = penable[i];\n60:            assign apb_masters[i].pwrite  = pwrite[i];\n61:            assign apb_masters[i].paddr   = paddr[i];\n62:            assign apb_masters[i].psel    = psel[i];\n63:            assign apb_masters[i].pwdata  = pwdata[i];\n64:            assign prdata[i]              = apb_masters[i].prdata;\n65:            assign pready[i]              = apb_masters[i].pready;\n66:            assign pslverr[i]             = apb_masters[i].pslverr;\n67:         end\n68:    endgenerate\n69: \n70:    apb_node\n71:      #(\n72:        .NB_MASTER(NB_MASTER),\n73:        .APB_DATA_WIDTH(APB_DATA_WIDTH),\n74:        .APB_ADDR_WIDTH(APB_ADDR_WIDTH)\n75:        )\n76:    apb_node_i\n77:      (\n78: \n79:       .penable_i(apb_slave.penable),\n80:       .pwrite_i(apb_slave.pwrite),\n81:       .paddr_i(apb_slave.paddr),\n82:       .pwdata_i(apb_slave.pwdata),\n83:       .prdata_o(apb_slave.prdata),\n84:       .pready_o(apb_slave.pready),\n85:       .pslverr_o(apb_slave.pslverr),\n86: \n87:   \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 0,
+        "path": "ips/apb/apb_gpio/apb_gpio.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the “License”); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an “AS IS” BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: `define REG_PADDIR      5'b00000 //BASEADDR+0x00\\n12: `define REG_PADIN       5'b00001 //BASEADDR+0x04\\n13: `define REG_PADOUT      5'b00010 //BASEADDR+0x08\\n14: `define REG_INTEN       5'b00011 //BASEADDR+0x0C\\n15: `define REG_INTTYPE0    5'b00100 //BASEADDR+0x10\\n16: `define REG_INTTYPE1    5'b00101 //BASEADDR+0x14\\n17: `define REG_INTSTATUS   5'b00110 //BASEADDR+0x18\\n18: `define REG_GPIOEN      5'b00111 //BASEADDR+0x1C\\n19: \\n20: `define REG_PADCFG0     5'b01000 //BASEADDR+0x20\\n21: `define REG_PADCFG1     5'b01001 //BASEADDR+0x24\\n22: `define REG_PADCFG2     5'b01010 //BASEADDR+0x28\\n23: `define REG_PADCFG3     5'b01011 //BASEADDR+0x2C\\n24: `define REG_PADCFG4     5'b01100 //BASEADDR+0x30\\n25: `define REG_PADCFG5     5'b01101 //BASEADDR+0x34\\n26: `define REG_PADCFG6     5'b01110 //BASEADDR+0x38\\n27: `define REG_PADCFG7     5'b01111 //BASEADDR+0x3C\\n28: \\n29: `define REG_PADOUTSET   5'b10000 //BASEADDR+0x40\\n30: `define REG_PADOUTCLR   5'b10001 //BASEADDR+0x44\\n31: `define REG_GPIOLOCK    5'b10010 //BASEADDR+0x48\\n32: \\n33: module apb_gpio\\n34: #(\\n35:     parameter APB_ADDR_WIDTH = 12  //APB slaves are 4KB by default\\n36: )\\n37: (\\n38:     input  logic                      HCLK,\\n39:     input  logic                      HRESETn,\\n40: \\n41:     input  logic                      dft_cg_enable_i,\\n42: \\n43:     input  logic [APB_ADDR_WIDTH-1:0] PADDR,\\n44:     input  logic               [31:0] PWDATA,\\n45:     input  logic                      PWRITE,\\n46:     input  logic                      PSEL,\\n47:     input  logic                      PENABLE,\\n48:     output logic               [31:0] PRDATA,\\n49:     output logic                      PREADY,\\n50:     output logic                      PSLVERR,\\n51: \\n52:     input  logic               [31:0] gpio_in,\\n53:     output logic               [31:0] gpio_in_sync,\\n54:     output logic               [31:0] gpio_out,\\n55:     output logic               [31:0] gpio_dir,\\n56:     output logic          [31:0][5:0] gpio_padcfg,\\n57:     output logic                      interrupt\\n58: );\\n59: \\n60:     logic [31:0] r_gpio_inten;\\n61:     logic [31:0] r_gpio_inttype0;\\n62:     logic [31:0] s_gpio_inttype0;\\n63:     logic [31:0] r_gpio_inttype1;\\n64:     logic [31:0] s_gpio_inttype1;\\n65:     logic [31:0] r_gpio_out;\\n66:     logic [31:0] r_gpio_dir;\\n67:     logic [31:0] r_gpio_sync0;\\n68:     logic [31:0] r_gpio_sync1;\\n69:     logic [31:0] r_gpio_in;\\n70:     logic [31:0] r_gpio_en;\\n71:     logic [31:0] r_gpio_lock;\\n72:     logic [31:0] s_gpio_rise;\\n73:     logic [31:0] s_gpio_fall;\\n74:     logic [31:0] s_is_int_rise;\\n75:     logic [31:0] s_is_int_rifa;\\n76:     logic [31:0] s_is_int_fall;\\n77:     logic [31:0] s_is_int_all;\\n78:     logic        s_rise_int;\\n79: \\n80:     logic  [4:0] s_apb_addr;\\n81: \\n82:     logic [31:0] r_status;\\n83: \\n84:     logic [7:0] s_clk_en;\\n85:     logic [7:0] s_clkg;\\n86: \\n87:     genvar i;\\n88: \\n89:     assign s_apb_addr = PADDR[6:2];\\n90: \\n91:     assign gpio_in_sync = r_gpio_sync1;\\n92: \\n93:     assign s_gpio_rise =  r_gpio_sync1 & ~r_gpio_in; //foreach input check if rising edge\\n94:     assign s_gpio_fall = ~r_gpio_sync1 &  r_gpio_in; //foreach input check if falling edge\\n95: \\n96: \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 190,
+        "offset": 250,
+        "path": "ips/apb/apb_gpio/apb_gpio.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"250:     always_ff @(posedge s_clkg[6], negedge HRESETn)\\n251:     begin\\n252:         if(~HRESETn)\\n253:         begin\\n254:             r_gpio_sync0[27:24]    <= 'h0;\\n255:             r_gpio_sync1[27:24]    <= 'h0;\\n256:             r_gpio_in[27:24]       <= 'h0;\\n257:         end\\n258:         else\\n259:         begin\\n260:             r_gpio_sync0[27:24]    <= gpio_in[27:24];      //first 2 sync for metastability resolving\\n261:             r_gpio_sync1[27:24]    <= r_gpio_sync0[27:24];\\n262:             r_gpio_in[27:24]       <= r_gpio_sync1[27:24]; //last reg used for edge detection\\n263:         end\\n264:     end //always\\n265: \\n266:     always_ff @(posedge s_clkg[7], negedge HRESETn)\\n267:     begin\\n268:         if(~HRESETn)\\n269:         begin\\n270:             r_gpio_sync0[31:28]    <= 'h0;\\n271:             r_gpio_sync1[31:28]    <= 'h0;\\n272:             r_gpio_in[31:28]       <= 'h0;\\n273:         end\\n274:         else\\n275:         begin\\n276:             r_gpio_sync0[31:28]    <= gpio_in[31:28];      //first 2 sync for metastability resolving\\n277:             r_gpio_sync1[31:28]    <= r_gpio_sync0[31:28];\\n278:             r_gpio_in[31:28]       <= r_gpio_sync1[31:28]; //last reg used for edge detection\\n279:         end\\n280:     end //always\\n281: \\n282:     always_ff @(posedge HCLK, negedge HRESETn)\\n283:     begin\\n284:         if(~HRESETn)\\n285:         begin\\n286:             r_gpio_inten    <=  '0;\\n287:             r_gpio_inttype0 <=  '0;\\n288:             r_gpio_inttype1 <=  '0;\\n289:             r_gpio_out      <=  '0;\\n290:             r_gpio_dir      <=  '0;\\n291:             r_gpio_en       <=  '0;\\n292: \\t    r_gpio_lock     <=  '0;\\n293:             for (int i=0;i<32;i++)\\n294:                 gpio_padcfg[i]  <=  6'b000010; // DS=high, PE=disabled\\n295:         end\\n296:         else\\n297:         begin\\n298:             if (PSEL && PENABLE && PWRITE)\\n299:             begin\\n300: \\t\\tint pwdata_l;\\n301:                 case (s_apb_addr)\\n302:                 `REG_PADDIR: begin \\t\\t    \\n303: \\t\\t    if(r_gpio_lock[0] == '0) pwdata_l = PWDATA;\\n304: \\t\\t    else pwdata_l = '0;\\n305:                     r_gpio_dir      <= pwdata_l;\\n306: \\t\\tend\\n307:                 `REG_PADOUT: begin\\n308: \\t\\t    if(r_gpio_lock[2] == '0) pwdata_l = PWDATA;\\n309: \\t\\t    else pwdata_l = '0;\\n310:                     r_gpio_out      <= pwdata_l;\\n311: \\t\\tend\\n312:                 `REG_PADOUTSET:\\n313:                     r_gpio_out      <= r_gpio_out | PWDATA;\\n314:                 `REG_PADOUTCLR:\\n315:                     r_gpio_out      <= r_gpio_out & ~PWDATA;\\n316:                 `REG_INTEN:\\n317:                     r_gpio_inten    <= PWDATA;\\n318:                 `REG_INTTYPE0:\\n319:                     r_gpio_inttype0 <= PWDATA;\\n320:                 `REG_INTTYPE1:\\n321:                     r_gpio_inttype1 <= PWDATA;\\n322:                 `REG_GPIOEN:\\n323:                     r_gpio_en       <= PWDATA;\\n324: \\t\\t`REG_GPIOLOCK:\\n325: \\t\\t    r_gpio_lock     <= PWDATA;\\n326:                 `REG_PADCFG0:\\n327:                 begin\\n328:                     gpio_padcfg[0]  <= PWDATA[5:0]  ;\\n329:                     gpio_padcfg[1]  <= PWDATA[13:8] ;\\n330:                     gpio_padcfg[2]  <= PWDATA[21:16];\\n331:                     gpio_padcfg[3]  <= PWDATA[29:24];\\n332:                 end\\n333:                 `REG_PADCFG1:\\n334:                 begin\\n335:                     gpio_padcfg[4]  <= PWDATA[5:0]  ;\\n336:                     gpio_padcfg[5]  <= PWDATA[13:8] ;\\n337:                     gpio_padcfg[6]  <= PWDATA[21:16];\\n338:                     gpio_padcfg[7]  <= PWDATA[29:24];\\n339:                 end\\n340:                 `REG_PADCFG2:\\n341:                 begin\\n342:                     gpio_padcfg[8]  <= PWDATA[5:0]  ;\\n343:                     gpio_padcfg[9]  <= PWDATA[13:8] ;\\n344:                     gpio_padcfg[10] <= PWDATA[21:1\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 0,
+        "path": "ips/pulp_soc/rtl/components/apb_clkdiv.sv"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/components/apb_clkdiv.sv",
+      "error": null,
+      "content": "1: // Copyright 2018 ETH Zurich and University of Bologna.\n2: // Copyright and related rights are licensed under the Solderpad Hardware\n3: // License, Version 0.51 (the \"License\"); you may not use this file except in\n4: // compliance with the License.  You may obtain a copy of the License at\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n6: // or agreed to in writing, software, hardware and materials distributed under\n7: // this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\n9: // specific language governing permissions and limitations under the License.\n10: \n11: \n12: `define REG_CLKDIV0     2'b00 //BASEADDR+0x00\n13: `define REG_CLKDIV1     2'b01 //BASEADDR+0x04\n14: `define REG_CLKDIV2     2'b10 //BASEADDR+0x08\n15: \n16: module apb_clkdiv\n17: #(\n18:     parameter APB_ADDR_WIDTH = 12  //APB slaves are 4KB by default\n19: )\n20: (\n21:     input  logic                      HCLK,\n22:     input  logic                      HRESETn,\n23:     input  logic [APB_ADDR_WIDTH-1:0] PADDR,\n24:     input  logic               [31:0] PWDATA,\n25:     input  logic                      PWRITE,\n26:     input  logic                      PSEL,\n27:     input  logic                      PENABLE,\n28:     output logic               [31:0] PRDATA,\n29:     output logic                      PREADY,\n30:     output logic                      PSLVERR,\n31: \n32:     output logic                [7:0] clk_div0,\n33:     output logic                      clk_div0_valid,\n34:     output logic                [7:0] clk_div1,\n35:     output logic                      clk_div1_valid,\n36:     output logic                [7:0] clk_div2,\n37:     output logic                      clk_div2_valid\n38: \n39: );\n40: \n41:    logic [7:0]                        r_clkdiv0;\n42:    logic [7:0]                        r_clkdiv1;\n43:    logic [7:0]                        r_clkdiv2;\n44: \n45:    logic [1:0]                        s_apb_addr;\n46: \n47:    assign s_apb_addr = PADDR[3:2];\n48: \n49:    always @ (posedge HCLK or negedge HRESETn) begin\n50:       if(~HRESETn) begin\n51:          r_clkdiv0      = 'h0;\n52:          r_clkdiv1      = 'h0;\n53:          r_clkdiv2      = 8'h0A;\n54:          clk_div0_valid = 1'b0;\n55:          clk_div1_valid = 1'b0;\n56:          clk_div2_valid = 1'b0;\n57:       end\n58:       else begin\n59:          clk_div0_valid    = 1'b0;\n60:          clk_div1_valid    = 1'b0;\n61:          clk_div2_valid    = 1'b0;\n62:          if (PSEL && PENABLE && PWRITE)\n63:            begin\n64:               case (s_apb_addr)\n65:                 `REG_CLKDIV0:\n66:                   begin\n67:                      r_clkdiv0      = PWDATA[7:0];\n68:                      clk_div0_valid = 1'b1;\n69:                   end\n70:                 `REG_CLKDIV1:\n71:                   begin\n72:                      r_clkdiv1      = PWDATA[7:0];\n73:                      clk_div1_valid = 1'b1;\n74:                   end\n75:                 `REG_CLKDIV2:\n76:                   begin\n77:                      r_clkdiv2      = PWDATA[7:0];\n78:                      clk_div2_valid = 1'b1;\n79:                   end\n80:               endcase\n81:            end\n82:       end\n83:    end //always\n84: \n85:    always_comb\n86:      begin\n87:         case (s_apb_addr)\n88:           `REG_CLKDIV0:\n89:             PRDATA = {24'h0,r_clkdiv0};\n90:           `REG_CLKDIV1:\n91:             PRDATA = {24'h0,r_clkdiv1};\n92:           `REG_CLKDIV2:\n93:             PRDATA = {24'h0,r_clkdiv2};\n94:           default:\n95:             PRDATA = '0;\n96:         endcase\n97:      end\n98: \n99:    assign clk_div0 = r_clkdiv0;\n100:    assign clk_div1 = r_clkdiv1;\n101:    assign clk_div2 = r_clkdiv2;\n102: \n103:    assign PREADY  = 1'b1;\n104:    assign PSLVERR = 1'b0;\n105: \n106: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 100,
+        "path": "ips/pulp_soc/rtl/components/apb_timer_unit.sv"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/components/apb_timer_unit.sv",
+      "error": null,
+      "content": "100: \ts_write_counter_hi = 1'b0;\n101: \ts_start_timer_lo   = 1'b0;\n102: \ts_start_timer_hi   = 1'b0;\n103: \ts_reset_timer_lo   = 1'b0;\n104: \ts_reset_timer_hi   = 1'b0;\n105: \n106: \t// APERIPH BUS: LOWER PRIORITY\n107:         if (PSEL && PENABLE && PWRITE)\n108:           begin\n109: \n110:              case (PADDR[5:0])\n111: \n112: \t       `CFG_REG_LO:\n113: \t\t s_cfg_lo           = PWDATA;\n114: \n115: \t       `CFG_REG_HI:\n116: \t\t s_cfg_hi           = PWDATA;\n117: \n118: \t       `TIMER_VAL_LO:\n119: \t\t s_write_counter_lo = 1'b1;\n120: \n121: \t       `TIMER_VAL_HI:\n122: \t\t s_write_counter_hi = 1'b1;\n123: \n124: \t       `TIMER_CMP_LO:\n125:                  s_timer_cmp_lo     = PWDATA;\n126: \n127: \t       `TIMER_CMP_HI:\n128:                  s_timer_cmp_hi     = PWDATA;\n129: \n130: \t       `TIMER_START_LO:\n131: \t\t s_start_timer_lo   = 1'b1;\n132: \n133: \t       `TIMER_START_HI:\n134: \t\t s_start_timer_hi   = 1'b1;\n135: \n136: \t       `TIMER_RESET_LO:\n137: \t\t s_reset_timer_lo   = 1'b1;\n138: \n139: \t       `TIMER_RESET_HI:\n140: \t\t s_reset_timer_hi   = 1'b1;\n141: \n142:              endcase\n143:           end\n144: \n145: \t// INPUT EVENTS: HIGHER PRIORITY\n146: \tif ( event_lo_i == 1 | s_start_timer_lo == 1 )\n147: \t  s_cfg_lo[`ENABLE_BIT] = 1;\n148: \telse\n149: \t  begin\n150: \t     if ( s_cfg_lo_reg[`MODE_64_BIT] == 1'b0 ) // 32 BIT MODE\n151: \t       begin\n152: \t\t  if ( ( s_cfg_lo[`ONE_SHOT_BIT] == 1'b1 ) && ( s_target_reached_lo == 1'b1 ) ) // ONE SHOT FEATURE: DISABLES TIMER ONCE THE TARGET IS REACHED\n153: \t\t    s_cfg_lo[`ENABLE_BIT] = 0;\n154: \t       end\n155: \t     else\n156: \t       begin\n157: \t\t  if ( ( s_cfg_lo[`ONE_SHOT_BIT] == 1'b1 ) && ( s_timer_val_lo  == 32'hFFFFFFFF ) && ( s_target_reached_hi == 1'b1 ) ) // ONE SHOT FEATURE: DISABLES TIMER ONCE LOW COUNTER REACHES 0xFFFFFFFF and HI COUNTER TARGET IS REACHED\n158: \t\t    s_cfg_lo[`ENABLE_BIT] = 0;\n159: \t       end\n160: \t  end\n161: \n162: \t// INPUT EVENTS: HIGHER PRIORITY\n163: \tif ( event_hi_i == 1 | s_start_timer_hi == 1 )\n164: \t  s_cfg_hi[`ENABLE_BIT] = 1;\n165: \telse\n166: \t  begin\n167: \t     if ( ( s_cfg_hi_reg[`MODE_64_BIT] == 1'b0 ) && ( s_cfg_hi[`ONE_SHOT_BIT] == 1'b1 ) && ( s_target_reached_hi == 1'b1 ) ) // ONE SHOT FEATURE: DISABLES TIMER ONCE THE TARGET IS REACHED IN 32 BIT MODE\n168: \t       s_cfg_hi[`ENABLE_BIT] = 0;\n169: \t  end\n170: \n171: \t// RESET LO\n172: \tif (s_reset_count_lo == 1'b1)\n173: \t  s_cfg_lo[`RESET_BIT] = 1'b0;\n174: \n175: \t// RESET HI\n176: \tif (s_reset_count_hi == 1'b1)\n177: \t  s_cfg_hi[`RESET_BIT] = 1'b0;\n178: \n179:      end\n180: \n181:    // sequential part\n182:    always_ff @(posedge HCLK, negedge HRESETn)\n183:      begin\n184:         if(~HRESETn)\n185:           begin\n186: \t     s_cfg_lo_reg       <= 0;\n187: \t     s_cfg_hi_reg       <= 0;\n188: \t     s_timer_cmp_lo_reg <= 0;\n189: \t     s_timer_cmp_hi_reg <= 0;\n190:           end\n191:         else\n192:           begin\n193: \t     s_cfg_lo_reg       <= s_cfg_lo;\n194: \t     s_cfg_hi_reg       <= s_cfg_hi;\n195: \t     s_timer_cmp_lo_reg <= s_timer_cmp_lo;\n196: \t     s_timer_cmp_hi_reg <= s_timer_cmp_hi;\n197:           end\n198:      end\n199: \n200:    assign PSLVERR = 1'b0;\n201:    assign PREADY  = PSEL & PENABLE;\n202:    // APB register read logic\n203:    always_comb\n204:      begin\n205:         PRDATA  = 'b0;\n206: \n207:         if (PSEL && PENABLE && !PWRITE)\n208:           begin\n209: \n210:              case (PADDR[5:0])\n211: \n212: \t       `CFG_REG_LO:\n213:                  PRDATA = s_cfg_lo_reg;\n214: \n215:                `CFG_REG_HI:\n216:                  PRDATA = s_cfg_hi_reg;\n217: \n218:                `TIMER_VAL_LO:\n219:                  PRDATA = s_timer_val_lo;\n220: \n221: \t       `TIMER_VAL_HI:\n222:                  PRDATA = s_timer_val_hi;\n223: \n224: \t       `TIMER_CMP_LO:\n225:                  PRDATA = s_timer_cmp_lo_reg;\n226: \n227: \t       `TIMER_CMP_HI:\n228:                  PRDATA = s_timer_cmp_hi_reg;\n229: \n230:              endcase\n231: \n232:           end\n233: \n234:      end\n235: \n236:    //**************************************\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl",
+        "query": "auth"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/components/pulp_interfaces.sv:1324: // AUTHORS",
+      "truncated": false
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 650,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"650:         .event_fifo_fulln_o  ( s_fc_event_ready    ),\\n651:         .event_fifo_data_i   ( s_fc_event_data     ),\\n652:         .events_i            ( s_fc_events         ),\\n653:         .hwpe_events_o       ( s_fc_hwpe_events    ),\\n654: \\n655:         .supervisor_mode_o   ( s_supervisor_mode   )\\n656:     );\\n657: \\n658:     soc_clk_rst_gen i_clk_rst_gen (\\n659:         .ref_clk_i                  ( ref_clk_i                     ),\\n660:         .test_clk_i                 ( test_clk_i                    ),\\n661:         .sel_fll_clk_i              ( sel_fll_clk_i                 ),\\n662: \\n663:         .rstn_glob_i                ( rstn_glob_i                   ),\\n664:         .rstn_soc_sync_o            ( s_soc_rstn                    ),\\n665:         .rstn_cluster_sync_o        ( s_cluster_rstn                ),\\n666: \\n667:         .clk_cluster_o              ( s_cluster_clk                 ),\\n668:         .test_mode_i                ( dft_test_mode_i               ),\\n669:         .shift_enable_i             ( 1'b0                          ),\\n670: \\n671:         .soc_fll_slave_req_i        ( s_soc_fll_master.req          ),\\n672:         .soc_fll_slave_wrn_i        ( s_soc_fll_master.wrn          ),\\n673:         .soc_fll_slave_add_i        ( s_soc_fll_master.add[1:0]     ),\\n674:         .soc_fll_slave_data_i       ( s_soc_fll_master.data         ),\\n675:         .soc_fll_slave_ack_o        ( s_soc_fll_master.ack          ),\\n676:         .soc_fll_slave_r_data_o     ( s_soc_fll_master.r_data       ),\\n677:         .soc_fll_slave_lock_o       ( s_soc_fll_master.lock         ),\\n678: \\n679:         .per_fll_slave_req_i        ( s_per_fll_master.req          ),\\n680:         .per_fll_slave_wrn_i        ( s_per_fll_master.wrn          ),\\n681:         .per_fll_slave_add_i        ( s_per_fll_master.add[1:0]     ),\\n682:         .per_fll_slave_data_i       ( s_per_fll_master.data         ),\\n683:         .per_fll_slave_ack_o        ( s_per_fll_master.ack          ),\\n684:         .per_fll_slave_r_data_o     ( s_per_fll_master.r_data       ),\\n685:         .per_fll_slave_lock_o       ( s_per_fll_master.lock         ),\\n686: \\n687:         .cluster_fll_slave_req_i    ( s_cluster_fll_master.req      ),\\n688:         .cluster_fll_slave_wrn_i    ( s_cluster_fll_master.wrn      ),\\n689:         .cluster_fll_slave_add_i    ( s_cluster_fll_master.add[1:0] ),\\n690:         .cluster_fll_slave_data_i   ( s_cluster_fll_master.data     ),\\n691:         .cluster_fll_slave_ack_o    ( s_cluster_fll_master.ack      ),\\n692:         .cluster_fll_slave_r_data_o ( s_cluster_fll_master.r_data   ),\\n693:         .cluster_fll_slave_lock_o   ( s_cluster_fll_master.lock     ),\\n694: \\n695:         .clk_soc_o                  ( s_soc_clk                     ),\\n696:         .clk_per_o                  ( s_periph_clk                  )\\n697:     );\\n698: \\n699:     soc_interconnect_wrap #(\\n700:         .N_L2_BANKS         ( NB_L2_BANKS           ),\\n701:         .ADDR_MEM_WIDTH     ( L2_MEM_ADDR_WIDTH     ),\\n702:         .N_HWPE_PORTS       ( NB_HWPE_PORTS         ),\\n703: \\n704:         .N_L2_BANKS_PRI     ( NB_L2_BANKS_PRI       ),\\n705:         .ADDR_MEM_PRI_WIDTH ( L2_MEM_ADDR_WIDTH_PRI ),\\n706: \\n707:         .ROM_ADDR_WIDTH     ( ROM_ADDR_WIDTH        ),\\n708: \\n709:         .AXI_32_ID_WIDTH    ( AXI_ID_OUT_WIDTH      ),\\n710:         .AXI_32_USER_WIDTH  ( AXI_USER_WIDTH        ),\\n711: \\n712:         .AXI_ADDR_WIDTH     ( AXI_ADDR_WIDTH        ),\\n713:         .AXI_DATA_WIDTH     ( AXI_DATA_IN_WIDTH     ),\\n714:         .AXI_STRB_WIDTH     ( AXI_DATA_IN_WIDTH/8   ),\\n715:         .AXI_USER_WIDTH     ( AXI_USER_WIDTH        ),\\n716:         .AXI_ID_WIDTH       ( AXI_ID_IN_WIDTH       )\\n717:     ) i_soc_interconnect_wrap (\\n718:         .clk_i            ( s_soc_clk           ),\\n719:         .rstn_i           ( s_soc_rstn          ),\\n720:         .test_en_i        ( dft_test_mode_i  \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 0,
+        "path": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: \\n12: module soc_interconnect #(\\n13:     parameter USE_AXI           = 1,\\n14:     parameter ADDR_WIDTH        = 32,\\n15:     parameter N_HWPE_PORTS      = 4,\\n16:     parameter N_MASTER_32       = 5+N_HWPE_PORTS,\\n17:     parameter N_MASTER_AXI_64   = 1,\\n18:     parameter DATA_WIDTH        = 32,\\n19:     parameter BE_WIDTH          = DATA_WIDTH/8,\\n20:     parameter ID_WIDTH          = N_MASTER_32+N_MASTER_AXI_64*4,\\n21:     parameter AUX_WIDTH         = 8,\\n22:     parameter N_L2_BANKS        = 4,\\n23:     parameter N_L2_BANKS_PRI    = 2,\\n24:     parameter ADDR_L2_WIDTH     = 12,\\n25:     parameter ADDR_L2_PRI_WIDTH = 12,\\n26:     parameter ROM_ADDR_WIDTH    = 10,\\n27:     // AXI PARAMS\\n28:     // 32 bit axi Interface\\n29:     parameter AXI_32_ID_WIDTH   = 12,\\n30:     parameter AXI_32_USER_WIDTH = 6,\\n31:     // 64 bit axi Interface\\n32:     parameter AXI_ADDR_WIDTH    = 32,\\n33:     parameter AXI_DATA_WIDTH    = 64,\\n34:     parameter AXI_STRB_WIDTH    = 8,\\n35:     parameter AXI_USER_WIDTH    = 6,\\n36:     parameter AXI_ID_WIDTH      = 7\\n37: ) (\\n38:     input  logic                                                clk,\\n39:     input  logic                                                rst_n,\\n40:     input  logic                                                test_en_i,\\n41:     output logic [N_L2_BANKS-1:0]     [DATA_WIDTH-1:0]          L2_D_o,\\n42:     output logic [N_L2_BANKS-1:0]     [ADDR_L2_WIDTH-1:0]       L2_A_o,\\n43:     output logic [N_L2_BANKS-1:0]                               L2_CEN_o,\\n44:     output logic [N_L2_BANKS-1:0]                               L2_WEN_o,\\n45:     output logic [N_L2_BANKS-1:0]     [BE_WIDTH-1:0]            L2_BE_o,\\n46:     output logic [N_L2_BANKS-1:0]     [31:0]                    L2_ID_o,\\n47:     input  logic [N_L2_BANKS-1:0]     [DATA_WIDTH-1:0]          L2_Q_i,\\n48:     //RISC DATA PORT\\n49:     input  logic                                                FC_DATA_req_i,\\n50:     input  logic [ADDR_WIDTH-1:0]                               FC_DATA_add_i,\\n51:     input  logic                                                FC_DATA_wen_i,\\n52:     input  logic [DATA_WIDTH-1:0]                               FC_DATA_wdata_i,\\n53:     input  logic [BE_WIDTH-1:0]                                 FC_DATA_be_i,\\n54:     input  logic [AUX_WIDTH-1:0]                                FC_DATA_aux_i,\\n55:     output logic                                                FC_DATA_gnt_o,\\n56:     output logic [AUX_WIDTH-1:0]                                FC_DATA_r_aux_o,\\n57:     output logic                                                FC_DATA_r_valid_o,\\n58:     output logic [DATA_WIDTH-1:0]                               FC_DATA_r_rdata_o,\\n59:     output logic                                                FC_DATA_r_opc_o,\\n60:     // RISC INSTR PORT\\n61:     input  logic                                                FC_INSTR_req_i,\\n62:     input  logic [ADDR_WIDTH-1:0]                               FC_INSTR_add_i,\\n63:     input  logic                                                FC_INSTR_wen_i,\\n64:     input  logic [DATA_WIDTH-1:0]                               FC_INSTR_wdata_i,\\n65:     input  logic [BE_WIDTH-1:0]                 \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 0,
+        "path": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect_wrap.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: \\n12: module soc_interconnect_wrap #(\\n13:     parameter N_L2_BANKS         = 4,\\n14:     parameter N_L2_BANKS_PRI     = 2,\\n15:     parameter N_HWPE_PORTS       = 4,\\n16:     parameter ADDR_MEM_WIDTH     = 12,\\n17:     parameter ADDR_MEM_PRI_WIDTH = 12,\\n18:     parameter AXI_32_ID_WIDTH    = 12,\\n19:     parameter AXI_32_USER_WIDTH  = 6,\\n20:     parameter ROM_ADDR_WIDTH     = 10,\\n21:     // 64 bit axi Interface\\n22:     parameter AXI_ADDR_WIDTH     = 32,\\n23:     parameter AXI_DATA_WIDTH     = 64,\\n24:     parameter AXI_STRB_WIDTH     = 8,\\n25:     parameter AXI_USER_WIDTH     = 6,\\n26:     parameter AXI_ID_WIDTH       = 7\\n27: ) (\\n28:     input logic              clk_i,\\n29:     input logic              rstn_i,\\n30:     input logic              test_en_i,\\n31:     XBAR_TCDM_BUS.Slave      lint_fc_data,\\n32:     XBAR_TCDM_BUS.Slave      lint_fc_instr,\\n33:     XBAR_TCDM_BUS.Slave      lint_udma_tx,\\n34:     XBAR_TCDM_BUS.Slave      lint_udma_rx,\\n35:     XBAR_TCDM_BUS.Slave      lint_debug,\\n36:     XBAR_TCDM_BUS.Slave      lint_hwpe [N_HWPE_PORTS-1:0],\\n37:     AXI_BUS.Slave            axi_from_cluster,\\n38:     AXI_BUS.Master           axi_to_cluster,\\n39:     APB_BUS.Master           apb_periph_bus,\\n40:     UNICAD_MEM_BUS_32.Master mem_l2_bus[N_L2_BANKS-1:0],\\n41:     UNICAD_MEM_BUS_32.Master mem_l2_pri_bus[N_L2_BANKS_PRI-1:0],\\n42:     UNICAD_MEM_BUS_32.Master mem_rom_bus\\n43: );\\n44: \\n45:     logic [N_L2_BANKS-1:0][31:0]                       mem_wdata;\\n46:     logic [N_L2_BANKS-1:0][ADDR_MEM_WIDTH-1:0]         mem_add;\\n47:     logic [N_L2_BANKS-1:0]                             mem_csn;\\n48:     logic [N_L2_BANKS-1:0]                             mem_wen;\\n49:     logic [N_L2_BANKS-1:0][3:0]                        mem_be;\\n50:     logic [N_L2_BANKS-1:0][31:0]                       mem_id;\\n51:     logic [N_L2_BANKS-1:0][31:0]                       mem_rdata;\\n52: \\n53:     logic [N_L2_BANKS_PRI-1:0][31:0]                   mem_pri_wdata;\\n54:     logic [N_L2_BANKS_PRI-1:0][ADDR_MEM_PRI_WIDTH-1:0] mem_pri_add;\\n55:     logic [N_L2_BANKS_PRI-1:0]                         mem_pri_csn;\\n56:     logic [N_L2_BANKS_PRI-1:0]                         mem_pri_wen;\\n57:     logic [N_L2_BANKS_PRI-1:0][3:0]                    mem_pri_be;\\n58:     logic [N_L2_BANKS_PRI-1:0][31:0]                   mem_pri_rdata;\\n59: \\n60:     // accelerator interface - must be unrolled\\n61:     logic [N_HWPE_PORTS-1:0]       s_lint_hwpe_req;\\n62:     logic [N_HWPE_PORTS-1:0][31:0] s_lint_hwpe_add;\\n63:     logic [N_HWPE_PORTS-1:0]       s_lint_hwpe_wen;\\n64:     logic [N_HWPE_PORTS-1:0][31:0] s_lint_hwpe_wdata;\\n65:     logic [N_HWPE_PORTS-1:0][3:0]  s_lint_hwpe_be;\\n66:     logic [N_HWPE_PORTS-1:0]       s_lint_hwpe_gnt;\\n67:     logic [N_HWPE_PORTS-1:0]       s_lint_hwpe_r_valid;\\n68:     logic [N_HWPE_PORTS-1:0][31:0] s_lint_hwpe_r_rdata;\\n69:     logic [N_HWPE_PORTS-1:0] s_lint_hwpe_r_opc;\\n70: \\n71:     genvar i;\\n72: \\n73:     generate\\n74: \\n75:         for(i=0; i<N_HWPE_PORTS; i++)\\n76:         begin : HWPE_BINDING\\n77:             assign s_lint_hwpe_req   [i] = lint_hwpe[i].req;\\n78:             assign s_lint_hwpe_add   [i] = lint_hwpe[i].add;\\n79:             assign s_lint_hwpe_wen  \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 380,
+        "path": "ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"380:     // ██║   ██║██║  ██║██║╚██╔╝██║██╔══██║    ╚════██║██║   ██║██╔══██╗╚════██║  ╚██╔╝  ╚════██║ //\\n381:     // ╚██████╔╝██████╔╝██║ ╚═╝ ██║██║  ██║    ███████║╚██████╔╝██████╔╝███████║   ██║   ███████║ //\\n382:     //  ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═╝    ╚══════╝ ╚═════╝ ╚═════╝ ╚══════╝   ╚═╝   ╚══════╝ //\\n383:     ////////////////////////////////////////////////////////////////////////////////////////////////\\n384:     udma_subsystem #(\\n385:         .UDMA_EVENTS    ( UDMA_EVENTS    ),\\n386:         .APB_ADDR_WIDTH ( APB_ADDR_WIDTH ),\\n387:         .L2_ADDR_WIDTH  ( MEM_ADDR_WIDTH )\\n388:     ) i_udma (\\n389:         .L2_ro_req_o      ( l2_tx_master.req     ),\\n390:         .L2_ro_gnt_i      ( l2_tx_master.gnt     ),\\n391:         .L2_ro_wen_o      ( l2_tx_master.wen     ),\\n392:         .L2_ro_addr_o     ( l2_tx_master.add     ),\\n393:         .L2_ro_wdata_o    ( l2_tx_master.wdata   ),\\n394:         .L2_ro_be_o       ( l2_tx_master.be      ),\\n395:         .L2_ro_rdata_i    ( l2_tx_master.r_rdata ),\\n396:         .L2_ro_rvalid_i   ( l2_tx_master.r_valid ),\\n397: \\n398:         .L2_wo_req_o      ( l2_rx_master.req     ),\\n399:         .L2_wo_gnt_i      ( l2_rx_master.gnt     ),\\n400:         .L2_wo_wen_o      ( l2_rx_master.wen     ),\\n401:         .L2_wo_addr_o     ( l2_rx_master.add     ),\\n402:         .L2_wo_wdata_o    ( l2_rx_master.wdata   ),\\n403:         .L2_wo_be_o       ( l2_rx_master.be      ),\\n404:         .L2_wo_rdata_i    ( l2_rx_master.r_rdata ),\\n405:         .L2_wo_rvalid_i   ( l2_rx_master.r_valid ),\\n406: \\n407:         .dft_test_mode_i  ( dft_test_mode_i      ),\\n408:         .dft_cg_enable_i  ( 1'b0                 ),\\n409: \\n410:         .sys_clk_i        ( clk_i                ),\\n411:         .periph_clk_i     ( periph_clk_i         ),\\n412:         .HRESETn          ( rst_ni               ),\\n413: \\n414:         .PADDR            ( s_udma_bus.paddr     ),\\n415:         .PWDATA           ( s_udma_bus.pwdata    ),\\n416:         .PWRITE           ( s_udma_bus.pwrite    ),\\n417:         .PSEL             ( s_udma_bus.psel      ),\\n418:         .PENABLE          ( s_udma_bus.penable   ),\\n419:         .PRDATA           ( s_udma_bus.prdata    ),\\n420:         .PREADY           ( s_udma_bus.pready    ),\\n421:         .PSLVERR          ( s_udma_bus.pslverr   ),\\n422: \\n423:         .events_o         ( s_udma_events        ),\\n424: \\n425:         .event_valid_i    ( s_pr_event_valid     ),\\n426:         .event_data_i     ( s_pr_event_data      ),\\n427:         .event_ready_o    ( s_pr_event_ready     ),\\n428: \\n429:         .spi0_clk         ( spi_master0_clk      ),\\n430:         .spi0_csn0        ( spi_master0_csn0     ),\\n431:         .spi0_csn1        ( spi_master0_csn1     ),\\n432:         .spi0_csn2        ( spi_master0_csn2     ),\\n433:         .spi0_csn3        ( spi_master0_csn3     ),\\n434:         .spi0_mode        ( spi_master0_mode     ),\\n435:         .spi0_sdo0        ( spi_master0_sdo0     ),\\n436:         .spi0_sdo1        ( spi_master0_sdo1     ),\\n437:         .spi0_sdo2        ( spi_master0_sdo2     ),\\n438:         .spi0_sdo3        ( spi_master0_sdo3     ),\\n439:         .spi0_sdi0        ( spi_master0_sdi0     ),\\n440:         .spi0_sdi1        ( spi_master0_sdi1     ),\\n441:         .spi0_sdi2        ( spi_master0_sdi2     ),\\n442:         .spi0_sdi3        ( spi_master0_sdi3     ),\\n443: \\n444:         .sdclk_o          ( sdclk_o              ),           \\n445:         .sdcmd_o          ( sdcmd_o              ),\\n446:         .sdcmd_i          ( sdcmd_i              ),\\n447:         .sdcmd_oen_o      ( sdcmd_oen_o          ),\\n448:         .sddata_o         ( sddata_o             ),\\n449:         .sddata_i         ( sddata_i             ),\\n450:         .sddata_oen_o     ( sddata_oen_o         ),\\n451: \\n452:         .cam_clk_i        ( cam_clk_i            ),\\n453:         .cam_data_i       ( cam_data_i           ),\\n45\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 6,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+        "query": "START_ADDR"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:261: localparam logic [N_PERIPHS-1:0][ADDR_WIDTH-1:0] PER_START_ADDR = { 32'h1C00_8000, 32'h1C00_0000, 32'h1A00_0000,  32'h1000_0000, 32'h1A10_0000};\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:264: localparam logic [ADDR_WIDTH-1:0] TCDM_START_ADDR = {32'h1C01_0000}; // Start of L2 interleaved\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:526: .START_ADDR        ( PER_START_ADDR                 ),\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:586: .PER_START_ADDR      ( PER_START_ADDR                     ),\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:588: .TCDM_START_ADDR     ( TCDM_START_ADDR                    ),\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:641: .PER_START_ADDR      ( PER_START_ADDR                           ),\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:643: .TCDM_START_ADDR     ( TCDM_START_ADDR                          ),",
+      "truncated": false
+    },
+    {
+      "step": 6,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+        "query": "SOC_APB_START_ADDR"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 6,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+        "query": "DBG_RX"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:97: input  logic                                                DBG_RX_req_i,\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:98: input  logic [ADDR_WIDTH-1:0]                               DBG_RX_add_i,\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:99: input  logic                                                DBG_RX_wen_i,\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:100: input  logic [DATA_WIDTH-1:0]                               DBG_RX_wdata_i,\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:101: input  logic [BE_WIDTH-1:0]                                 DBG_RX_be_i,\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:102: input  logic [AUX_WIDTH-1:0]                                DBG_RX_aux_i,\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:103: output logic                                                DBG_RX_gnt_o,\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:104: output logic [AUX_WIDTH-1:0]                                DBG_RX_r_aux_o,\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:105: output logic                                                DBG_RX_r_valid_o,\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:106: output logic [DATA_WIDTH-1:0]                               DBG_RX_r_rdata_o,\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:107: output logic                                                DBG_RX_r_opc_o,\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:401: assign FC_data_req_INT_32      =  {  FC_INSTR_req_i      ,  UDMA_TX_req_i     ,  UDMA_RX_req_i     , DBG_RX_req_i     , FC_DATA_req_i      };\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:402: assign FC_data_add_INT_32      =  {  FC_INSTR_add_i      ,  UDMA_TX_add_i     ,  UDMA_RX_add_i     , DBG_RX_add_i     , FC_DATA_add_int    };\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:403: assign FC_data_wen_INT_32      =  {  FC_INSTR_wen_i      ,  UDMA_TX_wen_i     ,  UDMA_RX_wen_i     , DBG_RX_wen_i     , FC_DATA_wen_i      };\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:404: assign FC_data_wdata_INT_32    =  {  FC_INSTR_wdata_i    ,  UDMA_TX_wdata_i   ,  UDMA_RX_wdata_i   , DBG_RX_wdata_i   , FC_DATA_wdata_i    };\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:405: assign FC_data_be_INT_32       =  {  FC_INSTR_be_i       ,  UDMA_TX_be_i      ,  UDMA_RX_be_i      , DBG_RX_be_i      , FC_DATA_be_i       };\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:406: assign FC_data_aux_INT_32      =  {  FC_INSTR_aux_i      ,  UDMA_TX_aux_i     ,  UDMA_RX_aux_i     , DBG_RX_aux_i     , FC_DATA_aux_i      };\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:407: assign                            {  FC_INSTR_gnt_o      ,  UDMA_TX_gnt_o     ,  UDMA_RX_gnt_o     , DBG_RX_gnt_o     , FC_DATA_gnt_o      } = FC_data_gnt_INT_32     ;\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:408: assign                            {  FC_INSTR_r_aux_o    ,  UDMA_TX_r_aux_o   ,  UDMA_RX_r_aux_o   , DBG_RX_r_aux_o   , FC_DATA_r_aux_o    } = FC_data_r_aux_INT_32   ;\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:409: assign                            {  FC_INSTR_r_valid_o  ,  UDMA_TX_r_valid_o ,  UDMA_RX_r_valid_o , DBG_RX_r_valid_o , FC_DATA_r_valid_o  } = FC_data_r_valid_INT_32 ;\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:410: assign                            {  FC_INSTR_r_rdata_o  ,  UDMA_TX_r_rdata_o ,  UDMA_RX_r_rdata_o , DBG_RX_r_rdata_o , FC_DATA_r_rdata_o  } = FC_data_r_rdata_INT_32 ;\nips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:411: assign                            {  FC_INSTR_r_opc_o    ,  UDMA_TX_r_opc_o   ,  UDMA_RX_r_opc_o   , DBG_RX_r_opc_o   , FC_DATA_r_opc_o    } = FC_data_r_opc_INT_32   ;",
+      "truncated": false
+    },
+    {
+      "step": 6,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+        "query": "PSEL && PENABLE && PWRITE"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 7,
+      "tool": "read_file",
+      "args": {
+        "limit": 240,
+        "offset": 240,
+        "path": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"240:     // CH_3, CH_4 Private Mem Banks (L2)\\n241:     output logic [N_L2_BANKS_PRI-1:0] [DATA_WIDTH-1:0]          L2_pri_D_o,\\n242:     output logic [N_L2_BANKS_PRI-1:0] [ADDR_L2_PRI_WIDTH-1:0]   L2_pri_A_o,\\n243:     output logic [N_L2_BANKS_PRI-1:0]                           L2_pri_CEN_o,\\n244:     output logic [N_L2_BANKS_PRI-1:0]                           L2_pri_WEN_o,\\n245:     output logic [N_L2_BANKS_PRI-1:0] [BE_WIDTH-1:0]            L2_pri_BE_o,\\n246:     input  logic [N_L2_BANKS_PRI-1:0] [DATA_WIDTH-1:0]          L2_pri_Q_i\\n247: );\\n248: \\n249:     localparam N_CH0 = N_MASTER_32      ;\\n250:     localparam N_CH1 = N_MASTER_AXI_64*4;\\n251: \\n252:     localparam N_CH0_BRIDGE = N_CH0;\\n253:     localparam N_CH1_BRIDGE = N_CH1;\\n254: \\n255:     localparam PER_ID_WIDTH = N_CH0_BRIDGE+N_CH1_BRIDGE;\\n256:     localparam N_PERIPHS    = 3+N_L2_BANKS_PRI         ;\\n257: \\n258:     localparam L2_OFFSET_PRI = 15'h1000; // FIXME Put the right FORMULA\\n259: \\n260:     // PRI_L2_CH1  //PRI_L2_CH0    //ROM          // AXI         // APB\\n261:     localparam logic [N_PERIPHS-1:0][ADDR_WIDTH-1:0] PER_START_ADDR = { 32'h1C00_8000, 32'h1C00_0000, 32'h1A00_0000,  32'h1000_0000, 32'h1A10_0000};\\n262:     localparam logic [N_PERIPHS-1:0][ADDR_WIDTH-1:0] PER_END_ADDR   = { 32'h1C01_0000, 32'h1C00_8000, 32'h1A04_0000,  32'h1040_0000, 32'h1A20_0000};\\n263: \\n264:     localparam logic [ADDR_WIDTH-1:0] TCDM_START_ADDR = {32'h1C01_0000}; // Start of L2 interleaved\\n265:     localparam logic [ADDR_WIDTH-1:0] TCDM_END_ADDR   = {32'h1C08_2000}; // END of L2 interleaved\\n266: \\n267:     logic [N_MASTER_32-1:0]                           FC_data_req_INT_32;\\n268:     logic [N_MASTER_32-1:0] [ADDR_WIDTH - 1:0]        FC_data_add_INT_32;\\n269:     logic [ADDR_WIDTH-1:0]                            FC_DATA_add_int;\\n270:     logic [N_MASTER_32-1:0]                           FC_data_wen_INT_32;\\n271:     logic [N_MASTER_32-1:0] [DATA_WIDTH - 1:0]        FC_data_wdata_INT_32;\\n272:     logic [N_MASTER_32-1:0] [BE_WIDTH - 1:0]          FC_data_be_INT_32;\\n273:     logic [N_MASTER_32-1:0] [AUX_WIDTH - 1:0]         FC_data_aux_INT_32;\\n274:     logic [N_MASTER_32-1:0]                           FC_data_gnt_INT_32;\\n275:     logic [N_MASTER_32-1:0] [AUX_WIDTH-1:0]           FC_data_r_aux_INT_32;\\n276:     logic [N_MASTER_32-1:0]                           FC_data_r_valid_INT_32;\\n277:     logic [N_MASTER_32-1:0] [DATA_WIDTH - 1:0]        FC_data_r_rdata_INT_32;\\n278:     logic [N_MASTER_32-1:0] FC_data_r_opc_INT_32;\\n279: \\n280:     logic [N_MASTER_AXI_64*4-1:0]                     AXI_data_req_INT_64;\\n281:     logic [N_MASTER_AXI_64*4-1:0] [ADDR_WIDTH - 1:0]  AXI_data_add_INT_64;\\n282:     logic [N_MASTER_AXI_64*4-1:0]                     AXI_data_wen_INT_64;\\n283:     logic [N_MASTER_AXI_64*4-1:0] [DATA_WIDTH - 1:0]  AXI_data_wdata_INT_64;\\n284:     logic [N_MASTER_AXI_64*4-1:0] [BE_WIDTH - 1:0]    AXI_data_be_INT_64;\\n285:     logic [N_MASTER_AXI_64*4-1:0] [AUX_WIDTH - 1:0]   AXI_data_aux_INT_64;\\n286:     logic [N_MASTER_AXI_64*4-1:0]                     AXI_data_gnt_INT_64;\\n287:     logic [N_MASTER_AXI_64*4-1:0] [AUX_WIDTH-1:0]     AXI_data_r_aux_INT_64;\\n288:     logic [N_MASTER_AXI_64*4-1:0]                     AXI_data_r_valid_INT_64;\\n289:     logic [N_MASTER_AXI_64*4-1:0] [DATA_WIDTH - 1:0]  AXI_data_r_rdata_INT_64;\\n290:     logic [N_MASTER_AXI_64*4-1:0] AXI_data_r_opc_INT_64;\\n291: \\n292:     logic [N_CH0+N_CH1-1:0]                           PER_data_req_DEM_2_L2_XBAR;\\n293:     logic [N_CH0+N_CH1-1:0][ADDR_WIDTH-1:0]           PER_data_add_DEM_2_L2_XBAR;\\n294:     logic [N_CH0+N_CH1-1:0]                           PER_data_wen_DEM_2_L2_XBAR;\\n295:     logic [N_CH0+N_CH1-1:0][DATA_WIDTH-1:0]           PER_data_wdata_DEM_2_L2_XBAR;\\n296:     logic [N_CH0+N_CH1-1:0][BE_WIDTH-1:0]             PER_data_be_DEM_2_L2_XBAR;\\n297:     logic [N_CH0+N_CH1-1:0][AUX_WIDTH-1:0]            PER_data_aux_DEM_2_L2_X\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 7,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 380,
+        "path": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"380:                     PER_data_r_valid_TO_BRIDGE[k+3] <= '0;\\n381:                     PER_data_r_ID_TO_BRIDGE[k+3]    <= '0;\\n382:                     PER_data_r_aux_TO_BRIDGE[k+3]   <= '0;\\n383:                 end\\n384:                 else begin\\n385:                     PER_data_r_valid_TO_BRIDGE[k+3] <= PER_data_req_TO_BRIDGE[k+3];\\n386:                     PER_data_r_ID_TO_BRIDGE[k+3]    <= PER_data_ID_TO_BRIDGE[k+3];\\n387:                     PER_data_r_aux_TO_BRIDGE[k+3]   <= PER_data_aux_TO_BRIDGE[k+3];\\n388:                 end\\n389:             end\\n390: \\n391:         end\\n392:     endgenerate\\n393: \\n394:     always_comb\\n395:     begin\\n396:         FC_DATA_add_int = FC_DATA_add_i;\\n397:         if(FC_DATA_add_i[31:20] == 12'h000)\\n398:             FC_DATA_add_int[31:20] = 12'h1C0;\\n399:     end\\n400: \\n401:     assign FC_data_req_INT_32      =  {  FC_INSTR_req_i      ,  UDMA_TX_req_i     ,  UDMA_RX_req_i     , DBG_RX_req_i     , FC_DATA_req_i      };\\n402:     assign FC_data_add_INT_32      =  {  FC_INSTR_add_i      ,  UDMA_TX_add_i     ,  UDMA_RX_add_i     , DBG_RX_add_i     , FC_DATA_add_int    };\\n403:     assign FC_data_wen_INT_32      =  {  FC_INSTR_wen_i      ,  UDMA_TX_wen_i     ,  UDMA_RX_wen_i     , DBG_RX_wen_i     , FC_DATA_wen_i      };\\n404:     assign FC_data_wdata_INT_32    =  {  FC_INSTR_wdata_i    ,  UDMA_TX_wdata_i   ,  UDMA_RX_wdata_i   , DBG_RX_wdata_i   , FC_DATA_wdata_i    };\\n405:     assign FC_data_be_INT_32       =  {  FC_INSTR_be_i       ,  UDMA_TX_be_i      ,  UDMA_RX_be_i      , DBG_RX_be_i      , FC_DATA_be_i       };\\n406:     assign FC_data_aux_INT_32      =  {  FC_INSTR_aux_i      ,  UDMA_TX_aux_i     ,  UDMA_RX_aux_i     , DBG_RX_aux_i     , FC_DATA_aux_i      };\\n407:     assign                            {  FC_INSTR_gnt_o      ,  UDMA_TX_gnt_o     ,  UDMA_RX_gnt_o     , DBG_RX_gnt_o     , FC_DATA_gnt_o      } = FC_data_gnt_INT_32     ;\\n408:     assign                            {  FC_INSTR_r_aux_o    ,  UDMA_TX_r_aux_o   ,  UDMA_RX_r_aux_o   , DBG_RX_r_aux_o   , FC_DATA_r_aux_o    } = FC_data_r_aux_INT_32   ;\\n409:     assign                            {  FC_INSTR_r_valid_o  ,  UDMA_TX_r_valid_o ,  UDMA_RX_r_valid_o , DBG_RX_r_valid_o , FC_DATA_r_valid_o  } = FC_data_r_valid_INT_32 ;\\n410:     assign                            {  FC_INSTR_r_rdata_o  ,  UDMA_TX_r_rdata_o ,  UDMA_RX_r_rdata_o , DBG_RX_r_rdata_o , FC_DATA_r_rdata_o  } = FC_data_r_rdata_INT_32 ;\\n411:     assign                            {  FC_INSTR_r_opc_o    ,  UDMA_TX_r_opc_o   ,  UDMA_RX_r_opc_o   , DBG_RX_r_opc_o   , FC_DATA_r_opc_o    } = FC_data_r_opc_INT_32   ;\\n412: \\n413:     // the accelerator is directly connected to the interleaved region\\n414:     assign TCDM_data_req_DEM_TO_XBAR   [N_CH0-1:N_CH0-N_HWPE_PORTS] =  HWPE_req_i;\\n415:     assign TCDM_data_add_DEM_TO_XBAR   [N_CH0-1:N_CH0-N_HWPE_PORTS] =  HWPE_add_i;\\n416:     assign TCDM_data_wen_DEM_TO_XBAR   [N_CH0-1:N_CH0-N_HWPE_PORTS] =  HWPE_wen_i;\\n417:     assign TCDM_data_wdata_DEM_TO_XBAR [N_CH0-1:N_CH0-N_HWPE_PORTS] =  HWPE_wdata_i;\\n418:     assign TCDM_data_be_DEM_TO_XBAR    [N_CH0-1:N_CH0-N_HWPE_PORTS] =  HWPE_be_i;\\n419:     assign HWPE_gnt_o      = TCDM_data_gnt_DEM_TO_XBAR     [N_CH0-1:N_CH0-N_HWPE_PORTS];\\n420:     assign HWPE_r_valid_o  = TCDM_data_r_valid_DEM_TO_XBAR [N_CH0-1:N_CH0-N_HWPE_PORTS];\\n421:     assign HWPE_r_rdata_o  = TCDM_data_r_rdata_DEM_TO_XBAR [N_CH0-1:N_CH0-N_HWPE_PORTS];\\n422: \\n423:     genvar j;\\n424:     generate\\n425:         for(j=0;j<N_CH0+N_CH1;j++) begin\\n426:             assign TCDM_data_add_DEM_TO_XBAR_resized[j] = TCDM_data_add_DEM_TO_XBAR[j][ADDR_L2_WIDTH+$clog2(N_L2_BANKS)+2-1:2];\\n427:         end\\n428:     endgenerate\\n429: \\n430:     // ██╗     ██████╗         ██╗  ██╗██████╗  █████╗ ██████╗\\n431:     // ██║     ╚════██╗        ╚██╗██╔╝██╔══██╗██╔══██╗██╔══██╗\\n432:     // ██║      █████╔╝         ╚███╔╝ ██████╔╝███████║██████╔╝\\n433:     // ██║  \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 7,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 560,
+        "path": "ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"560:                 .data_r_rdata_o      ( FC_data_r_rdata_INT_32 [i]         ),\\n561:                 .data_r_opc_o        ( FC_data_r_opc_INT_32   [i]         ),\\n562: \\n563:                 // Interleaved Region\\n564:                 .data_req_o_TDCM     ( TCDM_data_req_DEM_TO_XBAR      [i] ),\\n565:                 .data_add_o_TDCM     ( TCDM_data_add_DEM_TO_XBAR      [i] ),\\n566:                 .data_wen_o_TDCM     ( TCDM_data_wen_DEM_TO_XBAR      [i] ),\\n567:                 .data_wdata_o_TDCM   ( TCDM_data_wdata_DEM_TO_XBAR    [i] ),\\n568:                 .data_be_o_TDCM      ( TCDM_data_be_DEM_TO_XBAR       [i] ),\\n569:                 .data_gnt_i_TDCM     ( TCDM_data_gnt_DEM_TO_XBAR      [i] ),\\n570:                 .data_r_valid_i_TDCM ( TCDM_data_r_valid_DEM_TO_XBAR  [i] ),\\n571:                 .data_r_rdata_i_TDCM ( TCDM_data_r_rdata_DEM_TO_XBAR  [i] ),\\n572: \\n573:                 // Memory Regions : Bridges\\n574:                 .data_req_o_PER      ( PER_data_req_DEM_2_L2_XBAR     [i] ),\\n575:                 .data_add_o_PER      ( PER_data_add_DEM_2_L2_XBAR     [i] ),\\n576:                 .data_wen_o_PER      ( PER_data_wen_DEM_2_L2_XBAR     [i] ),\\n577:                 .data_wdata_o_PER    ( PER_data_wdata_DEM_2_L2_XBAR   [i] ),\\n578:                 .data_be_o_PER       ( PER_data_be_DEM_2_L2_XBAR      [i] ),\\n579:                 .data_aux_o_PER      ( PER_data_aux_DEM_2_L2_XBAR     [i] ),\\n580:                 .data_gnt_i_PER      ( PER_data_gnt_DEM_2_L2_XBAR     [i] ),\\n581:                 .data_r_valid_i_PER  ( PER_data_r_valid_DEM_2_L2_XBAR [i] ),\\n582:                 .data_r_rdata_i_PER  ( PER_data_r_rdata_DEM_2_L2_XBAR [i] ),\\n583:                 .data_r_opc_i_PER    ( PER_data_r_opc_DEM_2_L2_XBAR   [i] ),\\n584:                 .data_r_aux_i_PER    ( PER_data_r_aux_DEM_2_L2_XBAR   [i] ),\\n585: \\n586:                 .PER_START_ADDR      ( PER_START_ADDR                     ),\\n587:                 .PER_END_ADDR        ( PER_END_ADDR                       ),\\n588:                 .TCDM_START_ADDR     ( TCDM_START_ADDR                    ),\\n589:                 .TCDM_END_ADDR       ( TCDM_END_ADDR                      )\\n590:             );\\n591:         end\\n592: \\n593:         for(i=0; i<N_CH1; i++) begin : FC_DEMUX_64\\n594:             l2_tcdm_demux #(\\n595:                 .ADDR_WIDTH ( ADDR_WIDTH ), //= 32,\\n596:                 .DATA_WIDTH ( DATA_WIDTH ), //= 32,\\n597:                 .BE_WIDTH   ( BE_WIDTH   ), //= DATA_WIDTH/8,\\n598:                 .AUX_WIDTH  ( AUX_WIDTH  ), //=\\n599:                 .N_PERIPHS  ( N_PERIPHS  )  //= 2\\n600:             ) DEMUX_AXI64 (\\n601:                 .clk                 ( clk                                      ),\\n602:                 .rst_n               ( rst_n                                    ),\\n603:                 .test_en_i           ( test_en_i                                ),\\n604: \\n605:                 // CORE SIDE\\n606:                 .data_req_i          ( AXI_data_req_INT_64     [i]              ),\\n607:                 .data_add_i          ( AXI_data_add_INT_64     [i]              ),\\n608:                 .data_wen_i          ( AXI_data_wen_INT_64     [i]              ),\\n609:                 .data_wdata_i        ( AXI_data_wdata_INT_64   [i]              ),\\n610:                 .data_be_i           ( AXI_data_be_INT_64      [i]              ),\\n611:                 .data_aux_i          ( AXI_data_aux_INT_64     [i]              ),\\n612:                 .data_gnt_o          ( AXI_data_gnt_INT_64     [i]              ),\\n613:                 .data_r_aux_o        ( AXI_data_r_aux_INT_64   [i]              ),\\n614:                 .data_r_valid_o      ( AXI_data_r_valid_INT_64 [i]              ),\\n615:                 .data_r_rdata_o      ( AXI_data_r_rdata_INT_64 [i]              ),\\n616:                 .data_r_opc_o        ( AXI_data_r_opc_INT_64   [i]              ),\\n617: \\n\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 7,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 0,
+        "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: \\n11: module udma_subsystem\\n12: #(\\n13:     parameter UDMA_EVENTS   = 28,\\n14:     parameter L2_ADDR_WIDTH = 15,\\n15:     parameter L2_DATA_WIDTH = 32,\\n16:     parameter CAM_DATA_WIDTH = 8,\\n17:     parameter APB_ADDR_WIDTH = 12,  //APB slaves are 4KB by default\\n18:     parameter TRANS_SIZE     = 17\\n19: )\\n20: (\\n21:     output logic                       L2_ro_wen_o    ,\\n22:     output logic                       L2_ro_req_o    ,\\n23:     input  logic                       L2_ro_gnt_i    ,\\n24:     output logic                [31:0] L2_ro_addr_o   ,\\n25:     output logic [L2_DATA_WIDTH/8-1:0] L2_ro_be_o     ,\\n26:     output logic   [L2_DATA_WIDTH-1:0] L2_ro_wdata_o  ,\\n27:     input  logic                       L2_ro_rvalid_i ,\\n28:     input  logic   [L2_DATA_WIDTH-1:0] L2_ro_rdata_i  ,\\n29: \\n30:     output logic                       L2_wo_wen_o    ,\\n31:     output logic                       L2_wo_req_o    ,\\n32:     input  logic                       L2_wo_gnt_i    ,\\n33:     output logic                [31:0] L2_wo_addr_o   ,\\n34:     output logic   [L2_DATA_WIDTH-1:0] L2_wo_wdata_o  ,\\n35:     output logic [L2_DATA_WIDTH/8-1:0] L2_wo_be_o     ,\\n36:     input  logic                       L2_wo_rvalid_i ,\\n37:     input  logic   [L2_DATA_WIDTH-1:0] L2_wo_rdata_i  ,\\n38: \\n39:     input  logic                       dft_test_mode_i,\\n40:     input  logic                       dft_cg_enable_i,\\n41: \\n42:     input  logic                       sys_clk_i,\\n43:     input  logic                       periph_clk_i,\\n44:     input  logic                       HRESETn,\\n45:     input  logic  [APB_ADDR_WIDTH-1:0] PADDR,\\n46:     input  logic                [31:0] PWDATA,\\n47:     input  logic                       PWRITE,\\n48:     input  logic                       PSEL,\\n49:     input  logic                       PENABLE,\\n50:     output logic                [31:0] PRDATA,\\n51:     output logic                       PREADY,\\n52:     output logic                       PSLVERR,\\n53: \\n54:     output logic     [UDMA_EVENTS-1:0] events_o,\\n55: \\n56:     input  logic                      event_valid_i,\\n57:     input  logic                [7:0] event_data_i,\\n58:     output logic                      event_ready_o,\\n59: \\n60:     output logic                       spi0_clk,\\n61:     output logic                       spi0_csn0,\\n62:     output logic                       spi0_csn1,\\n63:     output logic                       spi0_csn2,\\n64:     output logic                       spi0_csn3,\\n65:     output logic                 [1:0] spi0_mode,\\n66:     output logic                       spi0_sdo0,\\n67:     output logic                       spi0_sdo1,\\n68:     output logic                       spi0_sdo2,\\n69:     output logic                       spi0_sdo3,\\n70:     input  logic                       spi0_sdi0,\\n71:     input  logic                       spi0_sdi1,\\n72:     input  logic                       spi0_sdi2,\\n73:     input  logic                       spi0_sdi3,\\n74: \\n75:     input  logic                       cam_clk_i,\\n76:     input  logic  [CAM_DATA_WIDTH-1:0] cam_data_i,\\n77:     input  logic                       cam_hsync_i,\\n78:     input  logic               \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 8,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+        "query": "cfg_startaddr"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:149: logic [N_TX_CHANNELS-1:0] [L2_AWIDTH_NOAL-1 : 0] tx_cfg_startaddr;\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:167: logic [N_RX_CHANNELS-1:0] [L2_AWIDTH_NOAL-1 : 0] rx_cfg_startaddr;\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:394: .tx_cfg_startaddr_i(tx_cfg_startaddr),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:410: .rx_cfg_startaddr_i(rx_cfg_startaddr),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:437: .cfg_rx_startaddr_o  ( rx_cfg_startaddr[CH_ID_UART]      ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:448: .cfg_tx_startaddr_o  ( tx_cfg_startaddr[CH_ID_UART]      ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:520: .cfg_tx_startaddr_o  ( tx_cfg_startaddr[CH_ID_SPIM0]       ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:530: .cfg_rx_startaddr_o  ( rx_cfg_startaddr[CH_ID_SPIM0]       ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:567: .cfg_rx_startaddr_o  ( rx_cfg_startaddr[CH_ID_SDIO]      ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:577: .cfg_tx_startaddr_o  ( tx_cfg_startaddr[CH_ID_SDIO]      ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:618: .cfg_tx_startaddr_o  ( tx_cfg_startaddr[CH_ID_I2C0]      ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:628: .cfg_rx_startaddr_o  ( rx_cfg_startaddr[CH_ID_I2C0]      ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:680: .cfg_tx_startaddr_o  ( tx_cfg_startaddr[CH_ID_I2C1]      ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:690: .cfg_rx_startaddr_o  ( rx_cfg_startaddr[CH_ID_I2C1]      ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:754: .cfg_rx_ch0_startaddr_o  ( rx_cfg_startaddr[CH_ID_I2S]     ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:765: .cfg_rx_ch1_startaddr_o  ( rx_cfg_startaddr[CH_ID_I2S+1]     ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:805: .cfg_rx_startaddr_o  ( rx_cfg_startaddr[CH_ID_CAM]     ),",
+      "truncated": false
+    },
+    {
+      "step": 8,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+        "query": "PADDR"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:45: input  logic  [APB_ADDR_WIDTH-1:0] PADDR,\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:342: .PADDR(PADDR),",
+      "truncated": false
+    },
+    {
+      "step": 8,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+        "query": "L2_ro_addr_o"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:24: output logic                [31:0] L2_ro_addr_o   ,\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:243: assign L2_ro_addr_o = {8'h1C,{(32-L2_ADDR_WIDTH-10){1'b0}},s_L2_ro_addr,2'b00};",
+      "truncated": false
+    },
+    {
+      "step": 8,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+        "query": "u_dmac"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 9,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 220,
+        "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"220: \\n221:     logic        [31:0] s_periph_data_from_uart;\\n222:     logic               s_periph_valid_uart;\\n223:     logic               s_periph_ready_from_uart;\\n224: \\n225:     logic        [31:0] s_periph_data_from_i2s;\\n226:     logic               s_periph_valid_i2s;\\n227:     logic               s_periph_ready_from_i2s;\\n228: \\n229:     logic        [31:0] s_periph_data_from_cam;\\n230:     logic               s_periph_valid_cam;\\n231:     logic               s_periph_ready_from_cam;\\n232: \\n233:     logic         [3:0] s_trigger_events;\\n234: \\n235:     logic s_cam_evt;\\n236:     logic s_i2s_evt;\\n237:     logic s_i2c1_evt;\\n238:     logic s_i2c0_evt;\\n239:     logic s_uart_evt;\\n240: \\n241:     logic [2:0] s_tgen_en;\\n242: \\n243:     assign L2_ro_addr_o = {8'h1C,{(32-L2_ADDR_WIDTH-10){1'b0}},s_L2_ro_addr,2'b00};\\n244:     assign L2_wo_addr_o = {8'h1C,{(32-L2_ADDR_WIDTH-10){1'b0}},s_L2_wo_addr,2'b00};\\n245: \\n246:     assign s_cam_evt  = 1'b0;\\n247:     assign s_i2s_evt  = 1'b0;\\n248:     assign s_uart_evt = 1'b0;\\n249: \\n250:     assign rx_cfg_filter[CH_ID_UART]  = 1'b0;\\n251:     assign rx_cfg_filter[CH_ID_SDIO]  = 1'b0;\\n252:     assign rx_cfg_filter[CH_ID_SPIM0] = 1'b0;\\n253:     assign rx_cfg_filter[CH_ID_I2C0]  = 1'b0;\\n254:     assign rx_cfg_filter[CH_ID_I2C1]  = 1'b0;\\n255:     assign rx_cfg_filter[CH_ID_I2S]   = 1'b0;\\n256:     assign rx_cfg_filter[CH_ID_I2S+1] = 1'b0;\\n257: \\n258:     assign s_events = {\\n259:                     `ifdef HYPER_RAM\\n260:                         3'h0,\\n261:                     `else\\n262:                         6'h0,\\n263:                     `endif\\n264:                         s_cam_evt,                     //camera event            EVENT25\\n265:                         rx_ch_events[CH_ID_CAM],       //camera IF               EVENT24\\n266:                         s_i2s_evt,                     //i2s event               EVENT23\\n267:                         rx_ch_events[CH_ID_I2S+1],     //i2s0 channels           EVENT22\\n268:                         rx_ch_events[CH_ID_I2S],       //i2s0 channels           EVENT21\\n269:                         2'h0,\\n270:                         s_i2c1_evt,                    //i2c1 event              EVENT18\\n271:                         rx_ch_events[CH_ID_I2C1],      //i2c1                    EVENT17\\n272:                         tx_ch_events[CH_ID_I2C1],      //i2c1                    EVENT16\\n273:                         s_i2c0_evt,                    //i2c0 event              EVENT15\\n274:                         rx_ch_events[CH_ID_I2C0],      //i2c0                    EVENT14\\n275:                         tx_ch_events[CH_ID_I2C0],      //i2c0                    EVENT13\\n276:                         1'b0      ,                    //hyper RFU               EVENT9\\n277:                         rx_ch_events[CH_ID_SDIO],      //sdio  rx                EVENT8\\n278:                         tx_ch_events[CH_ID_SDIO],      //sdio  tx                EVENT7\\n279:                         s_spi0_eot,                    //spim0 end of transfer   EVENT12\\n280:                         rx_ch_events[CH_ID_SPIM0],     //spim0 rx                EVENT11\\n281:                         tx_ch_events[CH_ID_SPIM0],     //spim0 tx                EVENT10\\n282:                         s_uart_evt,                    //uart event              EVENT6\\n283:                         rx_ch_events[CH_ID_UART],      //uart rx                 EVENT5\\n284:                         tx_ch_events[CH_ID_UART],      //uart tx                 EVENT4\\n285:                         4'h0\\n286:                       };\\n287: \\n288:     integer i;\\n289: \\n290:     assign s_periph_data_from = {\\n291:                         s_periph_data_from_cam,\\n292:                         s_periph_data_from_i2s,\\n293:                         s_periph_data_from_i2c1,\\n294:                         s_periph_data_from_i2c0,\\n295:                         s\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 9,
+      "tool": "read_file",
+      "args": {
+        "limit": 120,
+        "offset": 330,
+        "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+      "error": null,
+      "content": "330:         .N_RX_CHANNELS(N_RX_CHANNELS),\n331:         .N_TX_CHANNELS(N_TX_CHANNELS),\n332:         .TRANS_SIZE(TRANS_SIZE),\n333:         .N_PERIPHS(N_PERIPHS),\n334: \t.APB_ADDR_WIDTH(APB_ADDR_WIDTH)\n335:     ) u_udmacore (\n336:         .sys_clk_i(sys_clk_i),\n337:         .per_clk_i(periph_clk_i),\n338: \n339:         .dft_cg_enable_i(dft_cg_enable_i),\n340: \n341:         .HRESETn(HRESETn),\n342:         .PADDR(PADDR),\n343:         .PWDATA(PWDATA),\n344:         .PWRITE(PWRITE),\n345:         .PSEL(PSEL),\n346:         .PENABLE(PENABLE),\n347:         .PRDATA(PRDATA),\n348:         .PREADY(PREADY),\n349:         .PSLVERR(PSLVERR),\n350: \n351:         .periph_per_clk_o(s_clk_periphs_per),\n352:         .periph_sys_clk_o(s_clk_periphs_core),\n353:     \n354:         .event_valid_i(event_valid_i),\n355:         .event_data_i (event_data_i),\n356:         .event_ready_o(event_ready_o),\n357: \n358:         .event_o(s_trigger_events),\n359: \n360:         .filter_eot_o( s_filter_eot_evt ),\n361:         .filter_act_o( s_filter_act_evt ),\n362: \n363:         .periph_data_to_o(s_periph_data_to),\n364:         .periph_addr_o(s_periph_addr),\n365:         .periph_data_from_i(s_periph_data_from),\n366:         .periph_ready_i(s_periph_ready),\n367:         .periph_valid_o(s_periph_valid),\n368:         .periph_rwn_o(s_periph_rwn),\n369: \n370:         .tx_l2_req_o(L2_ro_req_o),\n371:         .tx_l2_gnt_i(L2_ro_gnt_i),\n372:         .tx_l2_addr_o(s_L2_ro_addr),\n373:         .tx_l2_rdata_i(L2_ro_rdata_i),\n374:         .tx_l2_rvalid_i(L2_ro_rvalid_i),\n375: \n376:         .rx_l2_req_o(L2_wo_req_o),\n377:         .rx_l2_gnt_i(L2_wo_gnt_i),\n378:         .rx_l2_addr_o(s_L2_wo_addr),\n379:         .rx_l2_be_o(L2_wo_be_o),\n380:         .rx_l2_wdata_o(L2_wo_wdata_o),\n381: \n382:         .tx_ch_req_i(tx_ch_req),\n383:         .tx_ch_gnt_o(tx_ch_gnt),\n384:         .tx_ch_valid_o(tx_ch_valid),\n385:         .tx_ch_data_o(tx_ch_data),\n386:         .tx_ch_ready_i(tx_ch_ready),\n387:         .tx_ch_datasize_i(tx_ch_datasize),\n388:         .tx_ch_events_o(tx_ch_events),\n389:         .tx_ch_en_o(tx_ch_en),\n390:         .tx_ch_pending_o(tx_ch_pending),\n391:         .tx_ch_curr_addr_o(tx_ch_curr_addr),\n392:         .tx_ch_bytes_left_o(tx_ch_bytes_left),\n393: \n394:         .tx_cfg_startaddr_i(tx_cfg_startaddr),\n395:         .tx_cfg_size_i(tx_cfg_size),\n396:         .tx_cfg_continuous_i(tx_cfg_continuous),\n397:         .tx_cfg_en_i(tx_cfg_en),\n398:         .tx_cfg_clr_i(tx_cfg_clr),\n399: \n400:         .rx_ch_valid_i(rx_ch_valid),\n401:         .rx_ch_data_i(rx_ch_data),\n402:         .rx_ch_ready_o(rx_ch_ready),\n403:         .rx_ch_datasize_i(rx_ch_datasize),\n404:         .rx_ch_events_o(rx_ch_events),\n405:         .rx_ch_en_o(rx_ch_en),\n406:         .rx_ch_pending_o(rx_ch_pending),\n407:         .rx_ch_curr_addr_o(rx_ch_curr_addr),\n408:         .rx_ch_bytes_left_o(rx_ch_bytes_left),\n409: \n410:         .rx_cfg_startaddr_i(rx_cfg_startaddr),\n411:         .rx_cfg_size_i(rx_cfg_size),\n412:         .rx_cfg_continuous_i(rx_cfg_continuous),\n413:         .rx_cfg_filter_i(rx_cfg_filter),\n414:         .rx_cfg_en_i(rx_cfg_en),\n415:         .rx_cfg_clr_i(rx_cfg_clr)\n416:     );\n417: \n418: \n419:     udma_uart_top #(\n420:         .L2_AWIDTH_NOAL ( L2_AWIDTH_NOAL ),\n421:         .TRANS_SIZE     ( TRANS_SIZE     )\n422:     ) u_uart (\n423:         .sys_clk_i           ( s_clk_periphs_core[PER_ID_UART] ),\n424:         .periph_clk_i        ( s_clk_periphs_per[PER_ID_UART]  ),\n425:         .rstn_i              ( HRESETn                  ),\n426: \n427:         .uart_tx_o           ( uart_tx                  ),\n428:         .uart_rx_i           ( uart_rx                  ),\n429: \n430:         .cfg_data_i          ( s_periph_data_to         ),\n431:         .cfg_addr_i          ( s_periph_addr            ),\n432:         .cfg_valid_i         ( s_periph_valid_uart      ),\n433:         .cfg_rwn_i           ( s_periph_rwn             ),\n434:         .cfg_data_o          ( s_periph_data_from_uart  ),\n435:         .cfg_ready_o \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 9,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+        "query": "cfg_en"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:152: logic [N_TX_CHANNELS-1:0]                        tx_cfg_en;\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:171: logic [N_RX_CHANNELS-1:0]                        rx_cfg_en;\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:397: .tx_cfg_en_i(tx_cfg_en),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:414: .rx_cfg_en_i(rx_cfg_en),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:440: .cfg_rx_en_o         ( rx_cfg_en[CH_ID_UART]             ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:451: .cfg_tx_en_o         ( tx_cfg_en[CH_ID_UART]             ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:523: .cfg_tx_en_o         ( tx_cfg_en[CH_ID_SPIM0]              ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:533: .cfg_rx_en_o         ( rx_cfg_en[CH_ID_SPIM0]              ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:570: .cfg_rx_en_o         ( rx_cfg_en[CH_ID_SDIO]             ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:580: .cfg_tx_en_o         ( tx_cfg_en[CH_ID_SDIO]             ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:621: .cfg_tx_en_o         ( tx_cfg_en[CH_ID_I2C0]             ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:631: .cfg_rx_en_o         ( rx_cfg_en[CH_ID_I2C0]             ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:683: .cfg_tx_en_o         ( tx_cfg_en[CH_ID_I2C1]             ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:693: .cfg_rx_en_o         ( rx_cfg_en[CH_ID_I2C1]             ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:757: .cfg_rx_ch0_en_o         ( rx_cfg_en[CH_ID_I2S]            ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:768: .cfg_rx_ch1_en_o         ( rx_cfg_en[CH_ID_I2S+1]            ),\nips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv:808: .cfg_rx_en_o         ( rx_cfg_en[CH_ID_CAM]            ),",
+      "truncated": false
+    },
+    {
+      "step": 9,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+        "query": "range"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/udma_subsystem/udma_subsystem.sv",
+      "error": null,
+      "content": "",
+      "truncated": false
+    },
+    {
+      "step": 10,
+      "tool": "read_file",
+      "args": {
+        "limit": 70,
+        "offset": 0,
+        "path": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+      "error": null,
+      "content": "1: // Copyright 2018 ETH Zurich and University of Bologna.\n2: // Copyright and related rights are licensed under the Solderpad Hardware\n3: // License, Version 0.51 (the \"License\"); you may not use this file except in\n4: // compliance with the License.  You may obtain a copy of the License at\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n6: // or agreed to in writing, software, hardware and materials distributed under\n7: // this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\n9: // specific language governing permissions and limitations under the License.\n10: \n11: \n12: `define REG_INFO        7'b0000000 //BASEADDR+0x00 CONTAINS NUMBER OF CORES [31:16] AND CLUSTERS [15:0]\n13: `define REG_FCBOOT      7'b0000001 //BASEADDR+0x04 not used at the moment\n14: `define REG_FCFETCH     7'b0000010 //BASEADDR+0x08 not used at the moment\n15: \n16: `define REG_PADFUN0     7'b0000100 //BASEADDR+0x10 sets the mux for pins  0 (bits [1:0]) to 15 (bits [31:30])\n17: `define REG_PADFUN1     7'b0000101 //BASEADDR+0x14 sets the mux for pins 16 (bits [1:0]) to 31 (bits [31:30])\n18: `define REG_PADFUN2     7'b0000110 //BASEADDR+0x18 sets the mux for pins 32 (bits [1:0]) to 47 (bits [31:30])\n19: `define REG_PADFUN3     7'b0000111 //BASEADDR+0x1C sets the mux for pins 48 (bits [1:0]) to 63 (bits [31:30])\n20: \n21: //PADs configuration is made of 8bits out of which only the first 6 are used\n22: //bit0    enable pull UP\n23: //bit1    enable pull DOWN\n24: //bit2    enable ST\n25: //bit3    enable SlewRate Limit\n26: //bit4..5 Driving Strength\n27: //bit6..7 not used\n28: `define REG_PADCFG0     7'b0001000 //BASEADDR+0x20 sets config for pin  0(bits [7:0]) to pin  3(bits [31:24])\n29: `define REG_PADCFG1     7'b0001001 //BASEADDR+0x24 sets config for pin  4(bits [7:0]) to pin  7(bits [31:24])\n30: `define REG_PADCFG2     7'b0001010 //BASEADDR+0x28 sets config for pin  8(bits [7:0]) to pin 11(bits [31:24])\n31: `define REG_PADCFG3     7'b0001011 //BASEADDR+0x2C sets config for pin 12(bits [7:0]) to pin 15(bits [31:24])\n32: `define REG_PADCFG4     7'b0001100 //BASEADDR+0x30 sets config for pin 16(bits [7:0]) to pin 19(bits [31:24])\n33: `define REG_PADCFG5     7'b0001101 //BASEADDR+0x34 sets config for pin 20(bits [7:0]) to pin 23(bits [31:24])\n34: `define REG_PADCFG6     7'b0001110 //BASEADDR+0x38 sets config for pin 24(bits [7:0]) to pin 27(bits [31:24])\n35: `define REG_PADCFG7     7'b0001111 //BASEADDR+0x3C sets config for pin 28(bits [7:0]) to pin 31(bits [31:24])\n36: `define REG_PADCFG8     7'b0010000 //BASEADDR+0x40 sets config for pin 32(bits [7:0]) to pin 35(bits [31:24])\n37: `define REG_PADCFG9     7'b0010001 //BASEADDR+0x44 sets config for pin 36(bits [7:0]) to pin 39(bits [31:24])\n38: `define REG_PADCFG10    7'b0010010 //BASEADDR+0x48 sets config for pin 40(bits [7:0]) to pin 43(bits [31:24])\n39: `define REG_PADCFG11    7'b0010011 //BASEADDR+0x4C sets config for pin 44(bits [7:0]) to pin 47(bits [31:24])\n40: `define REG_PADCFG12    7'b0010100 //BASEADDR+0x50 sets config for pin 48(bits [7:0]) to pin 51(bits [31:24])\n41: `define REG_PADCFG13    7'b0010101 //BASEADDR+0x54 sets config for pin 52(bits [7:0]) to pin 55(bits [31:24])\n42: `define REG_PADCFG14    7'b0010110 //BASEADDR+0x58 sets config for pin 56(bits [7:0]) to pin 59(bits [31:24])\n43: `define REG_PADCFG15    7'b0010111 //BASEADDR+0x5C sets config for pin 60(bits [7:0]) to pin 63(bits [31:24])\n44: \n45: `define REG_JTAGREG     7'b0011101 //BASEADDR+0x74 JTAG REG\n46: \n47: `define REG_CORESTATUS  7'b0101000 //BASEADDR+0xA0 32bit GP register to be used during testing to return EOC(bit[31]) and status(bit[30:0])\n48: `define REG_CS_RO       7'b0110000 //BASEADDR+0xC0 32bit GP register to be used during testing to return EOC(bit[31]) and status(bit[30:0]) Read Only mirror\n49: `define REG_BOOTSEL     7'b0110001 //BASEADDR+0xC4 bootsel\n50: `define REG_CLKSEL      7'b0110010 //BASE\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 10,
+      "tool": "read_file",
+      "args": {
+        "limit": 80,
+        "offset": 430,
+        "path": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/components/apb_soc_ctrl.sv",
+      "error": null,
+      "content": "430:             PRDATA = {2'b00,pad_cfg[63],2'b00,pad_cfg[62],2'b00,pad_cfg[61],2'b00,pad_cfg[60]};\n431:           `REG_FCBOOT:\n432:             PRDATA = r_bootaddr;\n433:           `REG_INFO:\n434:             PRDATA = {n_cores,n_clusters};\n435:           `REG_CORESTATUS:\n436:             PRDATA = r_corestatus;\n437:           `REG_CS_RO:\n438:             PRDATA = r_corestatus;\n439:           `REG_BOOTSEL:\n440:             PRDATA =  32'h0;\n441:           `REG_CLKSEL:\n442:             PRDATA = {31'h0,sel_fll_clk_i};\n443:           `REG_CLUSTER_CTRL:\n444:             PRDATA = {\n445:               29'h0,\n446:               r_cluster_rstn,\n447:               r_cluster_fetch_enable,\n448:               r_cluster_pow,\n449:               r_cluster_byp };\n450:           `REG_JTAGREG:\n451:             PRDATA = {16'h0,r_jtag_regi_sync[0],r_jtag_rego};\n452:           `REG_CTRL_PER:\n453:             PRDATA = {31'b0, r_sel_hyper_axi};\n454:           `REG_CLUSTER_IRQ:\n455:             PRDATA = {31'b0, r_cluster_irq};\n456:           `REG_CLUSTER_BOOT_ADDR0:\n457:             PRDATA = r_cluster_boot[31:0];\n458:           `REG_CLUSTER_BOOT_ADDR1:\n459:             PRDATA = r_cluster_boot[63:32];\n460:           default:\n461:             begin\n462:             PRDATA = 'h0;\n463:             `ifndef SYNTHESIS\n464:               `ifdef MSG_VERBOSE\n465:               $display(\"[APB SOC CTRL] INVALID READ ACCESS to %x at time %t\\n\",PADDR, $time);\n466:               `endif\n467:             `endif\n468:             end\n469:         endcase\n470:     end\n471: \n472:    assign n_cores    = NB_CORES;\n473:    assign n_clusters = NB_CLUSTERS;\n474: \n475:    assign PREADY     = 1'b1;\n476:    assign PSLVERR    = 1'b0;\n477: \n478: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 10,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "query": "soc_jtag_reg"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:41: input  logic [7:0]                    soc_jtag_reg_i,\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:42: output logic [7:0]                    soc_jtag_reg_o,\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:485: .soc_jtag_reg_i         ( soc_jtag_reg_i         ),\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:486: .soc_jtag_reg_o         ( soc_jtag_reg_o         ),",
+      "truncated": false
+    },
+    {
+      "step": 10,
+      "tool": "search_text",
+      "args": {
+        "case_sensitive": false,
+        "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+        "query": "dft_"
+      },
+      "status": "ok",
+      "path": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+      "error": null,
+      "content": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:38: input  logic                          dft_test_mode_i,\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:39: input  logic                          dft_cg_enable_i,\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:375: assign cluster_test_en_o = dft_test_mode_i;\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:429: .test_mode_i     ( dft_test_mode_i    ),\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:448: .test_mode_i ( dft_test_mode_i )\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:470: .dft_test_mode_i        ( dft_test_mode_i        ),\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:471: .dft_cg_enable_i        ( 1'b0                   ),\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:632: .test_en_i           ( dft_test_mode_i     ),\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:668: .test_mode_i                ( dft_test_mode_i               ),\nips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:720: .test_en_i        ( dft_test_mode_i     ),",
+      "truncated": false
+    },
+    {
+      "step": 11,
+      "tool": "model_message",
+      "args": {},
+      "status": "ok",
+      "content": "```json\n{\n  \"scope_id\": \"pulp_soc_apb_interconnect_permission_scope\",\n  \"results\": [\n    {\n      \"obligation_id\": \"PERM-SOCCTRL-APB-WRITE-GUARD\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"APB/peripheral bus requester reaching soc_peripherals.apb_slave and s_soc_ctrl_bus\",\n      \"operation\": \"write/configure/trigger boot and execution-control state\",\n      \"object\": \"fc_bootaddr_o, fc_fetchen_o, cluster_boot_addr_o, cluster_fetch_enable_o, cluster_rstn_o, cluster_pow_o, cluster_byp_o, sel_hyper_axi_o, soc_jtag_reg_o, plus pad mux/config side effects\",\n      \"expected_guard\": \"Explicit privilege, lock, lifecycle, safe-state, or debug-authorization guard on writes to SoC-control boot/fetch/reset/power/mux/JTAG registers, beyond APB PSEL/PENABLE/PWRITE and address decode.\",\n      \"observed_behavior\": \"The protected SoC-control registers are updated directly when `PSEL && PENABLE && PWRITE` and the local APB address matches. No privilege, lock, lifecycle, debug-authorization, or safe-state condition is present in the write path. Reset values leave several controls post-reset writable: FC boot address defaults to `32'h1A000000`, FC fetch defaults enabled, cluster reset defaults deasserted, cluster bypass defaults asserted, cluster power/fetch disabled but writable.\",\n      \"path\": \"soc_interconnect/soc APB -> soc_peripherals.periph_bus_wrap -> s_soc_ctrl_bus -> apb_soc_ctrl register file\",\n      \"state_condition\": \"After reset and during cluster power/reset/fetch transitions, any requester that can issue APB writes to the decoded SoC-control address range can update these controls. No lock-after-setup behavior was found.\",\n      \"impact\": \"An APB-capable requester can rewrite boot and fetch control, reset/power/bypass cluster behavior, change boot vectors, drive a JTAG-visible register, and alter peripheral/pad control without an explicit authorization check.\",\n      \"rtl_evidence\": [\n        \"ips/pulp_soc/rtl/components/apb_soc_ctrl.sv:12-57 defines register addresses including `REG_FCBOOT`, `REG_FCFETCH`, `REG_JTAGREG`, `REG_CLUSTER_CTRL`, `REG_CTRL_PER`, `REG_CLUSTER_IRQ`, and cluster boot-address registers.\",\n        \"ips/pulp_soc/rtl/components/apb_soc_ctrl.sv:131-146 directly assigns internal registers to protected outputs such as `soc_jtag_reg_o`, `fc_bootaddr_o`, `fc_fetchen_o`, `cluster_pow_o`, `sel_hyper_axi_o`, `cluster_rstn_o`, `cluster_boot_addr_o`, `cluster_fetch_enable_o`, `cluster_byp_o`, and `cluster_irq_o`.\",\n        \"ips/pulp_soc/rtl/components/apb_soc_ctrl.sv:159-178 reset values: `r_bootaddr <= 32'h1A000000`, `r_fetchen <= 'h1`, `r_cluster_pow <= 1'b0`, `r_cluster_byp <= 1'b1`, `r_cluster_fetch_enable <= 1'b0`, `r_cluster_rstn <= 1'b1`.\",\n        \"ips/pulp_soc/rtl/components/apb_soc_ctrl.sv:184-365: write block guarded only by `if (PSEL && PENABLE && PWRITE)` and `case (s_apb_addr)`.\",\n        \"ips/pulp_soc/rtl/components/apb_soc_ctrl.sv:187-194 update `r_bootaddr` and `r_fetchen`; lines 331-334 update `r_jtag_rego`; lines 339-345 update cluster bypass/power/fetch/reset; lines 346-350 update `r_sel_hyper_axi`; lines 351-357 update cluster IRQ and boot address.\",\n        \"ips/pulp_soc/rtl/components/apb_soc_ctrl.sv:475-476 drives `PREADY = 1'b1` and `PSLVERR = 1'b0`, so invalid/disallowed writes are not signaled as permission failures.\",\n        \"ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv:495-528 instantiates `apb_soc_ctrl` on `s_soc_ctrl_bus` and connects outputs to SoC-level boot, JTAG, cluster power/reset/fetch/bypass paths.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM-JTAG-DEBUG-REACHABILITY-AUTHZ\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"JTAG/debug interface requester through `lint_jtag_wrap` / debug local interconnect path\",\n      \"operation\": \"read/write/expose/override through debug or JTAG path\",\n      \"object\": \"local interconnect memory/APB targets, APB debug bus, and SoC-control/JTAG register visibility\",\n      \"expected_guard\": \"JTAG/debug-initiated accesses should require debug authorization or lifecycle enable and should not bypass normal access mediation for protected SoC state or memory.\",\n      \"observed_behavior\": \"The top level connects JTAG AXI-register signals into `lint_jtag_wrap`, whose local-interconnect master output is wired directly to `s_lint_debug_bus`. The SoC interconnect treats `DBG_RX_*` as one of the regular masters bundled with FC data, uDMA TX/RX, and FC instruction. No authorization/lifecycle signal was found by text search or in the visible port connections. Debug requests are demuxed/routed using address ranges like other masters.\",\n      \"path\": \"JTAG pins/signals -> `lint_jtag_wrap` -> `s_lint_debug_bus` -> `soc_interconnect_wrap` -> `soc_interconnect` DBG_RX master -> APB/L2/ROM/AXI/private L2 ranges\",\n      \"state_condition\": \"In reset-released operation, if JTAG/debug can generate local-interconnect requests, the RTL shows no debug-enable or lifecycle condition on the path. No distinction from non-debug master guards was observed.\",\n      \"impact\": \"A debug/JTAG-originated local bus requester may access memory/peripheral address ranges using the same decode fabric as normal masters, including paths to APB and memory windows, without visible authorization mediation.\",\n      \"rtl_evidence\": [\n        \"ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:737-750 instantiates `lint_jtag_wrap`, connects JTAG pins/signals, and wires `.jtag_lint_master(s_lint_debug_bus)`.\",\n        \"ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv:717-735 wires `s_lint_debug_bus` into `soc_interconnect_wrap` as `.lint_debug`.\",\n        \"ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:97-107 declares `DBG_RX_req_i/add_i/wen_i/wdata_i/be_i` and response outputs.\",\n        \"ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:401-411 bundles `DBG_RX_*` with `FC_DATA`, `UDMA_RX`, `UDMA_TX`, and `FC_INSTR` masters; debug is not accompanied by an auth/lifecycle qualifier.\",\n        \"ips/pulp_soc/rtl/pulp_soc/soc_interconnect.sv:260-265 defines shared target ranges: APB `1A10_0000..1A20_0000`, AXI/cluster `1000_0000..1040_0000`, ROM `1A00_0000..1A04_0000`, L2 private windows, and TCDM `1C01_0000..1C08_2000`.\",\n        \"Search for `auth` under `ips/pulp_soc/rtl` returned no relevant authorization signal.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM-FLL-LOCK-WRITE-MEDIATION\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"APB requester via `s_fll_bus`\",\n      \"operation\": \"write/configure FLL registers\",\n      \"object\": \"fll1_add/data/wrn/req, fll2_add/data/wrn/req, fll3_add/data/wrn/req and associated FLL configuration state\",\n      \"expected_guard\": \"Writes to each FLL should be blocked or restricted when the corresponding `fll*_lock` is asserted.\",\n      \"observed_behavior\": \"`fll1_lock`, `fll2_lock`, and `fll3_lock` are synchronized and readable at address selector `4'b1111`, but they are not used in the APB write-decode or request-generation logic. Writes to direct FLL address ranges assert `fll*_wr_access`, cause the FSM to issue `fll*_req`, and drive `fll*_wrn`, `fll*_add`, and `fll*_data` from APB signals regardless of the synchronized lock state.\",\n      \"path\": \"soc_peripherals `s_fll_bus` -> `apb_fll_if` -> FLL master ports into `soc_clk_rst_gen` FLL slave interfaces\",\n      \"state_condition\": \"When any lock input is asserted and synchronized, the lock is exposed to software readback but does not prevent new write requests or alter write data/address generation. During pending request/ack, no lock recheck is visible.\",\n      \"impact\": \"APB software can still issue FLL configuration writes even when the corresponding FLL lock bit is asserted, potentially bypassing intended lock protection for clock-generation configuration.\",\n      \"rtl_evidence\": [\n        \"ips/apb/apb_fll_if/apb_fll_if.sv:27-47 declares FLL request/write/address/data ports and lock inputs.\",\n        \"ips/apb/apb_fll_if/apb_fll_if.sv:83-116 synchronizes `fll*_lock` into `fll*_lock_sync`.\",\n        \"ips/apb/apb_fll_if/apb_fll\n[TRUNCATED]",
+      "truncated": true
+    }
+  ]
+}

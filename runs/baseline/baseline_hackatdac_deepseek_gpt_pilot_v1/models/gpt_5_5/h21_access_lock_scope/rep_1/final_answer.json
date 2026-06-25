@@ -1,16 +1,16 @@
 {
-  "analysis_summary": "The scoped RTL contains permission-related security vulnerabilities in the access-control, register-lock, and PKT/fuse wrappers. Source evidence shows that access-control state resets to an all-allow value, PKT/fuse read data can bypass the intended register-lock mask through a default read path, one register-lock entry does not preserve itself when locked, and JTAG unlock clears all register-lock state. These issues can permit unauthorized reads/writes of protected peripheral configuration or sensitive fuse/key-related data depending on integration and lifecycle controls.",
+  "analysis_summary": "Inspected the RTL/source files under the input scope, including the top-level peripheral integration and local wrappers for access control, register lock, HMAC, and PKT. The design implements permission checks using access-control bits indexed by CPU privilege level and register-lock bits. Visible source evidence shows multiple permission-related weaknesses: access-control registers reset to an all-allow state, one peripheral permission is hard-wired to inherit another peripheral's permission, and register-lock state can be cleared by a JTAG unlock signal. These behaviors can undermine privilege separation and protection of security-sensitive peripherals unless external boot/debug controls, not visible in scope, compensate for them.",
   "findings": [
     {
       "finding_id": "FINDING-001",
       "status": "confirmed_finding",
-      "summary": "Access-control table resets to all permissions enabled.",
-      "vulnerability_category": "Fail-open access-control default / insecure permission reset state",
+      "summary": "Access-control registers reset to all ones, causing protected peripheral permissions to default to allowed for all privilege levels.",
+      "vulnerability_category": "Improper default permissions / fail-open access control",
       "affected_locations": [
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 49,
-          "line_end": 84,
+          "line_start": 84,
+          "line_end": 89,
           "module": "acct_wrapper",
           "signal_or_register": "acct_mem, acc_ctrl_o"
         },
@@ -27,38 +27,59 @@
           "line_end": 517,
           "module": "riscv_peripherals",
           "signal_or_register": "rom_req"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
+          "line_start": 80,
+          "line_end": 80,
+          "module": "hmac_wrapper",
+          "signal_or_register": "en, acct_ctrl_i"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
+          "line_start": 68,
+          "line_end": 68,
+          "module": "pkt_wrapper",
+          "signal_or_register": "en, acct_ctrl_i"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 72,
+          "line_end": 72,
+          "module": "reglk_wrapper",
+          "signal_or_register": "en, acct_ctrl_i"
         }
       ],
       "evidence": [
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 49,
-          "line_end": 49,
+          "line_start": 84,
+          "line_end": 89,
           "module": "acct_wrapper",
-          "object": "acc_ctrl_o",
-          "evidence_type": "assignment",
-          "description": "The exported access-control vector is derived from acct_mem, with the low word ORed by we_flag.",
-          "supports_claim": "Shows acct_mem is the source of the permission bits consumed by integration logic."
+          "object": "acct_mem",
+          "evidence_type": "source_code",
+          "description": "Access-control memory is initialized to all ones on reset, making all permission bits allowed by default.",
+          "supports_claim": "The reset branch assigns every acct_mem entry to 32'hffffffff."
         },
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 81,
-          "line_end": 84,
+          "line_start": 47,
+          "line_end": 47,
           "module": "acct_wrapper",
-          "object": "acct_mem",
-          "evidence_type": "reset behavior",
-          "description": "On reset condition, every acct_mem entry is assigned 32'hffffffff.",
-          "supports_claim": "Shows permissions default to all ones rather than a deny-by-default value."
+          "object": "acc_ctrl_o",
+          "evidence_type": "source_code",
+          "description": "Exported access-control output is derived directly from acct_mem, with an additional OR of we_flag for part of the vector.",
+          "supports_claim": "The output permission vector is built from acct_mem entries, so the all-ones reset value propagates to downstream permission logic."
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 222,
+          "line_start": 215,
           "line_end": 222,
           "module": "riscv_peripherals",
           "object": "acc_ctrl_c",
-          "evidence_type": "assignment",
-          "description": "acc_ctrl is transposed into acc_ctrl_c by privilege level and peripheral index.",
-          "supports_claim": "Shows the exported access-control bits are used as per-privilege/per-peripheral permission bits."
+          "evidence_type": "source_code",
+          "description": "Top-level permission matrix acc_ctrl_c is derived from acc_ctrl and indexed by privilege level and peripheral index.",
+          "supports_claim": "Peripheral access permissions are represented as acc_ctrl_c[privilege][peripheral]."
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
@@ -66,175 +87,125 @@
           "line_end": 517,
           "module": "riscv_peripherals",
           "object": "rom_req",
-          "evidence_type": "permission gate",
-          "description": "ROM request is gated as rom_req_acct && acc_ctrl_c[priv_lvl_i][0].",
-          "supports_claim": "Shows a one value in acc_ctrl_c enables access."
+          "evidence_type": "source_code",
+          "description": "Boot ROM request is explicitly gated by acc_ctrl_c indexed by priv_lvl_i.",
+          "supports_claim": "A permission bit value of one enables access; because reset sets permission bits to one, access is allowed by default."
         },
         {
-          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 73,
-          "line_end": 73,
-          "module": "acct_wrapper",
-          "object": "en",
-          "evidence_type": "permission gate",
-          "description": "The local AXI-lite enable is en_acct && acct_ctrl_i.",
-          "supports_claim": "Shows wrapper access is allowed when the selected access-control bit is one."
-        }
-      ],
-      "reasoning_summary": "acct_mem drives acc_ctrl_o, which is converted into acc_ctrl_c and used as an active-high access enable for protected peripherals. Reset initializes all acct_mem entries to 32'hffffffff. Therefore, after reset, the permission state is fail-open for all represented privilege/peripheral bits unless later software or external sequencing restricts it.",
-      "security_impact": "Lower-privilege or otherwise unauthorized software may access protected peripherals after reset and may be able to rewrite access-control policy before it is locked down. This can undermine privilege separation for ROM, crypto, fuse/key, register-lock, and access-control peripherals controlled by acc_ctrl_c.",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "The scoped source does not include a security specification, boot ROM policy, or full reset sequencing. If external trusted logic blocks all untrusted accesses until access-control registers are programmed, practical exploitability may be reduced, but the RTL default is visibly fail-open.",
-      "recommended_follow_up": [
-        "Change access-control reset defaults to deny-by-default for untrusted privilege levels.",
-        "Document which privilege level may program acct_mem and enforce that policy in hardware before relying on software initialization.",
-        "Review we_flag behavior because it ORs permission bits into acc_ctrl_o."
-      ]
-    },
-    {
-      "finding_id": "FINDING-002",
-      "status": "confirmed_finding",
-      "summary": "PKT/fuse read-lock can be bypassed through the default read path.",
-      "vulnerability_category": "Authorization bypass / sensitive data exposure",
-      "affected_locations": [
-        {
-          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
-          "line_start": 68,
-          "line_end": 111,
-          "module": "pkt_wrapper",
-          "signal_or_register": "rdata, fuse_rdata_i, reglk_ctrl_i[6], fuse_addr_o"
-        }
-      ],
-      "evidence": [
+          "file": "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
+          "line_start": 80,
+          "line_end": 80,
+          "module": "hmac_wrapper",
+          "object": "assign en = en_acct && acct_ctrl_i",
+          "evidence_type": "source_code",
+          "description": "Peripheral wrappers use acct_ctrl_i to enable AXI register access.",
+          "supports_claim": "HMAC register accesses are permitted when acct_ctrl_i is high."
+        },
         {
           "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
           "line_start": 68,
           "line_end": 68,
           "module": "pkt_wrapper",
-          "object": "en",
-          "evidence_type": "permission gate",
-          "description": "The wrapper only gates accesses using en_acct && acct_ctrl_i.",
-          "supports_claim": "Shows register-lock bits are not part of the initial wrapper access enable."
+          "object": "assign en = en_acct && acct_ctrl_i",
+          "evidence_type": "source_code",
+          "description": "Peripheral wrappers use acct_ctrl_i to enable AXI register access.",
+          "supports_claim": "PKT register accesses are permitted when acct_ctrl_i is high."
         },
         {
-          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
-          "line_start": 96,
-          "line_end": 96,
-          "module": "pkt_wrapper",
-          "object": "rdata",
-          "evidence_type": "assignment",
-          "description": "When enabled, rdata is first assigned fuse_rdata_i before the address case statement.",
-          "supports_claim": "Creates a preloaded sensitive-data value that can survive some case paths."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
-          "line_start": 107,
-          "line_end": 107,
-          "module": "pkt_wrapper",
-          "object": "reglk_ctrl_i[6], fuse_rdata_i",
-          "evidence_type": "lock check",
-          "description": "Address slot 4 masks fuse_rdata_i to zero when reglk_ctrl_i[6] is set.",
-          "supports_claim": "Shows the design intent is to protect fuse_rdata_i reads with reglk_ctrl_i[6]."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
-          "line_start": 108,
-          "line_end": 111,
-          "module": "pkt_wrapper",
-          "object": "default case",
-          "evidence_type": "bypass path",
-          "description": "In the default case, rdata is overwritten with zero only if fuse_addr_o <= 110; otherwise the earlier fuse_rdata_i assignment remains.",
-          "supports_claim": "Shows an unmapped/default read can return fuse_rdata_i without applying reglk_ctrl_i[6]."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv",
-          "line_start": 75,
-          "line_end": 84,
-          "module": "pkt_wrapper",
-          "object": "fuse_req_o, fuse_addr_o",
-          "evidence_type": "write path",
-          "description": "Writes to fuse request and fuse address are controlled by en and we but not by reglk_ctrl_i.",
-          "supports_claim": "Supports the possibility that an authorized peripheral accessor can influence fuse_addr_o used by the default read condition."
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 72,
+          "line_end": 72,
+          "module": "reglk_wrapper",
+          "object": "assign en = en_acct && acct_ctrl_i",
+          "evidence_type": "source_code",
+          "description": "Register-lock wrapper itself is also gated by acct_ctrl_i.",
+          "supports_claim": "The register-lock control block is subject to the same access-control vector that resets to allow."
         }
       ],
-      "reasoning_summary": "The explicit fuse-data read at address slot 4 is protected by reglk_ctrl_i[6], but the combinational read logic initializes rdata to fuse_rdata_i before the case. For default addresses, rdata is only cleared when fuse_addr_o <= 110. If the default branch is taken with fuse_addr_o > 110, fuse_rdata_i is returned without the lock check, bypassing the intended protection.",
-      "security_impact": "Software with PKT wrapper access can potentially read fuse data despite the fuse-data lock bit being set. Depending on fuse contents, this may disclose provisioned configuration, key-related material, or other security-sensitive device state.",
+      "reasoning_summary": "The design treats access-control bits as enables: requests and wrapper register accesses proceed when the selected acc_ctrl_c[priv_lvl_i][peripheral] bit is one. The access-control source registers reset to 32'hffffffff, so every permission bit is one immediately after reset. This is a fail-open policy. Unless trusted firmware always configures restrictive permissions before any untrusted or lower-privileged code can execute, all controlled peripherals are accessible by default.",
+      "security_impact": "Lower-privileged or early-boot code may access protected peripherals before secure configuration. This could permit reads or writes to security configuration, register-lock state, cryptographic engines, key-related controls, fuse/PKT interfaces, reset controls, DMA, or other sensitive peripherals protected by this mechanism.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "The sensitivity and valid range of fuse_rdata_i are not defined in the scoped files. The upstream address decoder behavior is also not fully visible, so practical access to unmapped PKT offsets is inferred from the wrapper accepting address[7:3].",
+      "uncertainty_or_missing_evidence": "The input scope does not include boot firmware or reset sequencing guarantees. If immutable trusted boot code configures and locks permissions before any attacker-controlled execution, exploitability is reduced, but the RTL itself is visibly fail-open.",
       "recommended_follow_up": [
-        "Initialize rdata to zero, not fuse_rdata_i.",
-        "Only assign fuse_rdata_i inside address cases that explicitly apply the appropriate lock checks.",
-        "Gate fuse_req_o and fuse_addr_o writes with suitable register-lock or privilege checks if fuse access is security-sensitive."
+        "Change the access-control reset policy to fail closed, e.g. initialize unauthorized privilege/peripheral combinations to zero and explicitly enable only required boot resources.",
+        "Document and verify the intended reset permissions for each privilege level and peripheral.",
+        "Add assertions or formal checks that lower privilege levels cannot access sensitive peripherals after reset or before explicit secure initialization.",
+        "Review boot sequence to ensure no untrusted execution occurs before access-control registers are programmed and locked."
       ]
     },
     {
-      "finding_id": "FINDING-003",
+      "finding_id": "FINDING-002",
       "status": "confirmed_finding",
-      "summary": "Register-lock memory entry 2 is altered while locked because it copies reglk_mem[3] instead of preserving itself.",
-      "vulnerability_category": "Register-lock bypass / incorrect locked-state assignment",
+      "summary": "Peripheral index 5 inherits access from peripheral index 4 due to a hard-coded OR in the permission matrix.",
+      "vulnerability_category": "Permission aliasing / over-broad authorization",
       "affected_locations": [
         {
-          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 89,
-          "line_end": 94,
-          "module": "reglk_wrapper",
-          "signal_or_register": "reglk_mem[2], reglk_mem[3], reglk_ctrl[1]"
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 222,
+          "line_end": 222,
+          "module": "riscv_peripherals",
+          "signal_or_register": "acc_ctrl_c"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1627,
+          "line_end": 1627,
+          "module": "riscv_peripherals",
+          "signal_or_register": "acct_ctrl_i for peripheral index 5"
         }
       ],
       "evidence": [
         {
-          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 48,
-          "line_end": 48,
-          "module": "reglk_wrapper",
-          "object": "reglk_ctrl_o",
-          "evidence_type": "assignment",
-          "description": "reglk_ctrl_o is composed from reglk_mem[5:0].",
-          "supports_claim": "Shows reglk_mem entries are exported as the downstream register-lock control state."
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 222,
+          "line_end": 222,
+          "module": "riscv_peripherals",
+          "object": "assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i])",
+          "evidence_type": "source_code",
+          "description": "Permission matrix generation ORs peripheral index 5's permission with peripheral index 4's permission for the same privilege level.",
+          "supports_claim": "For j == 5, acc_ctrl_c is asserted if either peripheral 5's own permission is set or peripheral 4's permission is set."
         },
         {
-          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 91,
-          "line_end": 94,
-          "module": "reglk_wrapper",
-          "object": "reglk_mem[1:3]",
-          "evidence_type": "write path",
-          "description": "Adjacent locked writes preserve their own target register, but address 2 assigns reglk_mem[2] <= reglk_mem[3] when reglk_ctrl[1] is set.",
-          "supports_claim": "Shows the locked case for reglk_mem[2] can modify the protected value rather than holding it."
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 116,
-          "line_end": 116,
-          "module": "reglk_wrapper",
-          "object": "reglk_mem[2]",
-          "evidence_type": "read path",
-          "description": "reglk_mem[2] is readable through address slot 2 when read lock reglk_ctrl[0] is not asserted.",
-          "supports_claim": "Confirms reglk_mem[2] is an individually addressable lock-control word."
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": 1627,
+          "line_end": 1627,
+          "module": "riscv_peripherals",
+          "object": ".acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][5])",
+          "evidence_type": "source_code",
+          "description": "A peripheral wrapper is connected to permission index 5.",
+          "supports_claim": "The aliased permission bit is used to gate an actual peripheral."
         }
       ],
-      "reasoning_summary": "The intended locked-write pattern is to retain the existing target register value. For address 2, however, a write while reglk_ctrl[1] is asserted updates reglk_mem[2] from reglk_mem[3]. If reglk_mem[3] differs from reglk_mem[2], the protected lock-control word changes even though it is locked.",
-      "security_impact": "A lock-control word may be corrupted or intentionally changed after the write lock is active. Since reglk_mem drives reglk_ctrl_o, this can alter downstream read/write lock policy and potentially enable unauthorized access to protected registers.",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "The exact peripheral mapping of reglk_mem[2] is not documented in the scoped files. Exploitability depends on whether an attacker can access the reglk wrapper while the relevant access-control bit permits it.",
+      "reasoning_summary": "The access-control matrix generally maps each peripheral j to its own permission bits acc_ctrl[j*4+i]. However, for j == 5, the expression additionally ORs in acc_ctrl[4*4+i]. Therefore, granting a privilege level access to peripheral index 4 automatically grants that same privilege level access to peripheral index 5, even if index 5's own permission bit is cleared. This weakens independent permission control and can over-grant access.",
+      "security_impact": "Software may believe it has denied access to peripheral index 5 while hardware still grants access whenever peripheral index 4 is allowed. If index 5 is security-sensitive, this can enable unauthorized peripheral access despite access-control configuration.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The visible source does not include a definitive peripheral-index-to-name table or explanation of this alias. It may be intentional, but no source comment justifies the over-granting behavior.",
       "recommended_follow_up": [
-        "Change the locked assignment to reglk_mem[2] <= reglk_mem[2].",
-        "Add assertions or lint checks that locked write paths preserve the target register.",
-        "Document the mapping from reglk_mem words to peripherals and lock bits."
+        "Confirm whether peripheral index 5 is intentionally allowed to inherit peripheral index 4 permissions; if so, document the security rationale clearly.",
+        "If independent access control is intended, remove the OR term and map acc_ctrl_c[i][j] directly to acc_ctrl[j*4+i].",
+        "Add verification tests that clearing a peripheral's access-control bit actually denies access regardless of neighboring peripheral permissions.",
+        "Create a visible peripheral-index map to support review of access-control policy."
       ]
     },
     {
-      "finding_id": "FINDING-004",
+      "finding_id": "FINDING-003",
       "status": "potential_warning",
-      "summary": "JTAG unlock clears all register-lock state.",
-      "vulnerability_category": "Debug authorization bypass / lock reset through debug unlock",
+      "summary": "Register-lock state can be cleared by asserting jtag_unlock, potentially undermining lock persistence.",
+      "vulnerability_category": "Debug unlock bypass of security locks",
       "affected_locations": [
         {
           "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 80,
-          "line_end": 84,
+          "line_start": 84,
+          "line_end": 89,
           "module": "reglk_wrapper",
           "signal_or_register": "jtag_unlock, reglk_mem"
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 47,
+          "line_end": 47,
+          "module": "reglk_wrapper",
+          "signal_or_register": "reglk_ctrl_o"
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
@@ -248,19 +219,29 @@
           "line_start": 1817,
           "line_end": 1820,
           "module": "riscv_peripherals",
-          "signal_or_register": "reglk_ctrl, jtag_unlock"
+          "signal_or_register": "jtag_unlock, reglk_ctrl"
         }
       ],
       "evidence": [
         {
           "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 80,
-          "line_end": 84,
+          "line_start": 84,
+          "line_end": 89,
           "module": "reglk_wrapper",
-          "object": "reglk_mem",
-          "evidence_type": "reset behavior",
-          "description": "The reset condition includes ~jtag_unlock; when jtag_unlock is high, all reglk_mem entries are cleared to zero.",
-          "supports_claim": "Shows JTAG unlock erases the register-lock policy state."
+          "object": "if(~(rst_ni && ~jtag_unlock && ~rst_9)) ... reglk_mem[j] <= 'h0",
+          "evidence_type": "source_code",
+          "description": "Register-lock memory is cleared to zero when the reset condition is triggered. Because jtag_unlock appears negated inside the conjunction, asserting jtag_unlock causes the condition to be true and clears all lock entries.",
+          "supports_claim": "jtag_unlock assertion resets/unlocks reglk_mem."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 47,
+          "line_end": 47,
+          "module": "reglk_wrapper",
+          "object": "assign reglk_ctrl_o = {reglk_mem[5], reglk_mem[4], reglk_mem[3], reglk_mem[2], reglk_mem[1], reglk_mem[0]}",
+          "evidence_type": "source_code",
+          "description": "Register-lock output is directly formed from reglk_mem.",
+          "supports_claim": "Clearing reglk_mem clears the register-lock control outputs."
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
@@ -268,32 +249,33 @@
           "line_end": 283,
           "module": "riscv_peripherals",
           "object": "jtag_unlock",
-          "evidence_type": "integration signal",
-          "description": "jtag_unlock is declared and driven by a jtag_unlock_o connection.",
-          "supports_claim": "Shows the lock reset path is connected to an integration-level debug/unlock signal."
+          "evidence_type": "source_code",
+          "description": "Top-level declares and receives jtag_unlock from another block.",
+          "supports_claim": "jtag_unlock is a real integration-level signal generated by another module and used in this subsystem."
         },
         {
           "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
           "line_start": 1817,
           "line_end": 1820,
           "module": "riscv_peripherals",
-          "object": "reglk_ctrl, jtag_unlock",
-          "evidence_type": "integration connection",
-          "description": "reglk_wrapper exports reglk_ctrl_o and receives jtag_unlock.",
-          "supports_claim": "Shows the cleared state is the central register-lock control state used by other wrappers."
+          "object": "i_reglk_wrapper connections",
+          "evidence_type": "source_code",
+          "description": "Top-level connects jtag_unlock into the register-lock wrapper and receives reglk_ctrl output.",
+          "supports_claim": "The JTAG unlock path is wired to the block that produces global register-lock controls."
         }
       ],
-      "reasoning_summary": "reglk_mem drives reglk_ctrl_o, the global register-lock state. The reglk_wrapper reset condition treats assertion of jtag_unlock as a reset condition and clears every lock word to zero. In the wrappers, lock bits are generally used such that a set bit blocks reads or writes; therefore clearing them tends to reopen protected registers.",
-      "security_impact": "If jtag_unlock can be asserted outside a tightly controlled authenticated debug or manufacturing lifecycle state, it can remove register-lock protections and permit unauthorized reads/writes of protected peripheral registers and security-control configuration.",
+      "reasoning_summary": "The register-lock block is intended to enforce read/write lock bits for protected registers. Its reset condition includes jtag_unlock such that asserting jtag_unlock clears reglk_mem to zero. Since reglk_ctrl_o is directly derived from reglk_mem, this can remove existing locks. If JTAG unlock is accessible or insufficiently authenticated in production, an attacker can clear locks and then modify protected configuration registers.",
+      "security_impact": "An attacker with access to the JTAG unlock path may be able to clear register locks, re-enable writes or reads to protected registers, alter access-control policy, and expose or modify security-sensitive HMAC, PKT/fuse, or other peripheral configuration.",
       "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The scoped source does not include the implementation or authorization policy for the producer of jtag_unlock_o. If jtag_unlock is cryptographically authenticated and disabled in production, this may be intended lifecycle behavior rather than an exploitable vulnerability.",
+      "uncertainty_or_missing_evidence": "The module producing jtag_unlock_o and any debug authentication or lifecycle control are not included in the visible input scope. If jtag_unlock is strictly protected and unavailable to attackers, the practical severity is lower.",
       "recommended_follow_up": [
-        "Verify that jtag_unlock is authenticated, lifecycle-gated, and unavailable to untrusted actors in production.",
-        "Consider separating debug unlock from clearing persistent lock policy.",
-        "Require explicit secure reset or privileged software action to clear register locks."
+        "Verify that jtag_unlock is authenticated, fused off, or otherwise unavailable in production mode.",
+        "Avoid clearing security locks through debug signals after secure boot unless a full-chip secure reset or authenticated debug protocol is enforced.",
+        "Add hardware policy preventing debug unlock from modifying register-lock state when lifecycle state is production/secure.",
+        "Review all lock-protected registers to determine what can be changed after jtag_unlock clears locks."
       ]
     }
   ],
   "no_finding_reason": "",
-  "global_uncertainty": "The analysis is based only on visible files under the provided input scope. The full upstream bus decoder, boot sequencing, lifecycle/debug authentication policy, security specification, and exact mapping of lock/access-control bits to all peripherals are not present. These missing artifacts may affect exploitability and intended behavior, but the reported RTL behaviors are directly supported by the scoped source evidence."
+  "global_uncertainty": "Analysis is based only on files visible under the provided input scope. Several instantiated peripheral implementations, boot firmware, lifecycle/debug authentication logic, and complete reset sequencing are not present. These missing components may affect exploitability but do not remove the observed fail-open and over-granting RTL behaviors."
 }

@@ -1,0 +1,514 @@
+{
+  "analysis_summary": "The proposed method produced 10 finding(s) from 10 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "External JTAG/DMI operations can reach DMControl and hart halt/resume controls without a demonstrated authentication or lifecycle/debug-enable gate. dmstatus reports authenticated=1 unconditionally, and DMControl writes directly update the control register that feeds haltreq/resumereq.",
+      "vulnerability_category": "trigger halt/resume/debug entry request / hart debug controls and CPU execution control / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external JTAG/DMI requester Operation: trigger halt/resume/debug entry request Object: hart debug controls and CPU execution control Expected guard: JTAG/DMI requests that can halt/resume harts or enter debug mode should be mediated by debug authorization/authentication such as jtag_key match, debug enable/lifecycle state, or equivalent access control before asserting hart debug controls. Observed behavior: dmi_jtag accepts TAP DMIACCESS traffic and forwards dmi_req through dmi_cdc to dm_csrs. dm_csrs sets dmstatus.authenticated = 1'b1 with comment 'no authentication implemented'. DMControl writes assign dmcontrol_d = dmi_req_i.data; haltreq/resumereq are derived from dmcontrol_q and connected through dm_top into dm_mem/debug_req_o path. jtag_key is only copied to pass on reset in the observed dmi_jtag excerpt; no comparison gate was observed in the request-forwarding or DMControl write path. Path: JTAG pins/tap -> dmi_jtag_tap DMIACCESS -> dmi_jtag state/request -> dmi_cdc -> dm_csrs DMControl -> dm_top dm_mem -> debug_req_o/haltreq/resumereq Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An unauthenticated external JTAG actor may be able to halt or resume harts and force debug entry, gaining control over CPU execution and enabling subsequent debug memory/CSR access.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The full untruncated dmi_jtag state machine around pass_chk was not visible, but the observed forwarding path and unconditional dmstatus.authenticated are sufficient to support a candidate lack-of-auth finding.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Debug SBA DMI writes can launch AXI master reads/writes without an observed address range, requester, or authentication policy check.",
+      "vulnerability_category": "read/write system bus via debug module / system memory and memory-mapped peripherals reachable through debug SBA/AXI / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: debug module system bus access master / DMI-JTAG requester Operation: read/write system bus via debug module Object: system memory and memory-mapped peripherals reachable through debug SBA/AXI Expected guard: Debug-originated system bus reads/writes should be constrained by debug authorization and any system address/PMP/range policy applicable to protected memory/peripherals; DMI CSR writes that launch SBA transfers should not bypass normal fabric permissions. Observed behavior: dm_csrs exposes sbaddress/sbdata/SBCS writes from DMI. Writes to SBAddress0 and SBData0 assert sbaddress_write_valid_o or sbdata_write_valid_o when sberror is zero, while only setting sbbusyerror when busy. dm_top instantiates dm_sba with dmactive_i and connects it directly to axi_m_req_o/axi_m_resp_i. No address decode/range/firewall or authentication guard was observed in the provided evidence. Path: JTAG/DMI -> dm_csrs SBCS/SBAddress/SBData write cases -> dm_top i_dm_sba -> axi_m_req_o AXI master Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An external debug requester could read or overwrite arbitrary reachable system memory or MMIO, potentially bypassing CPU privilege, PMP/MMU policy, boot integrity, secrets isolation, or device control permissions.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The body of dm_sba and top-level fabric address map/firewall were not provided in full; exact reachable ranges are therefore uncertain.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "DMI writes to DMControl can control dmactive and ndmreset without an observed authorization guard.",
+      "vulnerability_category": "write/trigger ndmreset or dmactive state / global/non-debug reset and debug module active state / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external debug requester Operation: write/trigger ndmreset or dmactive state Object: global/non-debug reset and debug module active state Expected guard: Writes that assert non-debug-module reset (ndmreset) or activate/deactivate the debug module should require authorized DMI access and should have safe reset defaults; reset control should not be reachable from unauthenticated/test paths. Observed behavior: DMControl write case casts DMI data to dmcontrol and assigns dmcontrol_d = dmi_req_i.data. When dmactive is low, the sequential block clears most fields including ndmreset but explicitly permits dmactive to be written. ndmreset_o is driven from dmcontrol state per module intent/ports, and dm_top exposes ndmreset_o to integration. No authorization check beyond valid DMI write was observed. Path: JTAG/DMI request -> dm_csrs DMControl write case -> dmcontrol_q.dmactive/ndmreset -> dmactive_o/ndmreset_o -> top-level reset/control integration Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An unauthenticated debug requester may reset non-debug logic or activate/deactivate the debug module, causing denial of service, state disruption, or preparation for further debug control.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Exact continuous assignments of ndmreset_o/dmactive_o were not shown in the excerpts, but port semantics and dmcontrol reset/update logic establish the control path.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "DMI read responses expose debug CSR, abstract data, and SBA read data over JTAG without an observed authorization gate.",
+      "vulnerability_category": "read/expose data over JTAG TDO / DMI-readable debug CSR contents, system bus read data, abstract command data / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dmi_cdc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dmi_jtag_tap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dmi_cdc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dmi_jtag_tap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external JTAG reader Operation: read/expose data over JTAG TDO Object: DMI-readable debug CSR contents, system bus read data, abstract command data Expected guard: Data returned over DMI/JTAG should be limited to authorized debug sessions and should not expose protected internal state, bus read data, or stale response data after reset/deactivation/error. Observed behavior: dm_csrs accepts DMI reads when dmi_req_ready_o && dmi_req_valid_i && DTM_READ and drives resp_queue_data from data_q, dmstatus, and SBA-related registers. dmstatus.authenticated is hardwired true. dmi_cdc returns responses to JTAG; dmi_jtag_tap selects dmi_tdo_i for DMIACCESS and drives td_o/tdo_oe during shift. No authorization gating of read muxes or TDO path was observed. Path: dm_csrs read mux/response queue -> dmi_cdc response path -> dmi_jtag -> dmi_jtag_tap DMIACCESS -> td_o Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An external JTAG reader may extract debug state, abstract command data, or system bus read data, which can disclose privileged memory contents or sensitive execution state.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Full read case and response queue implementation were truncated; stale-data handling after all error states could not be completely assessed.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "CSR privilege derivation appears to elevate when umode_i is asserted, undermining CSR privilege checks; MEPC is also explicitly exempted from the privilege check.",
+      "vulnerability_category": "read/write privileged CSR state / privileged CSRs and outputs including satp_ppn_o, asid_o, en_translation_o, sum_o, mxr_o, tvm_o, tw_o, tsr_o, debug_mode_o, single_step_o, cache enables, perf interface / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: software CSR interface / CPU privilege mode Operation: read/write privileged CSR state Object: privileged CSRs and outputs including satp_ppn_o, asid_o, en_translation_o, sum_o, mxr_o, tvm_o, tw_o, tsr_o, debug_mode_o, single_step_o, cache enables, perf interface Expected guard: Writes and reads of privileged CSRs that control address translation, privilege status, trap vectors, debug mode, cache enables, or performance interfaces should be gated by current privilege/debug state; user-mode access should be denied or faulted. Observed behavior: CSR access exception logic checks csr_addr privilege against priv_lvl_o, but priv_lvl_o is assigned to M when debug_mode_q or umode_i is true. Search results also show the access check exempts CSR_MEPC. Thus, if umode_i represents user mode as indicated by the obligation/fact layer, user-mode CSR operations are evaluated as machine privilege and can pass checks for privileged CSRs. Path: csr_op_i/csr_addr_i/csr_wdata_i -> csr_we/csr_read -> CSR read/write cases -> access exception check using priv_lvl_o -> privileged CSR state/output updates Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "User-mode software may read or modify privileged CSR state controlling address translation, trap handling, debug state, cache enables, and performance interface, enabling privilege escalation and isolation bypass.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact semantic source of umode_i was not provided beyond the fact layer naming it as user-mode condition; if umode_i is misnamed and actually means machine override, the finding would need revision.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "Core debug-mode entry is driven by debug_req_i and DMI-controlled halt/debug path without an observed upstream authorization guard; debug-only CSR read/write restrictions were not fully evidenced.",
+      "vulnerability_category": "enter/exit/configure debug mode / core debug mode state, debug PC redirection, single-step control, halt CSR behavior / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/csr_regfile.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: debug module and software CSR interface Operation: enter/exit/configure debug mode Object: core debug mode state, debug PC redirection, single-step control, halt CSR behavior Expected guard: Entry to and control of debug mode should require a valid debug request source and should not be triggerable by ordinary CSR writes or unprivileged state transitions; debug-only CSRs should be accessible only while in debug mode. Observed behavior: dm_top connects DMI-controlled haltreq/resumereq to dm_mem, which emits debug_req_o. csr_regfile exposes debug_req_i and drives debug_mode_o/set_debug_pc_o/single_step_o. Reset clears debug_mode_q and dcsr_q; DRET clears debug_mode_q. However, upstream DMI authentication is absent/unconditional, and the CSR read process exposes DCSR/DPC/DSCRATCH entries without an observed debug-mode-only condition in the read case excerpt. Path: external JTAG/DMI -> dm_csrs DMControl/haltreq -> dm_top dm_mem debug_req_o -> csr_regfile debug_req_i -> debug_mode_q/debug_mode_o/set_debug_pc_o/single_step_o Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthorized debug entry or debug CSR manipulation can stop normal execution, redirect PC into debug flow, enable single stepping, and expose privileged debug controls to software or external actors.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact csr_regfile debug_req_i transition code was not present in the visible excerpts, and full debug CSR write restrictions were truncated.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F7",
+      "status": "potential_warning",
+      "summary": "testmode_i selects the DFT TCK mux between inverted and non-inverted TCK. DMIACCESS selects DMI TDO in the TAP output mux, and tdo_oe_o is asserted during shift_ir or shift_dr. The excerpt does not show testmode_i directly selecting DMI access or bypassing the TAP instruction/state machine, but there is also no debug authorization gate on DMI/TDO in the observed path.",
+      "vulnerability_category": "enable/route DMI or reset through test/TAP logic / DMI access selection, DMI reset, TDO output enable / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/debug/dmi_jtag_tap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dmi_jtag_tap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: test/DFT and JTAG interface Operation: enable/route DMI or reset through test/TAP logic Object: DMI access selection, DMI reset, TDO output enable Expected guard: Testmode or DFT clock muxing should not enable DMI access, reset override, or TDO drive unless the same debug authorization and TAP state rules are satisfied; test-only controls should be isolated from protected debug operations in normal operation. Observed behavior: testmode_i selects the DFT TCK mux between inverted and non-inverted TCK. DMIACCESS selects DMI TDO in the TAP output mux, and tdo_oe_o is asserted during shift_ir or shift_dr. The excerpt does not show testmode_i directly selecting DMI access or bypassing the TAP instruction/state machine, but there is also no debug authorization gate on DMI/TDO in the observed path. Path: dmi_jtag_tap TAP state/instruction register plus testmode_i clock mux -> dmi_access_o/dtmcs_select_o/dmi_reset_o/tdo_oe_o -> dmi_jtag DMI path Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If testmode is externally controllable, it could affect TDO timing/drive and DMI accessibility; however, the provided evidence does not prove a direct testmode bypass of TAP or authorization.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need untruncated TAP instruction decode/reset logic and top-level testmode controllability to determine whether testmode can bypass normal access rules.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F8",
+      "status": "potential_warning",
+      "summary": "The fact layer shows rom2 has req_i, we_i, addr_i, wdata_i, and rdata_o, and an i_rom2 instance in tb/ariane_peripherals. No tool observation containing the rom2 body or instantiation wiring was provided in the visible record.",
+      "vulnerability_category": "write to ROM address / rom2/boot ROM contents and read data / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: bus/MMIO requester Operation: write to ROM address Object: rom2/boot ROM contents and read data Expected guard: ROM/boot code regions should reject writes or require a secure provisioning/lifecycle guard; if a write port exists, writes must be disabled or constrained to authorized initialization/test conditions. Observed behavior: The fact layer shows rom2 has req_i, we_i, addr_i, wdata_i, and rdata_o, and an i_rom2 instance in tb/ariane_peripherals. No tool observation containing the rom2 body or instantiation wiring was provided in the visible record. Path: rom2/APB/register interface -> req_i/we_i/addr_i/wdata_i -> rom2 storage/read data Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If we_i writes ROM storage in synthesis without a secure provisioning guard, a bus requester could modify boot code or constants and compromise boot integrity; this impact is conditional because write behavior was not observed.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "rom2 assignments, write handling, reset/init behavior, and address decode/wiring were not included in visible tool observations.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F9",
+      "status": "potential_warning",
+      "summary": "The fact layer identifies external PCIe ports, xdma_0 instance, AXI data-width converter, and AXI clock converter in ariane_xilinx. No detailed connection/decode evidence or firewall/range-check evidence was provided in the visible tool observations.",
+      "vulnerability_category": "DMA read/write over AXI / DDR/system memory and memory-mapped peripherals reachable from PCIe XDMA / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "fpga/src/ariane_xilinx.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: PCIe XDMA external master Operation: DMA read/write over AXI Object: DDR/system memory and memory-mapped peripherals reachable from PCIe XDMA Expected guard: External DMA/PCIe masters should be restricted by an address map/IOMMU/PMP-like range check or fabric firewall before reaching protected memory or MMIO; width/clock converters must preserve address/control attributes. Observed behavior: The fact layer identifies external PCIe ports, xdma_0 instance, AXI data-width converter, and AXI clock converter in ariane_xilinx. No detailed connection/decode evidence or firewall/range-check evidence was provided in the visible tool observations. Path: external PCIe XDMA/AXI master -> width/clock converters -> AXI fabric/memory/peripherals Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If the XDMA AXI master is connected to shared DDR/MMIO without range mediation, an external PCIe endpoint could DMA-read secrets or DMA-write code/data/peripheral controls; this remains conditional on fabric connectivity.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need ariane_xilinx AXI connection graph, address decode, and any firewall/IOMMU/range policy logic.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F10",
+      "status": "potential_warning",
+      "summary": "The fact layer shows serpent_peripherals exposes separate NoC channels for ariane_debug, bootrom, clint, and plic, plus debug outputs ndmreset_o, dmactive_o, debug_req_o and an i_dmi_jtag instance. No internal routing, requester filtering, or address/channel mediation logic was included in the visible tool observations.",
+      "vulnerability_category": "route/read/write peripheral requests from NoC / debug module, bootrom, CLINT timer/IPI controls, PLIC interrupt controls / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "openpiton/serpent_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "openpiton/serpent_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: OpenPiton NoC requester Operation: route/read/write peripheral requests from NoC Object: debug module, bootrom, CLINT timer/IPI controls, PLIC interrupt controls Expected guard: NoC request channels targeting debug, bootrom, CLINT, and PLIC should enforce requester/address permissions and should not allow debug or control peripherals to be reached by unauthorized NoC traffic. Observed behavior: The fact layer shows serpent_peripherals exposes separate NoC channels for ariane_debug, bootrom, clint, and plic, plus debug outputs ndmreset_o, dmactive_o, debug_req_o and an i_dmi_jtag instance. No internal routing, requester filtering, or address/channel mediation logic was included in the visible tool observations. Path: openpiton serpent_peripherals NoC debug/bootrom/clint/plic ports -> local peripheral wrappers and DMI/JTAG Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If general NoC traffic can target debug/reset/interrupt-control peripherals without requester or address permissions, remote tiles could reset/halt cores or manipulate timer/IPI/PLIC state; this impact is conditional on routing mediation details.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need serpent_peripherals internal assignments, wrappers, decode/routing conditions, and requester/channel permission checks.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

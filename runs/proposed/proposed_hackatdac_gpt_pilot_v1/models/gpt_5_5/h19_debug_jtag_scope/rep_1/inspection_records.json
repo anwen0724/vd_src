@@ -1,0 +1,1336 @@
+{
+  "scope_id": "rtl_permission_scope_debug_csr_peripherals",
+  "obligations": [
+    {
+      "obligation_id": "PERM-DBG-JTAG-AUTH-001",
+      "reason": "The visible scope includes external JTAG pins, a jtag_key input, pass_chk signal, DMI request/response handshake, and debug module CSR/SBA controls. Analysis should verify that authenticated JTAG state actually gates all DMI access rather than merely existing as a signal.",
+      "subject": "External JTAG/debug requester",
+      "operation": "read/write DMI registers and receive DMI responses over TDO",
+      "object": "Debug Module Interface request/response registers and downstream debug CSRs/SBA controls",
+      "expected_guard": "DMI/debug-register operations should be mediated by the visible JTAG authentication/authorization condition (e.g. jtag_key/pass_chk or equivalent) before dmi_req_valid_o can issue requests or dmi_resp data can be shifted out.",
+      "candidate_path": "JTAG TAP -> dmi_jtag -> dm_top/dm_csrs DMI request path",
+      "state_conditions_to_check": [
+        "pass_chk false or reset/unauthenticated state",
+        "dmi_access asserted by TAP instruction decode",
+        "dmi_req_valid_o generation",
+        "dmi_resp_valid_i capture/shift-out conditions"
+      ],
+      "required_evidence_slots": [
+        "subject: external JTAG/SimJTAG or DMI requester",
+        "operation: DMI read/write/shift response",
+        "object: DMI registers, dm_csrs registers, system bus access controls",
+        "expected guard: pass_chk/jtag_key or equivalent debug authorization",
+        "observed RTL gating on dmi_access/update_dr/dmi_req_valid/dmi_tdo",
+        "path/reachability from tck/tms/td_i to dm_top/dm_csrs and back to td_o",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dm_csrs.sv",
+        "tb/ariane_peripherals.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Crypto / Secret State Exposure",
+        "evidence closure: subject, operation, object, guard, path"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer shows jtag_key and pass_chk but not their assignments or all gating expressions; inspect RTL to determine whether guard is complete."
+    },
+    {
+      "obligation_id": "PERM-DBG-HALT-AUTH-002",
+      "reason": "Debug control can change processor privilege/mode and expose/control execution. The visible RTL has haltreq/resumereq/cmd_valid outputs and csr_regfile debug state, so the analysis must check authorization and mode-transition guards on these paths.",
+      "subject": "External debugger via Debug Module",
+      "operation": "halt, resume, enter/exit debug mode, write/read debug CSRs",
+      "object": "Hart debug control state: haltreq_o, resumereq_o, debug_req_o, debug_mode_q, dpc_q/dscratch registers",
+      "expected_guard": "External debug halt/resume and debug mode entry should require authorized debug/DMI access and should not be triggerable solely by unauthenticated JTAG state or test reset/control paths.",
+      "candidate_path": "JTAG/DMI -> dm_csrs halt/resume/control outputs -> csr_regfile debug_req_i/debug_mode_q",
+      "state_conditions_to_check": [
+        "dmactive_o deasserted/asserted",
+        "selected_hart/hartsel valid vs unavailable_i",
+        "debug_mode_q transitions",
+        "dret/reset handling",
+        "unauthenticated or pass_chk false state"
+      ],
+      "required_evidence_slots": [
+        "subject: DMI/JTAG requester",
+        "operation: halt/resume/debug command or CSR access",
+        "object: hart debug request and debug CSRs",
+        "expected guard: debug authorization plus legal dmactive/hart selection state",
+        "observed RTL behavior generating haltreq/resumereq/debug_req_o and csr_regfile debug_mode_q updates",
+        "path from DMI control register write to core debug request",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/csr_regfile.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control",
+        "state lifecycle: mode transition"
+      ],
+      "priority": "high",
+      "uncertainty": "Need RTL expressions for dmcontrol writes, debug_req_o assignment, and csr_regfile debug entry/exit."
+    },
+    {
+      "obligation_id": "PERM-DBG-SBA-RANGE-003",
+      "reason": "The debug module exposes sbaddress, sbdata, sbreadonaddr, sbreadondata, sbautoincrement, and instantiates dm_sba connected to AXI. Analysis should check whether debug SBA can reach protected address ranges without mediation.",
+      "subject": "Debug Module SBA requester",
+      "operation": "debug-initiated system bus read/write",
+      "object": "System bus address space reachable through sbaddress/sbdata and AXI master interface",
+      "expected_guard": "System Bus Access initiated by debug should be restricted by debug authorization and any address/range/access-size policy applicable to protected memory/peripheral regions; address, read/write, autoincrement, and read-on-data/address paths should all be covered.",
+      "candidate_path": "DMI -> dm_csrs System Bus Access signals -> dm_sba/i_axi_slave_connect_rev -> AXI master port",
+      "state_conditions_to_check": [
+        "sbbusy during address/data writes",
+        "sbreadonaddr and sbreadondata enabled",
+        "sbautoincrement crossing range boundaries",
+        "sbaccess size values",
+        "dmactive/reset state",
+        "sberror handling"
+      ],
+      "required_evidence_slots": [
+        "subject: external debugger/DMI requester",
+        "operation: SBA read/write/autoincrement",
+        "object: memory/peripheral address range on AXI",
+        "expected guard: debug authorization plus address/range/access-type policy",
+        "observed RTL: sbaddress/sbdata write/read enables, dm_sba AXI transactions, error generation",
+        "reachability to peripherals/ROM/AES/PLIC or memory map",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dmi_jtag.sv",
+        "tb/ariane_testharness.sv",
+        "tb/ariane_peripherals.sv",
+        "tb/ariane_soc_pkg.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "dm_sba module internals are instantiated but not listed as source file; inspect available connections and any included module definitions if present."
+    },
+    {
+      "obligation_id": "PERM-DM-BUSY-RACE-004",
+      "reason": "The fact layer exposes busy/error signals, response queue, SBA address/data registers, and dmactive/ndmreset controls. Permission bugs can arise if configuration changes race with active transfers or stale responses remain after reset/deactivation.",
+      "subject": "DMI requester",
+      "operation": "configure/update debug command and SBA state during active operations",
+      "object": "dm_csrs state including sbaddr_d, sbdata_d, resp_queue_data, cmdbusy/sbbusy state, dmactive_o, ndmreset_o",
+      "expected_guard": "Writes that change selected hart, abstract command, system bus address/data, or reset/debug-active state should be blocked or produce errors while the corresponding operation is busy; reset/active transitions should clear or invalidate stale permissions and responses.",
+      "candidate_path": "DMI writes to dm_csrs control registers while cmdbusy/sbbusy or reset states are active",
+      "state_conditions_to_check": [
+        "cmdbusy_i asserted",
+        "sbbusy_i asserted",
+        "resp_queue_full/empty/push/pop",
+        "dmi_rst_ni toggling",
+        "dmactive_o cleared",
+        "ndmreset_o assertion"
+      ],
+      "required_evidence_slots": [
+        "subject: DMI requester",
+        "operation: DMI writes to command/SBA/control CSRs",
+        "object: active debug/SBA operation state",
+        "expected guard: busy checks, error setting, reset/clear on dmactive/dmi reset",
+        "observed RTL updates to registers and queue",
+        "impact path to command execution or bus transaction",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dmi_jtag.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need to inspect dm_csrs case statements around DMI register decode and sequential reset behavior."
+    },
+    {
+      "obligation_id": "PERM-CSR-PRIV-DECODE-005",
+      "reason": "csr_regfile contains the main CSR decode and outputs privilege-sensitive controls. Analysis should verify that address decode, read mux, write enables, and exception outputs consistently enforce CSR privilege restrictions.",
+      "subject": "Core software executing CSR instruction",
+      "operation": "read/write CSR through csr_addr_i/csr_wdata_i/fu_op",
+      "object": "Machine/supervisor/debug CSRs such as mtvec, medeleg, mideleg, mie/mip, mstatus fields, satp, dpc, dscratch, cache-control CSRs",
+      "expected_guard": "CSR read/write operations should enforce privilege permissions based on CSR address privilege bits/current mode (including umode_i and supervisor/machine state) and should raise read/write access exceptions rather than updating or exposing protected CSRs.",
+      "candidate_path": "csr_regfile CSR read/write decode for machine/supervisor/user-visible CSRs",
+      "state_conditions_to_check": [
+        "umode_i asserted",
+        "attempted access to machine/supervisor/debug CSR addresses",
+        "csr_we true/false",
+        "read_access_exception behavior",
+        "exception output behavior"
+      ],
+      "required_evidence_slots": [
+        "subject: executing instruction/current CPU privilege mode",
+        "operation: CSR read/write",
+        "object: protected CSR/register/control output",
+        "expected guard: CSR privilege check and write/read exception",
+        "observed RTL: read_access_exception, csr_we, case decode, write update condition",
+        "source locations for decode and update"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer lists umode_i but not full privilege-mode inputs/types; inspect csr_regfile for how current privilege is represented."
+    },
+    {
+      "obligation_id": "PERM-CSR-DEBUG-ONLY-006",
+      "reason": "Debug CSRs are visible in csr_regfile and affect control flow/debug state. Analysis should check that non-debug execution cannot access or alter them and that DRET behavior is guarded by debug_mode_q.",
+      "subject": "Core software and external debugger",
+      "operation": "read/write debug CSRs and exit via dret",
+      "object": "dpc_q, dscratch0_q, dscratch1_q, debug_mode_q, single_step_o",
+      "expected_guard": "Debug-only CSRs such as dpc and dscratch should be readable/writable only in debug mode or through properly authorized debug mechanisms; normal CSR access outside debug mode should be denied.",
+      "candidate_path": "csr_regfile debug CSR access and debug-mode state transitions",
+      "state_conditions_to_check": [
+        "debug_mode_q false",
+        "debug_mode_q true",
+        "dret asserted",
+        "debug_req_i asserted",
+        "reset state"
+      ],
+      "required_evidence_slots": [
+        "subject: core CSR instruction vs debug requester",
+        "operation: CSR read/write/dret",
+        "object: dpc/dscratch/debug state",
+        "expected guard: debug_mode_q and/or authorized debug entry",
+        "observed RTL conditions in read/write decode and dret handling",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dm_csrs.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control",
+        "state lifecycle: mode transition"
+      ],
+      "priority": "high",
+      "uncertainty": "Need CSR address cases and sequential updates for dpc/dscratch/debug_mode_q."
+    },
+    {
+      "obligation_id": "PERM-CSR-MMU-POLICY-007",
+      "reason": "The CSR regfile directly drives translation and access-policy outputs. Improper CSR guards or unsafe mode-transition logic could allow lower privilege code to disable or weaken memory protections.",
+      "subject": "Core software executing CSR instruction",
+      "operation": "configure memory translation and privilege policy",
+      "object": "MMU and privilege-policy outputs: satp_ppn_o, asid_o, en_translation_o, en_ld_st_translation_o, sum_o, mxr_o, tvm_o, tw_o, tsr_o, mprv",
+      "expected_guard": "Only sufficiently privileged software should configure translation and supervisor memory access policy (satp, SUM, MXR, TVM, TW, TSR, MPRV/MPP-related state); lower privilege attempts should be denied and mode transitions should update effective permissions safely.",
+      "candidate_path": "csr_regfile memory protection/translation control CSRs -> en_translation_o/en_ld_st_translation_o/satp_ppn_o/asid_o/sum_o/mxr_o/tvm_o/tw_o/tsr_o",
+      "state_conditions_to_check": [
+        "umode_i or lower-privilege execution",
+        "sret/mret transitions",
+        "mprv set/clear",
+        "satp writes",
+        "mstatus fields SUM/MXR/TVM/TW/TSR updates",
+        "reset defaults"
+      ],
+      "required_evidence_slots": [
+        "subject: software at current privilege level",
+        "operation: CSR write/read and return-from-trap mode update",
+        "object: MMU/access policy state",
+        "expected guard: machine/supervisor privilege checks and legal mode transitions",
+        "observed RTL: CSR decode, write masks, output assignments, mret/sret effects",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "Privilege representation beyond umode_i must be identified in the RTL."
+    },
+    {
+      "obligation_id": "PERM-CSR-TRAP-CTRL-008",
+      "reason": "Trap routing and return-target CSRs control privilege transitions and execution redirection. Analysis should check that CSR permissions are enforced consistently at read mux, write update, and return path.",
+      "subject": "Core software executing CSR/trap-return instruction",
+      "operation": "configure trap/interrupt routing and exception return targets",
+      "object": "mtvec_q, stvec_q, medeleg_q, mideleg_q, mie_q, mip_q, mepc_q, sepc_q, mcause_q, scause_q, trap_vector_base_o, epc_o",
+      "expected_guard": "Writes to trap vectors, delegation registers, interrupt enable/pending state, and EPC/cause registers should be restricted to the appropriate privilege level and should not be writable by unprivileged software.",
+      "candidate_path": "csr_regfile trap-vector/delegation/interrupt CSRs -> trap_vector_base_o/epc_o/interrupt behavior",
+      "state_conditions_to_check": [
+        "umode_i asserted",
+        "sret/mret operation",
+        "interrupt_global_enable",
+        "exception input handling",
+        "reset mtvec load state"
+      ],
+      "required_evidence_slots": [
+        "subject: core software/current privilege",
+        "operation: CSR read/write, mret/sret",
+        "object: trap vector/delegation/EPC/interrupt CSRs",
+        "expected guard: machine/supervisor privilege checks",
+        "observed RTL conditions for writes and outputs",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "state lifecycle: mode transition"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need details of CSR decode and exception handling blocks."
+    },
+    {
+      "obligation_id": "PERM-PERIPH-MMIO-GUARD-009",
+      "reason": "The peripheral wrapper exposes multiple APB bridges and security-relevant signals including jtag_key output, pkey_loc_o, ROM2, and AES-related APB signals. Analysis should verify whether protected registers/keys are readable or writable by any bus master without privilege mediation.",
+      "subject": "SoC bus master accessing peripheral address map",
+      "operation": "MMIO/APB/AXI read and write",
+      "object": "ROM2/pkey_loc_o/jtag_key, AES APB registers, packet APB registers, PLIC configuration",
+      "expected_guard": "MMIO accesses to security-sensitive peripheral registers or ROM/key outputs should be mediated by address decode plus any required privilege/security attributes from the bus; writes to read-only assets and reads of secret/key state should be blocked or return safe values.",
+      "candidate_path": "APB/AXI peripheral wrappers in ariane_peripherals to protected peripherals (ROM2 pkey, AES, packet, PLIC)",
+      "state_conditions_to_check": [
+        "APB psel/penable/pwrite combinations",
+        "AXI aw/ar prot signals where present",
+        "ROM2 req/we",
+        "reset values",
+        "read-data mux selection"
+      ],
+      "required_evidence_slots": [
+        "subject: AXI/APB bus master",
+        "operation: read/write peripheral register",
+        "object: key/ROM/AES/PLIC/packet protected register",
+        "expected guard: address decode plus privilege/security attribute or read-only/write-only policy",
+        "observed RTL decode and prdata/rdata/wdata behavior",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_peripherals.sv",
+        "src/rom2/rom2.sv",
+        "tb/ariane_soc_pkg.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer is truncated for later peripheral signals; inspect full ariane_peripherals for exact address map and guards."
+    },
+    {
+      "obligation_id": "PERM-ROM2-JTAGKEY-010",
+      "reason": "Visible facts show a ROM2 instance with write-enable, pkey_loc_o, and a jtag_key output feeding DMI/JTAG authorization. The analysis should check whether the authentication key source can be modified or disclosed through ordinary bus access.",
+      "subject": "SoC bus master and JTAG authenticator",
+      "operation": "read/write key-related ROM/register and use key for JTAG auth",
+      "object": "ROM2 contents/read data, pkey_loc_o, jtag_key signal used by dmi_jtag",
+      "expected_guard": "If ROM2 stores or derives a JTAG key/public-key location or other security token, writes should be blocked or tightly controlled and reads should not expose secret material to unprivileged MMIO paths; jtag_key should not be controllable by untrusted bus writes unless explicitly intended and guarded.",
+      "candidate_path": "rom2 module and ariane_peripherals pkey/jtag_key connection",
+      "state_conditions_to_check": [
+        "rom2_we asserted",
+        "req_i asserted for reads",
+        "reset initialization",
+        "bus address decode selecting ROM2",
+        "jtag_key used when pass_chk computed"
+      ],
+      "required_evidence_slots": [
+        "subject: bus master and external JTAG requester",
+        "operation: write/read ROM2 or key-related signals",
+        "object: jtag_key/pkey_loc_o/ROM contents",
+        "expected guard: read-only ROM semantics, privilege/lock guard for key material, non-exposure of secrets",
+        "observed RTL: rom2 we_i handling, rdata_o contents, ariane_peripherals wiring to jtag_key",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_peripherals.sv",
+        "src/debug/dmi_jtag.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "Lock / Sticky Bit / Write Protection",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to inspect whether ROM2 is actually writable and whether pkey/jtag_key is secret or public policy data."
+    },
+    {
+      "obligation_id": "PERM-TESTMODE-BYPASS-011",
+      "reason": "Multiple debug modules expose testmode_i, and the TAP includes a DFT clock mux. Test paths are common bypass sources; analysis should verify that testmode does not enable protected debug access without proper lifecycle/authorization.",
+      "subject": "Test interface or testmode signal source",
+      "operation": "override/route debug/test signals",
+      "object": "DMI access control, JTAG TDO path, test clock mux, debug reset/active state",
+      "expected_guard": "testmode_i should not bypass authentication, force DMI access, expose TDO data, or alter debug reset/clocking in a way that grants debug access in normal operation; any test-only bypass should be conditioned on lifecycle/test authorization if visible.",
+      "candidate_path": "testmode_i paths in dmi_jtag_tap/dmi_jtag/dm_top/dm_csrs clock/reset/test muxing",
+      "state_conditions_to_check": [
+        "testmode_i asserted/deasserted",
+        "trst_ni/rst_ni/dmi_rst_ni resets",
+        "TAP states capture/shift/update",
+        "tdo_oe_o behavior",
+        "pass_chk false"
+      ],
+      "required_evidence_slots": [
+        "subject: test interface/testmode controller",
+        "operation: bypass/enable debug access or data output",
+        "object: DMI/JTAG access and debug module state",
+        "expected guard: lifecycle/test authorization or restriction to non-production",
+        "observed RTL: testmode_i use in muxes/resets/access conditions",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dm_csrs.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "No lifecycle controller appears in fact layer; determine whether testmode is only a clock-mux control or also an access bypass."
+    },
+    {
+      "obligation_id": "PERM-RESET-SAFE-012",
+      "reason": "The visible scope has multiple resets (rst_ni, trst_ni, dmi_rst_ni, dmi_reset, ndmreset). Analysis should ensure reset interactions do not produce transient or persistent unauthorized debug access or stale data exposure.",
+      "subject": "Reset/JTAG reset source",
+      "operation": "reset/clear/initialize permission-related state",
+      "object": "pass_chk/auth state, dmi_req/resp state, dmactive/ndmreset, sbaddr/sbdata, debug_mode_q, CSR privilege state, ROM/key outputs",
+      "expected_guard": "Reset should place permission/security state in a safe default: debug inactive unless authorized, no stale DMI responses or SBA data exposed, protected CSR state cleared or initialized safely, and key/authentication state not left in a permissive value.",
+      "candidate_path": "reset paths across DMI/JTAG/debug CSRs and csr_regfile security state",
+      "state_conditions_to_check": [
+        "rst_ni low/high",
+        "trst_ni low/high",
+        "dmi_rst_ni low/high",
+        "dmi_reset_o asserted",
+        "ndmreset_o asserted",
+        "dmactive_o cleared",
+        "response queue after reset",
+        "debug_mode_q after reset"
+      ],
+      "required_evidence_slots": [
+        "subject: reset controller or external JTAG reset",
+        "operation: reset/clear state",
+        "object: security/permission state and data-bearing registers",
+        "expected guard: safe reset defaults and stale-data clearing",
+        "observed RTL reset assignments and cross-domain reset propagation",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/csr_regfile.sv",
+        "src/rom2/rom2.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Debug / JTAG / Test Access",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need sequential blocks and reset polarity interactions for all debug and CSR modules."
+    }
+  ],
+  "inspection_records": [
+    {
+      "obligation_id": "PERM-DBG-JTAG-AUTH-001",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "External JTAG/SimJTAG requester via tck/tms/td_i and DMI requester.",
+        "operation": "Read/write DMI registers and shift DMI responses out over TDO.",
+        "object": "DMI registers in dm_csrs and downstream debug CSRs/SBA controls.",
+        "expected_guard": "DMI/debug-register operations should be mediated by jtag_key/pass_chk or equivalent authorization before dmi_req_valid_o issues requests or dmi_resp data is shifted out.",
+        "observed_behavior": "dmi_jtag_tap asserts dmi_access_o on DMIACCESS instruction and selects dmi_tdo_i onto TDO for DMIACCESS; dm_csrs hardwires dmstatus.authenticated=1 and comments 'no authentication implemented'. The dmi_cdc connects dmi_req_valid to dmi_req_valid_o without an observed pass_chk gate. jtag_key is only observed being copied to pass on reset.",
+        "path": "SimJTAG/external JTAG pins -> dmi_jtag_tap DMIACCESS -> dmi_jtag dmi_cdc -> dm_top/dm_csrs; response returns through dmi_resp_i/dmi_tdo to td_o.",
+        "state_condition": "pass_chk false/unauthenticated state; DMIACCESS selected; update_dr/shift_dr/capture_dr active; dmi_req_valid_o and dmi_resp_valid_i handshake.",
+        "impact": "Unauthenticated external JTAG traffic can issue DMI reads/writes and receive responses, enabling access to debug CSRs, halt control, and SBA paths.",
+        "rtl_evidence": [
+          {
+            "file": "src/debug/dmi_jtag_tap.sv",
+            "lines": "175-187",
+            "detail": "dmi_access_o defaults low and is asserted when jtag_ir_q is DMIACCESS, with no auth condition visible."
+          },
+          {
+            "file": "src/debug/dmi_jtag_tap.sv",
+            "lines": "195-205",
+            "detail": "TDO mux drives dmi_tdo_i for DMIACCESS."
+          },
+          {
+            "file": "src/debug/dmi_jtag.sv",
+            "lines": "263-281",
+            "detail": "dmi_cdc maps jtag_dmi_valid_i to core_dmi_valid_o/dmi_req_valid_o; no pass_chk guard visible in the observed connection."
+          },
+          {
+            "file": "src/debug/dmi_jtag.sv",
+            "lines": "228-233",
+            "detail": "pass register is loaded from jtag_key only during reset."
+          },
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "168-172",
+            "detail": "dmstatus.authenticated is set to 1'b1 with comment 'no authentication implemented'."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "121-153",
+            "detail": "SimJTAG pins connect to dmi_jtag and jtag_key input."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "The earlier combinational block in dmi_jtag where pass_chk may be computed was truncated; however, the observed downstream/authenticated status evidence does not show a complete pass_chk gate on DMI requests/responses.",
+      "candidate_finding": "DMI/JTAG access appears not to be mediated by the visible JTAG key/authentication condition. The TAP selects DMI access solely from the JTAG instruction, TDO shifts DMI response data for DMIACCESS, and dm_csrs reports authenticated=1 with a comment that no authentication is implemented. dmi_jtag contains jtag_key/pass/pass_chk signals, but the observed request/response path to dmi_cdc is not shown as being guarded by pass_chk.",
+      "notes": "High-priority candidate because the guard signal exists in the fact layer but is not evidenced on the DMI issue/response path."
+    },
+    {
+      "obligation_id": "PERM-DBG-HALT-AUTH-002",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "External debugger via JTAG/DMI.",
+        "operation": "Halt, resume, enter debug mode, issue abstract debug commands.",
+        "object": "haltreq_o, resumereq_o, debug_req_o, dmcontrol/debug command state, csr_regfile debug_mode_q/dpc/dscratch.",
+        "expected_guard": "External debug halt/resume and debug mode entry should require authorized debug/DMI access plus legal dmactive/hart-selection state.",
+        "observed_behavior": "DMControl write case assigns dmcontrol_d from dmi_req_i.data; haltreq_o[selected_hart] and resumereq_o[selected_hart] are directly assigned from dmcontrol_q bits. dm_top connects these outputs to dm_mem, whose debug_req_o drives core debug request. No pass_chk/jtag_key guard or unavailable/hartsel legality guard is visible on these assignments.",
+        "path": "JTAG/DMI -> dm_csrs DMControl/Command writes -> haltreq/resumereq/cmd_valid -> dm_top dm_mem -> debug_req_o -> csr_regfile debug_req_i/debug_mode_q.",
+        "state_condition": "DMControl write; selected_hart/hartsel selected; dmactive asserted/deasserted; unauthenticated/pass_chk false state.",
+        "impact": "An unauthenticated external debugger could halt/resume the hart or request debug entry, changing processor execution state and exposing/controling debug-mode resources.",
+        "rtl_evidence": [
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "307-315",
+            "detail": "DMControl write decodes dmi_req_i.data and assigns dmcontrol_d."
+          },
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "460-468",
+            "detail": "haltreq_o/resumereq_o for selected_hart are driven directly from dmcontrol_q.haltreq/resumereq."
+          },
+          {
+            "file": "src/debug/dm_top.sv",
+            "lines": "173-188",
+            "detail": "dm_mem receives haltreq_i, resumereq_i, cmd_valid_i and drives debug_req_o/cmd busy/error state."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "640-651",
+            "detail": "debug_req_i causes debug_mode_d=1, set_debug_pc_o=1, and dcsr cause=request when an instruction is valid."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Full dm_mem internals are not provided, so exact debug_req_o generation is inferred from dm_top connectivity and csr_regfile behavior.",
+      "candidate_finding": "External DMI writes can drive halt/resume/debug command state without an observed authentication guard. DMControl writes are accepted from DMI and haltreq/resumereq outputs are generated directly from dmcontrol_q for the selected hart; dm_mem then receives haltreq/resumereq/cmd_valid and produces debug_req_o.",
+      "notes": "This finding depends on PERM-DBG-JTAG-AUTH-001 evidence that DMI itself is not authenticated."
+    },
+    {
+      "obligation_id": "PERM-DBG-SBA-RANGE-003",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "External debugger/DMI requester using SBA registers.",
+        "operation": "Debug-initiated system bus read/write, read-on-address/data, autoincrement.",
+        "object": "AXI master address space reachable through dm_sba, including memory/peripherals if routed there.",
+        "expected_guard": "SBA should be restricted by debug authorization plus address/range/access-size policy covering sbaddress, sbdata, autoincrement, read-on-data/address.",
+        "observed_behavior": "dm_csrs drives sbautoincrement_o, sbreadonaddr_o, sbreadondata_o, sbaccess_o, sbdata_o, and sbaddress_o from CSR state; dm_top wires these into dm_sba, which drives axi_m_req_o. The observed wiring shows no range filter or privilege/security attribute check before AXI master issuance.",
+        "path": "DMI -> dm_csrs SBA CSRs -> dm_top sbaddress/sbdata/control wires -> dm_sba -> axi_m_req_o / axi_m_resp_i -> SoC fabric.",
+        "state_condition": "sbreadonaddr/sbreadondata/sbautoincrement enabled; sbaddress/sbdata written; dmactive asserted; sbbusy/sberror states.",
+        "impact": "If DMI is reachable, debug SBA may read/write arbitrary bus locations, bypassing normal core privilege/PMP/MMU checks and potentially reaching protected memory or peripherals.",
+        "rtl_evidence": [
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "153-159",
+            "detail": "SBA output controls and address/data are assigned from sbcs_q/sbdata_q/sbaddr_q."
+          },
+          {
+            "file": "src/debug/dm_top.sv",
+            "lines": "150-170",
+            "detail": "dm_sba connects dmactive_i, sbaddress/control/data signals, and axi_req_o/axi_resp_i."
+          },
+          {
+            "file": "src/debug/dm_top.sv",
+            "lines": "39-41",
+            "detail": "dm_top exposes bus master axi_m_req_o/axi_m_resp_i for system bus accesses."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "dm_sba internals and full SoC address map/routing are not provided; range-policy absence is based on visible connections and lack of guard evidence.",
+      "candidate_finding": "Debug System Bus Access can be configured through DMI and connected to an AXI master without observed address/range/access-policy mediation. dm_csrs exposes sbaddress/sbdata/control signals, and dm_top connects them to dm_sba and axi_m_req_o; only dmactive_i is visible on dm_sba, not a protected-range policy.",
+      "notes": "No protected-range comparator or access-control input is visible in the dm_sba port list shown."
+    },
+    {
+      "obligation_id": "PERM-DM-BUSY-RACE-004",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "DMI requester.",
+        "operation": "Configure/update debug command, DMControl, SBA state, and reset/debug-active state during active operations.",
+        "object": "dmcontrol_q, command/data/progbuf/abstractauto, sbaddr/sbdata/sbcs, response FIFO, cmdbusy/sbbusy, dmactive_o/ndmreset_o.",
+        "expected_guard": "Writes affecting selected hart, command/SBA, or reset/debug-active state should be blocked or error while busy; reset/active transitions should clear or invalidate stale responses and permissions.",
+        "observed_behavior": "Data, AbstractCS, Command, AbstractAuto, and ProgBuf writes include cmdbusy checks/errors. However, DMControl writes assign dmcontrol_d unconditionally from dmi_req_i.data. The response FIFO has flush_i tied to 1'b0 and reset only by dmi_rst_ni, not by dmactive clear; dmcontrol_q deactivation only resets selected fields in sequential logic after line 517.",
+        "path": "DMI writes -> dm_csrs write case -> dmcontrol/command/SBA/register/FIFO state -> dm_mem or dm_sba operations.",
+        "state_condition": "cmdbusy_i asserted; sbbusy_i asserted; response FIFO full/empty; dmactive cleared; dmi_rst_ni reset.",
+        "impact": "A requester may change halt/resume/reset/active/hart selection during active operations or observe stale queued responses after debug deactivation, causing authorization/state confusion and possible stale data exposure.",
+        "rtl_evidence": [
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "299-305",
+            "detail": "Data writes are blocked while cmdbusy_i."
+          },
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "319-343",
+            "detail": "AbstractCS and Command writes check cmdbusy_i and set CmdErrBusy in some cases."
+          },
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "345-350",
+            "detail": "AbstractAuto writes check cmdbusy_i."
+          },
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "307-315",
+            "detail": "DMControl write assigns dmcontrol_d = dmi_req_i.data without cmdbusy/sbbusy guard."
+          },
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "481-498",
+            "detail": "Response FIFO reset uses dmi_rst_ni and flush_i is hardwired 1'b0."
+          },
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "500-517",
+            "detail": "Power-on reset clears state; dmactive false triggers synchronous reset of debug-module fields beginning at line 517."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "The truncated portions around SBA register write cases and complete dmactive reset block may contain additional checks not visible here.",
+      "candidate_finding": "Some busy-state protections exist for abstract command data/command/autoexec writes, but DMControl updates, response FIFO stale data handling, and dmactive/deactivation interactions are not fully guarded. DMControl is assigned from DMI data even while operations may be busy, and the response FIFO is reset only by dmi_rst_ni with flush_i tied low.",
+      "notes": "Classified as candidate rather than satisfied because expected guard also covers DMControl/active transitions and stale responses, where visible evidence is weak."
+    },
+    {
+      "obligation_id": "PERM-CSR-PRIV-DECODE-005",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "Core software executing CSR instruction.",
+        "operation": "CSR read/write through csr_addr_i/csr_wdata_i/csr_op_i.",
+        "object": "Machine/supervisor/debug CSRs including mtvec, medeleg, mideleg, mie/mip, mstatus, satp, dpc, dscratch, cache-control CSRs.",
+        "expected_guard": "CSR operations should enforce privilege based on CSR address/current mode and raise access exceptions rather than exposing/updating protected CSRs.",
+        "observed_behavior": "Read cases return debug, supervisor, and machine CSRs without shown privilege checks. Write cases update DCSR/DPC/DSCRATCH and machine CSR state without shown privilege checks; default alone sets update_access_exception for unrecognized CSRs. priv_lvl_o assignment also maps debug_mode_q or umode_i to machine privilege, increasing concern.",
+        "path": "csr_op_i/csr_addr_i -> csr_op_logic -> csr_read_write read/write cases -> CSR state/output csr_rdata_o/csr_exception_o.",
+        "state_condition": "Lower privilege or umode_i asserted; CSR read or csr_we true; machine/supervisor/debug CSR address selected.",
+        "impact": "Lower-privilege software may read or modify protected CSRs, altering trap routing, interrupt controls, debug state, cache controls, and memory-protection policy.",
+        "rtl_evidence": [
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "150-157",
+            "detail": "Read decode initializes read_access_exception=0 and enters case on csr_addr.address when csr_read."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "187-218",
+            "detail": "Debug, supervisor, and machine CSR read cases return register values without visible privilege guard."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "332-390",
+            "detail": "Write decode executes on csr_we and updates debug CSRs directly."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "468-495",
+            "detail": "Machine interrupt/vector/EPC/cause/cache CSR write cases update state directly."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "937-939",
+            "detail": "priv_lvl_o is assigned machine privilege when debug_mode_q or umode_i is true."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Earlier/later code that might set csr_exception_o from CSR address privilege bits was not fully shown; no such guard was present in inspected decode snippets.",
+      "candidate_finding": "CSR read/write decode exposes and updates machine, supervisor, and debug CSRs without visible privilege checks based on CSR address privilege bits/current mode. The read mux returns machine/supervisor/debug registers directly, and the write case updates debug/machine CSRs directly; no guard on priv_lvl_q/CSR privilege appears in the inspected decode snippets.",
+      "notes": "The observed decode structure lacks the expected address-privilege enforcement at both read and write paths."
+    },
+    {
+      "obligation_id": "PERM-CSR-DEBUG-ONLY-006",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "Core software executing CSR/DRET instruction; external debugger indirectly through debug state.",
+        "operation": "Read/write debug CSRs and exit via DRET.",
+        "object": "dpc_q, dscratch0_q, dscratch1_q, dcsr_q, debug_mode_q, single_step_o.",
+        "expected_guard": "Debug CSRs should be readable/writable only in debug mode or through authorized debug mechanisms; DRET should be legal only when debug_mode_q is true.",
+        "observed_behavior": "Read cases return CSR_DCSR, CSR_DPC, CSR_DSCRATCH0, and CSR_DSCRATCH1 without a debug_mode_q condition. Write cases update DCSR, DPC, and DSCRATCH registers without a debug_mode_q condition. DRET operation sets dret=1 with no debug_mode_q guard; epc_o uses dpc_q if dret.",
+        "path": "CSR instruction -> csr_regfile read/write/dret decode -> debug CSR registers/debug return path -> epc_o/set_debug_pc_o/debug_mode_q.",
+        "state_condition": "debug_mode_q false vs true; csr_we true; DRET operation asserted; reset state.",
+        "impact": "Non-debug software can potentially read/modify debug return PC/scratch/control state or execute DRET to redirect control flow via dpc_q.",
+        "rtl_evidence": [
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "187-191",
+            "detail": "DCSR/DPC/DSCRATCH read cases return values directly."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "376-390",
+            "detail": "DCSR/DPC/DSCRATCH write cases update values directly."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "762-767",
+            "detail": "DRET operation sets dret without checking debug_mode_q."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "911-914",
+            "detail": "epc_o is set to dpc_q when dret is asserted."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "969-975",
+            "detail": "Reset clears debug_mode_q and debug CSRs."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "No full illegal-instruction exception logic for DRET/Debug CSR privilege was visible in the provided snippets.",
+      "candidate_finding": "Debug-only CSRs and DRET are not visibly guarded by debug_mode_q. DCSR/DPC/DSCRATCH reads and writes appear as ordinary CSR cases, and DRET sets dret regardless of debug_mode_q in csr_op_logic; epc_o then selects dpc_q when dret is asserted.",
+      "notes": "Strong candidate because both debug CSR decode and DRET path lack the expected explicit debug-mode predicate in observed RTL."
+    },
+    {
+      "obligation_id": "PERM-CSR-MMU-POLICY-007",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "Core software at current privilege level.",
+        "operation": "Configure memory translation and privilege policy via CSR writes/read and return-from-trap mode updates.",
+        "object": "satp_ppn_o, asid_o, en_translation_o, en_ld_st_translation_o, sum_o, mxr_o, tvm_o, tw_o, tsr_o, mprv/mstatus state.",
+        "expected_guard": "Only sufficiently privileged software should configure satp and mstatus privilege-policy fields; lower-privilege attempts should raise exceptions and mode transitions should update effective permissions safely.",
+        "observed_behavior": "CSR_SATP is returned by the read mux; mstatus-derived outputs directly drive sum_o/mxr_o/tvm_o/tw_o/tsr_o and translation enable. The inspected CSR write decode does not show privilege checks before protected CSR updates, and priv_lvl_o is forced to machine when umode_i is asserted.",
+        "path": "CSR instruction -> csr_regfile decode/state update -> satp_q/mstatus_q -> MMU/access-policy outputs.",
+        "state_condition": "umode_i/lower privilege; satp write/read; mstatus SUM/MXR/TVM/TW/TSR/MPRV changes; mret/sret transitions; reset defaults.",
+        "impact": "Lower-privilege code may disable/alter translation or weaken memory access policy, bypassing intended memory protection and isolation.",
+        "rtl_evidence": [
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "197-210",
+            "detail": "Supervisor CSR read cases include SSTATUS/SIE/SIP/STVEC/.../SATP without shown privilege guard."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "397-404",
+            "detail": "SSTATUS writes modify mstatus fields using a write mask."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "943-954",
+            "detail": "MMU/access-policy outputs are directly assigned from satp_q and mstatus_q fields."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "958-959",
+            "detail": "mprv derives from mstatus_q unless debug mode disables it via dcsr.mprven."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "937-939",
+            "detail": "priv_lvl_o assignment treats debug_mode_q or umode_i as machine privilege."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Specific SATP write case and complete privilege exception logic were not included in the provided observations.",
+      "candidate_finding": "Memory translation and access-policy CSRs appear to be writable/readable through the same unguarded CSR decode, and outputs directly drive MMU policy. The inspected snippets show SATP readable and mstatus/machine policy fields output directly, without visible lower-privilege denial.",
+      "notes": "Candidate based on absence of observed privilege gating and direct policy outputs."
+    },
+    {
+      "obligation_id": "PERM-CSR-TRAP-CTRL-008",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "Core software executing CSR or trap-return instruction.",
+        "operation": "Configure trap/interrupt routing and exception return targets; execute mret/sret.",
+        "object": "mtvec_q, stvec_q, medeleg_q, mideleg_q, mie_q, mip_q, mepc_q, sepc_q, mcause_q, scause_q, trap_vector_base_o, epc_o.",
+        "expected_guard": "Writes to trap vectors, delegation, interrupt enable/pending, EPC/cause registers should be restricted to appropriate privilege level.",
+        "observed_behavior": "Read cases return supervisor and machine trap/interrupt CSRs. Write cases for MIE, MTVEC, MSCRATCH, MEPC, MCAUSE, MTVAL, MIP update state directly in the inspected snippet. mret/sret are set by csr_op_logic without visible privilege checks; epc_o selects sepc_q for sret and mepc_q by default.",
+        "path": "CSR/trap-return instruction -> csr_regfile read/write and exception_ctrl -> trap_vector_base_o/epc_o/interrupt state.",
+        "state_condition": "umode_i/lower privilege; mret/sret; interrupt_global_enable; exception input; reset mtvec load.",
+        "impact": "Unprivileged or insufficiently privileged software could redirect traps/returns or alter interrupt routing, enabling control-flow hijack or privilege-transition manipulation.",
+        "rtl_evidence": [
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "197-218",
+            "detail": "Supervisor and machine trap/interrupt CSR read cases return values."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "470-490",
+            "detail": "MIE, MTVEC, MSCRATCH, MEPC, MCAUSE, MTVAL, MIP write cases update state."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "750-761",
+            "detail": "SRET/MRET operations set sret/mret without visible privilege guard."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "906-914",
+            "detail": "epc_o selects mepc_q, sepc_q on sret, or dpc_q on dret."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "900-904",
+            "detail": "trap_vector_base_o uses mtvec/stvec mode bits and interrupt cause."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Complete exception_ctrl and csr_exception_o generation are truncated; no explicit privilege denial was observed in the provided snippets.",
+      "candidate_finding": "Trap vector, delegation, interrupt, EPC, and cause CSRs are exposed by CSR read/write decode without visible privilege enforcement. Machine trap/interrupt CSR write cases update state directly, and trap_vector_base_o/epc_o are driven from those registers and return-operation state.",
+      "notes": "Medium-priority candidate aligned with the broader CSR privilege decode issue."
+    },
+    {
+      "obligation_id": "PERM-PERIPH-MMIO-GUARD-009",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "SoC AXI/APB bus master.",
+        "operation": "MMIO/APB/AXI read and write.",
+        "object": "ROM2 key storage/pkey_loc/jtag_key-related values, AES APB registers, packet APB registers, PLIC configuration.",
+        "expected_guard": "Security-sensitive MMIO should be mediated by address decode plus privilege/security attributes; secret reads and untrusted writes should be blocked or return safe values.",
+        "observed_behavior": "ariane_peripherals instantiates AXI/APB bridges and ROM2_FUSE wiring. ROM2 copies key constants to secure_reg on reset, allows writes to secure_reg when req_i && we_i, and returns secure_reg data on reads. No visible privilege/security/protection check accompanies rom2_req/rom2_we or APB bridge access signals in the inspected snippets.",
+        "path": "SoC bus fabric -> ariane_peripherals AXI/APB bridge or axi2rom2 -> ROM2/AES/packet/PLIC peripheral register interfaces -> rdata/prdata outputs.",
+        "state_condition": "APB psel/penable/pwrite; AXI request to ROM2; rom2_req/rom2_we; reset values; read-data mux selection.",
+        "impact": "Any bus master able to reach these MMIO regions may read secret/key material or overwrite security policy/key state, including JTAG and AES-related values.",
+        "rtl_evidence": [
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "160-167",
+            "detail": "PLIC connects to external_bus_io reg_bus."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "170-194",
+            "detail": "ROM2_FUSE peripheral defines rom2_req/addr/we and connects AXI slave to axi2mem."
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "17-23",
+            "detail": "mem constants include access-control, JTAG, and AES key/commented values."
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "32-41",
+            "detail": "secure_reg initialized from mem on reset, read address latched on read, and secure_reg entry overwritten on write."
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "47-47",
+            "detail": "rdata_o returns secure_reg[raddr_q] when in range."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "232-239",
+            "detail": "packet APB signals visible."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "374-381",
+            "detail": "AES APB signals visible."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Full ariane_peripherals address decode and any bus-level privilege attribute use are truncated; AES/packet internal register policies are not provided.",
+      "candidate_finding": "Security-sensitive peripheral/key storage paths are exposed through AXI/APB wrappers without visible privilege/security-attribute mediation. ROM2/FUSE has AXI-to-memory wiring with read/write request signals, and APB bridges expose PLIC, packet, AES, and UART buses; the observed ROM2 implementation permits reads and writes of key-containing secure_reg entries.",
+      "notes": "The ROM2 evidence alone supports a protected-register/key exposure candidate."
+    },
+    {
+      "obligation_id": "PERM-ROM2-JTAGKEY-010",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "SoC bus master and JTAG authenticator.",
+        "operation": "Read/write ROM2/key-related registers and use key for JTAG auth.",
+        "object": "ROM2 secure_reg contents, pkey_loc_o/key_reg_out, jtag_key input to dmi_jtag.",
+        "expected_guard": "ROM/key material should be read-only or tightly controlled; secret reads should be blocked; jtag_key should not be controllable by untrusted bus writes.",
+        "observed_behavior": "ROM2 secure_reg is initialized from constant mem on reset but is overwritten with wdata_i when req_i && we_i. rdata_o returns secure_reg contents. The mem includes a JTAG-labeled entry. ariane_peripherals defines jtag_key output and ROM2_FUSE wiring; dmi_jtag receives jtag_key and loads pass from jtag_key on reset.",
+        "path": "AXI bus -> ariane_peripherals axi2rom2 -> rom2 req/we/addr/wdata/rdata/secure_reg -> jtag_key/pkey-related wiring -> dmi_jtag pass/jtag auth state.",
+        "state_condition": "rom2_we asserted; req_i asserted; reset initialization; bus address decode selecting ROM2; dmi_jtag reset loads jtag_key/pass.",
+        "impact": "A bus master may disclose or modify JTAG/AES/access-control key material and potentially control future JTAG authentication behavior or security policy.",
+        "rtl_evidence": [
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "17-23",
+            "detail": "ROM2 mem constants include access-control entries, a JTAG entry, and an AES entry."
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "32-41",
+            "detail": "secure_reg initialized on reset and overwritten on req_i && we_i."
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "47-47",
+            "detail": "rdata_o exposes secure_reg contents by address."
+          },
+          {
+            "file": "tb/ariane_peripherals.sv",
+            "lines": "177-183",
+            "detail": "ROM2 request/address/write-enable/read/write data and pkey/key outputs are declared."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "135-153",
+            "detail": "jtag_key is wired into dmi_jtag."
+          },
+          {
+            "file": "src/debug/dmi_jtag.sv",
+            "lines": "228-233",
+            "detail": "pass is loaded from jtag_key on reset."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "The exact ariane_peripherals assignment from ROM2 secure_reg to jtag_key/pkey_loc_o is not fully shown in the provided observations.",
+      "candidate_finding": "ROM2, described as holding keys, is writable and readable through ordinary request/write-enable signals, and includes a JTAG key entry. The JTAG key signal is wired from peripherals into dmi_jtag; no lock, read suppression, or privilege guard is visible on ROM2 write/read paths.",
+      "notes": "Even if jtag_key is public policy rather than secret, the writable ROM2 path can undermine authentication/configuration integrity."
+    },
+    {
+      "obligation_id": "PERM-TESTMODE-BYPASS-011",
+      "inspection_status": "obligation_satisfied",
+      "evidence_slots": {
+        "subject": "Test interface/testmode signal source.",
+        "operation": "Override/route debug/test signals.",
+        "object": "JTAG TAP clocking, DMI/JTAG access and TDO path, debug reset/active state.",
+        "expected_guard": "testmode_i should not bypass authentication, force DMI access, expose TDO data, or alter debug reset/clocking in a way that grants debug access in normal operation.",
+        "observed_behavior": "In the inspected TAP logic, testmode_i is used as the select for a DFT clock mux choosing inverted vs non-inverted TCK. DMI access selection remains based on the JTAG instruction decode, and TDO selection remains based on shift_ir/jtag_ir_q. No observed testmode_i condition forces DMIACCESS, dmi_access_o, dmi_tdo_i, tdo_oe_o, DMI valid, or dmactive.",
+        "path": "testmode_i -> dmi_jtag_tap pulp_clock_mux2 clock selection; dmi_jtag/dm_top/dm_csrs testmode_i passed to submodules/FIFO as testmode, with no observed access enable bypass.",
+        "state_condition": "testmode_i asserted/deasserted; TAP shift/capture/update; trst_ni/rst_ni/dmi_rst_ni reset; pass_chk false.",
+        "impact": "No independent permission bypass impact was established for testmode_i in the provided evidence; testmode appears limited to clock/test plumbing in inspected RTL.",
+        "rtl_evidence": [
+          {
+            "file": "src/debug/dmi_jtag_tap.sv",
+            "lines": "175-187",
+            "detail": "dmi_access_o is selected by jtag_ir_q DMIACCESS, not by testmode_i."
+          },
+          {
+            "file": "src/debug/dmi_jtag_tap.sv",
+            "lines": "195-205",
+            "detail": "TDO mux selects IR/IDCODE/DTMCSR/DMIACCESS/bypass by TAP state/instruction, not by testmode_i."
+          },
+          {
+            "file": "src/debug/dmi_jtag_tap.sv",
+            "lines": "211-224",
+            "detail": "testmode_i selects the DFT TCK mux between tck_ni and tck_i."
+          },
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "481-490",
+            "detail": "testmode_i is passed into fifo_v2 testmode_i; no FIFO access-control bypass visible."
+          },
+          {
+            "file": "tb/ariane_testharness.sv",
+            "lines": "135-153",
+            "detail": "test_en drives dmi_jtag testmode_i while JTAG pins still drive TAP."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Lifecycle/test authorization source for test_en is not shown, and other submodule uses of testmode_i beyond the provided snippets are not exhaustively inspected.",
+      "candidate_finding": "",
+      "notes": "The missing impact slot request is closed negatively: available evidence does not show security-sensitive bypass impact from testmode_i itself."
+    },
+    {
+      "obligation_id": "PERM-RESET-SAFE-012",
+      "inspection_status": "candidate_violation",
+      "evidence_slots": {
+        "subject": "Reset controller or external JTAG reset source.",
+        "operation": "Reset/clear/initialize permission-related state.",
+        "object": "pass/auth state, DMI request/response state, dmactive/ndmreset, sbaddr/sbdata, debug_mode_q, CSR privilege state, ROM/key outputs.",
+        "expected_guard": "Reset should place permission/security state in safe defaults: debug inactive unless authorized, no stale DMI/SBA data, CSR privilege safe, key/auth not permissive.",
+        "observed_behavior": "JTAG TAP state resets on trst_ni and csr/debug state reset clears many registers. csr_regfile resets debug_mode_q=0 and privilege to machine. dm_csrs PoR clears dmcontrol/sbaddr/sbdata/data and sets havereset. However dmstatus.authenticated is always 1, response FIFO flush_i is tied low and only reset by dmi_rst_ni, and dmi_jtag pass is loaded from jtag_key only during reset, making reset/key timing relevant. ROM2 restores constants on reset but permits normal writes afterward.",
+        "path": "rst_ni/trst_ni/dmi_rst_ni -> dmi_jtag TAP/pass state, dm_csrs/FIFO/debug state, csr_regfile privilege/debug state, ROM2 key state.",
+        "state_condition": "rst_ni low/high; trst_ni low/high; dmi_rst_ni low/high; dmactive_o cleared; response queue after reset; debug_mode_q after reset; ROM reset.",
+        "impact": "Reset sequencing or deactivation may leave debug logically authenticated, retain queued response data until dmi reset, or restore/permit mutable key material, enabling transient/stale unauthorized debug access or data exposure.",
+        "rtl_evidence": [
+          {
+            "file": "src/debug/dmi_jtag.sv",
+            "lines": "212-225",
+            "detail": "trst_ni resets dr_q/state_q/address_q/data_q/error_q."
+          },
+          {
+            "file": "src/debug/dmi_jtag.sv",
+            "lines": "228-233",
+            "detail": "pass is loaded from jtag_key when rst_ni is low."
+          },
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "168-172",
+            "detail": "dmstatus.authenticated is hardwired to 1."
+          },
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "481-498",
+            "detail": "response FIFO reset is dmi_rst_ni; flush_i is tied 0."
+          },
+          {
+            "file": "src/debug/dm_csrs.sv",
+            "lines": "500-513",
+            "detail": "PoR clears dmcontrol, command/data, sbcs/sbaddr/sbdata and sets havereset."
+          },
+          {
+            "file": "src/csr_regfile.sv",
+            "lines": "964-975",
+            "detail": "reset sets priv_lvl_q to machine and clears debug_mode_q/dcsr/dpc/dscratch."
+          },
+          {
+            "file": "src/rom2/rom2.sv",
+            "lines": "32-41",
+            "detail": "reset restores secure_reg from mem; normal req_i && we_i overwrites secure_reg."
+          }
+        ]
+      },
+      "missing_or_uncertain_evidence": "Complete dmi_reset_o/dmi_rst_ni propagation and full dmactive clear behavior are truncated; exact stale-response exploitability is not fully proven.",
+      "candidate_finding": "Several reset defaults are safe, but reset/authentication interactions have concerning behavior: dmi_jtag loads pass from jtag_key only while rst_ni is low, dm_csrs response FIFO is not flushed except by dmi_rst_ni, and dmstatus is hardwired authenticated=1. ROM2 key registers are restored on reset but are writable during normal operation.",
+      "notes": "Candidate focuses on reset/auth permissiveness and stale data clearing rather than absence of all reset initialization."
+    }
+  ],
+  "tool_observations": [
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 1,
+        "path": "src/debug/dmi_jtag.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: /* Copyright 2018 ETH Zurich and University of Bologna.\\n2:  * Copyright and related rights are licensed under the Solderpad Hardware\\n3:  * License, Version 0.51 (the “License”); you may not use this file except in\\n4:  * compliance with the License.  You may obtain a copy of the License at\\n5:  * http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6:  * or agreed to in writing, software, hardware and materials distributed under\\n7:  * this License is distributed on an “AS IS” BASIS, WITHOUT WARRANTIES OR\\n8:  * CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9:  * specific language governing permissions and limitations under the License.\\n10:  *\\n11:  * File:   axi_riscv_debug_module.sv\\n12:  * Author: Florian Zaruba <zarubaf@iis.ee.ethz.ch>\\n13:  * Date:   19.7.2018\\n14:  *\\n15:  * Description: JTAG DMI (debug module interface)\\n16:  *\\n17:  */\\n18: import ariane_pkg::*;\\n19: \\n20: module dmi_jtag (\\n21:     input  logic         clk_i,      // DMI Clock\\n22:     input  logic         rst_ni,     // Asynchronous reset active low\\n23:     input  logic         testmode_i,\\n24:     input  logic [31:0]  jtag_key, // key for jtag\\n25: \\n26:     output logic         dmi_rst_no, // hard reset\\n27:     output dm::dmi_req_t dmi_req_o,\\n28:     output logic         dmi_req_valid_o,\\n29:     input  logic         dmi_req_ready_i,\\n30: \\n31:     input dm::dmi_resp_t dmi_resp_i,\\n32:     output logic         dmi_resp_ready_o,\\n33:     input  logic         dmi_resp_valid_i,\\n34: \\n35:     input  logic         tck_i,    // JTAG test clock pad\\n36:     input  logic         tms_i,    // JTAG test mode select pad\\n37:     input  logic         trst_ni,  // JTAG test reset pad\\n38:     input  logic         td_i,     // JTAG test data input pad\\n39:     output logic         td_o,     // JTAG test data output pad\\n40:     output logic         tdo_oe_o, // Data out output enable\\n41:     output logic         umode_o   // Sets the processor to machine mode \\n42: );\\n43:     assign       dmi_rst_no = rst_ni;\\n44: \\n45:     logic        test_logic_reset;\\n46:     logic        shift_dr;\\n47:     logic        update_dr;\\n48:     logic        capture_dr;\\n49:     logic        dmi_access;\\n50:     logic        dtmcs_select;\\n51:     logic        dmi_reset;\\n52:     logic        dmi_tdi;\\n53:     logic        dmi_tdo;\\n54: \\n55:     dm::dmi_req_t  dmi_req;\\n56:     logic          dmi_req_ready;\\n57:     logic          dmi_req_valid;\\n58: \\n59:     dm::dmi_resp_t dmi_resp;\\n60:     logic          dmi_resp_valid;\\n61:     logic          dmi_resp_ready;\\n62: \\n63:     typedef struct packed {\\n64:         logic [6:0]  address;\\n65:         logic [31:0] data;\\n66:         logic [1:0]  op;\\n67:     } dmi_t;\\n68: \\n69:     typedef enum logic [1:0] {\\n70:                                 DMINoError = 2'h0, DMIReservedError = 2'h1,\\n71:                                 DMIOPFailed = 2'h2, DMIBusy = 2'h3\\n72:                              } dmi_error_t;\\n73: \\n74:     enum logic [2:0] { Idle, Read, WaitReadValid, Write, WaitWriteValid } state_d, state_q;\\n75: \\n76:     logic [$bits(dmi_t)-1:0] dr_d, dr_q;\\n77:     logic [6:0] address_d, address_q;\\n78:     logic [31:0] data_d, data_q, pass;\\n79:     logic pass_chk;\\n80: \\n81:     dmi_t  dmi;\\n82:     assign dmi          = dmi_t'(dr_q);\\n83:     assign dmi_req.addr = address_q;\\n84:     assign dmi_req.data = data_q;\\n85:     assign dmi_req.op   = (state_q == Write) ? dm::DTM_WRITE : dm::DTM_READ;\\n86:     // we'will always be ready to accept the data we requested\\n87:     assign dmi_resp_ready = 1'b1;\\n88:     //assign pass = 32'hDEADC0DE;\\n89: \\n90:     logic error_dmi_busy;\\n91:     dmi_error_t error_d, error_q;\\n92: \\n93:     always_comb begin\\n94:         error_dmi_busy = 1'b0;\\n95:         // default assignments\\n96:         state_d   = state_q;\\n97:         address_d = address_q;\\n98:         data_d    = data_q;\\\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 1,
+        "path": "src/debug/dm_csrs.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: /* Copyright 2018 ETH Zurich and University of Bologna.\\n2:  * Copyright and related rights are licensed under the Solderpad Hardware\\n3:  * License, Version 0.51 (the “License”); you may not use this file except in\\n4:  * compliance with the License.  You may obtain a copy of the License at\\n5:  * http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6:  * or agreed to in writing, software, hardware and materials distributed under\\n7:  * this License is distributed on an “AS IS” BASIS, WITHOUT WARRANTIES OR\\n8:  * CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9:  * specific language governing permissions and limitations under the License.\\n10:  *\\n11:  * File:  dm_csrs.sv\\n12:  * Author: Florian Zaruba <zarubaf@iis.ee.ethz.ch>\\n13:  * Date:   30.6.2018\\n14:  *\\n15:  * Description: Debug CSRs. Communication over Debug Transport Module (DTM)\\n16:  */\\n17: \\n18: module dm_csrs #(\\n19:     parameter int NrHarts = -1\\n20: ) (\\n21:     input  logic                              clk_i,              // Clock\\n22:     input  logic                              rst_ni,             // Asynchronous reset active low\\n23:     input  logic                              testmode_i,\\n24:     input  logic                              dmi_rst_ni,         // Debug Module Interface reset, active-low\\n25:     input  logic                              dmi_req_valid_i,\\n26:     output logic                              dmi_req_ready_o,\\n27:     input  dm::dmi_req_t                      dmi_req_i,\\n28:     // every request needs a response one cycle later\\n29:     output logic                              dmi_resp_valid_o,\\n30:     input  logic                              dmi_resp_ready_i,\\n31:     output dm::dmi_resp_t                     dmi_resp_o,\\n32:     // global ctrl\\n33:     output logic                              ndmreset_o,      // non-debug module reset, active-high\\n34:     output logic                              dmactive_o,      // 1 -> debug-module is active, 0 -> synchronous re-set\\n35:     // hart status\\n36:     input  dm::hartinfo_t [NrHarts-1:0]       hartinfo_i,      // static hartinfo\\n37:     input  logic [NrHarts-1:0]                halted_i,        // hart is halted\\n38:     input  logic [NrHarts-1:0]                unavailable_i,   // e.g.: powered down\\n39:     input  logic [NrHarts-1:0]                resumeack_i,     // hart acknowledged resume request\\n40:     // hart control\\n41:     output logic [19:0]                       hartsel_o,       // hartselect to ctrl module\\n42:     output logic [NrHarts-1:0]                haltreq_o,       // request to halt a hart\\n43:     output logic [NrHarts-1:0]                resumereq_o,     // request hart to resume\\n44: \\n45:     output logic                              cmd_valid_o,       // debugger is writing to the command field\\n46:     output dm::command_t                      cmd_o,             // abstract command\\n47:     input  logic                              cmderror_valid_i,  // an error occured\\n48:     input  dm::cmderr_t                       cmderror_i,        // this error occured\\n49:     input  logic                              cmdbusy_i,         // cmd is currently busy executing\\n50: \\n51:     output logic [dm::ProgBufSize-1:0][31:0]  progbuf_o, // to system bus\\n52:     output logic [dm::DataCount-1:0][31:0]    data_o,\\n53: \\n54:     input  logic [dm::DataCount-1:0][31:0]    data_i,\\n55:     input  logic                              data_valid_i,\\n56:     // system bus access module (SBA)\\n57:     output logic [63:0]                       sbaddress_o,\\n58:     input  logic [63:0]                       sbaddress_i,\\n59:     output logic                              sbaddress_write_valid_o,\\n60:     // control signals in\\n61:     output logic                              sbreadonaddr_o,\\n62:     output logic                              sbautoincrement_o\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 1,
+      "tool": "read_file",
+      "args": {
+        "limit": 220,
+        "offset": 1,
+        "path": "src/csr_regfile.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: // Copyright 2018 ETH Zurich and University of Bologna.\\n2: // Copyright and related rights are licensed under the Solderpad Hardware\\n3: // License, Version 0.51 (the \\\"License\\\"); you may not use this file except in\\n4: // compliance with the License.  You may obtain a copy of the License at\\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6: // or agreed to in writing, software, hardware and materials distributed under\\n7: // this License is distributed on an \\\"AS IS\\\" BASIS, WITHOUT WARRANTIES OR\\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9: // specific language governing permissions and limitations under the License.\\n10: //\\n11: // Author: Florian Zaruba, ETH Zurich\\n12: // Date: 05.05.2017\\n13: // Description: CSR Register File as specified by RISC-V\\n14: \\n15: import ariane_pkg::*;\\n16: \\n17: module csr_regfile #(\\n18:     parameter int          ASID_WIDTH      = 1,\\n19:     parameter int unsigned NR_COMMIT_PORTS = 2\\n20: ) (\\n21:     input  logic                  clk_i,                      // Clock\\n22:     input  logic                  rst_ni,                     // Asynchronous reset active low\\n23:     input  logic                  time_irq_i,                 // Timer threw a interrupt\\n24:     // send a flush request out if a CSR with a side effect has changed (e.g. written)\\n25:     output logic                  flush_o,\\n26:     output logic                  halt_csr_o,                 // halt requested\\n27:     // commit acknowledge\\n28:     input  scoreboard_entry_t [NR_COMMIT_PORTS-1:0] commit_instr_i, // the instruction we want to commit\\n29:     input  logic [NR_COMMIT_PORTS-1:0]              commit_ack_i,   // Commit acknowledged a instruction -> increase instret CSR\\n30:     // Core and Cluster ID\\n31:     input  logic  [63:0]          boot_addr_i,                // Address from which to start booting, mtvec is set to the same address\\n32:     input  logic  [63:0]          hart_id_i,                  // Hart id in a multicore environment (reflected in a CSR)\\n33:     // we are taking an exception\\n34:     input exception_t             ex_i,                       // We've got an exception from the commit stage, take its\\n35: \\n36:     input  fu_op                  csr_op_i,                   // Operation to perform on the CSR file\\n37:     input  logic  [11:0]          csr_addr_i,                 // Address of the register to read/write\\n38:     input  logic  [63:0]          csr_wdata_i,                // Write data in\\n39:     output logic  [63:0]          csr_rdata_o,                // Read data out\\n40:     input  logic                  dirty_fp_state_i,           // Mark the FP sate as dirty\\n41:     input  logic                  csr_write_fflags_i,         // Write fflags register e.g.: we are retiring a floating point instruction\\n42:     input  logic  [63:0]          pc_i,                       // PC of instruction accessing the CSR\\n43:     output exception_t            csr_exception_o,            // attempts to access a CSR without appropriate privilege\\n44:                                                               // level or to write  a read-only register also\\n45:                                                               // raises illegal instruction exceptions.\\n46:     // Interrupts/Exceptions\\n47:     output logic  [63:0]          epc_o,                      // Output the exception PC to PC Gen, the correct CSR (mepc, sepc) is set accordingly\\n48:     output logic                  eret_o,                     // Return from exception, set the PC of epc_o\\n49:     output logic  [63:0]          trap_vector_base_o,         // Output base of exception vector, correct CSR is output (mtvec, stvec)\\n50:     output riscv::priv_lvl_t      priv_lvl_o,                 // Current privilege level the CPU is in\\n51:     // FPU\\n52:     output riscv::xs_t            fs_o,   \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 120,
+        "offset": 200,
+        "path": "src/debug/dmi_jtag.sv"
+      },
+      "status": "ok",
+      "path": "src/debug/dmi_jtag.sv",
+      "error": null,
+      "content": "200:             end\n201:         end\n202: \n203:         if (shift_dr) begin\n204:             if (dmi_access) dr_d = {dmi_tdi, dr_q[$bits(dr_q)-1:1]};\n205:         end\n206: \n207:         if (test_logic_reset) begin\n208:             dr_d = '0;\n209:         end\n210:     end\n211: \n212:     always_ff @(posedge tck_i or negedge trst_ni) begin\n213:         if (~trst_ni) begin\n214:             dr_q      <= '0;\n215:             state_q   <= Idle;\n216:             address_q <= '0;\n217:             data_q    <= '0;\n218:             error_q   <= DMINoError;\n219:         end else begin\n220:             dr_q      <= dr_d;\n221:             state_q   <= state_d;\n222:             address_q <= address_d;\n223:             data_q    <= data_d;\n224:             error_q   <= error_d;\n225:         end\n226:     end\n227:     \n228: // On reset, key value input jtag_key from rom2 copied to register\n229:     always_ff @ (posedge clk_i) begin\n230:         if (~rst_ni) begin\n231:             pass <= jtag_key;\n232:         end \n233:     end\n234:  \n235:     // ---------\n236:     // TAP\n237:     // ---------\n238:     dmi_jtag_tap #(\n239:         .IrLength (5)\n240:     ) i_dmi_jtag_tap (\n241:         .tck_i,\n242:         .tms_i,\n243:         .trst_ni,\n244:         .td_i,\n245:         .td_o,\n246:         .tdo_oe_o,\n247:         .testmode_i         ( testmode_i       ),\n248:         .test_logic_reset_o ( test_logic_reset ),\n249:         .shift_dr_o         ( shift_dr         ),\n250:         .update_dr_o        ( update_dr        ),\n251:         .capture_dr_o       ( capture_dr       ),\n252:         .dmi_access_o       ( dmi_access       ),\n253:         .dtmcs_select_o     ( dtmcs_select     ),\n254:         .dmi_reset_o        ( dmi_reset        ),\n255:         .dmi_error_i        ( error_q          ),\n256:         .dmi_tdi_o          ( dmi_tdi          ),\n257:         .dmi_tdo_i          ( dmi_tdo          )\n258:     );\n259: \n260:     // ---------\n261:     // CDC\n262:     // ---------\n263:     dmi_cdc i_dmi_cdc (\n264:         // JTAG side (master side)\n265:         .tck_i,\n266:         .trst_ni,\n267:         .jtag_dmi_req_i    ( dmi_req          ),\n268:         .jtag_dmi_ready_o  ( dmi_req_ready    ),\n269:         .jtag_dmi_valid_i  ( dmi_req_valid    ),\n270:         .jtag_dmi_resp_o   ( dmi_resp         ),\n271:         .jtag_dmi_valid_o  ( dmi_resp_valid   ),\n272:         .jtag_dmi_ready_i  ( dmi_resp_ready   ),\n273:         // core side\n274:         .clk_i,\n275:         .rst_ni,\n276:         .core_dmi_req_o    ( dmi_req_o        ),\n277:         .core_dmi_valid_o  ( dmi_req_valid_o  ),\n278:         .core_dmi_ready_i  ( dmi_req_ready_i  ),\n279:         .core_dmi_resp_i   ( dmi_resp_i       ),\n280:         .core_dmi_ready_o  ( dmi_resp_ready_o ),\n281:         .core_dmi_valid_i  ( dmi_resp_valid_i )\n282:     );\n283: \n284: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 260,
+        "offset": 148,
+        "path": "src/debug/dm_csrs.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"148:     // a successful response returns zero\\n149:     assign dmi_resp_o.resp = dm::DTM_SUCCESS;\\n150:     assign dmi_resp_valid_o     = ~resp_queue_empty;\\n151:     assign dmi_req_ready_o      = ~resp_queue_full;\\n152:     assign resp_queue_push      = dmi_req_valid_i & dmi_req_ready_o;\\n153:     // SBA\\n154:     assign sbautoincrement_o = sbcs_q.sbautoincrement;\\n155:     assign sbreadonaddr_o    = sbcs_q.sbreadonaddr;\\n156:     assign sbreadondata_o    = sbcs_q.sbreadondata;\\n157:     assign sbaccess_o        = sbcs_q.sbaccess;\\n158:     assign sbdata_o          = sbdata_q;\\n159:     assign sbaddress_o       = sbaddr_q;\\n160: \\n161:     assign hartsel_o         = {dmcontrol_q.hartselhi, dmcontrol_q.hartsello};\\n162: \\n163:     always_comb begin : csr_read_write\\n164:         // --------------------\\n165:         // Static Values (R/O)\\n166:         // --------------------\\n167:         // dmstatus\\n168:         dmstatus    = '0;\\n169:         dmstatus.version = dm::DbgVersion013;\\n170:         // no authentication implemented\\n171:         dmstatus.authenticated = 1'b1;\\n172:         // we do not support halt-on-reset sequence\\n173:         dmstatus.hasresethaltreq = 1'b0;\\n174:         // TODO(zarubaf) things need to change here if we implement the array mask\\n175:         dmstatus.allhavereset = havereset_q[selected_hart];\\n176:         dmstatus.anyhavereset = havereset_q[selected_hart];\\n177: \\n178:         dmstatus.allresumeack = resumeack_i[selected_hart];\\n179:         dmstatus.anyresumeack = resumeack_i[selected_hart];\\n180: \\n181:         dmstatus.allunavail   = unavailable_i[selected_hart];\\n182:         dmstatus.anyunavail   = unavailable_i[selected_hart];\\n183: \\n184:         // as soon as we are out of the legal Hart region tell the debugger\\n185:         // that there are only non-existent harts\\n186:         dmstatus.allnonexistent = (hartsel_o > NrHarts[19:0] - 1) ? 1'b1 : 1'b0;\\n187:         dmstatus.anynonexistent = (hartsel_o > NrHarts[19:0] - 1) ? 1'b1 : 1'b0;\\n188: \\n189:         dmstatus.allhalted    = halted_i[selected_hart];\\n190:         dmstatus.anyhalted    = halted_i[selected_hart];\\n191: \\n192:         dmstatus.allrunning   = ~halted_i[selected_hart];\\n193:         dmstatus.anyrunning   = ~halted_i[selected_hart];\\n194: \\n195:         // abstractcs\\n196:         abstractcs = '0;\\n197:         abstractcs.datacount = dm::DataCount;\\n198:         abstractcs.progbufsize = dm::ProgBufSize;\\n199:         abstractcs.busy = cmdbusy_i;\\n200:         abstractcs.cmderr = cmderr_q;\\n201: \\n202:         // abstractautoexec\\n203:         abstractauto_d = abstractauto_q;\\n204:         abstractauto_d.zero0 = '0;\\n205: \\n206:         // default assignments\\n207:         havereset_d = havereset_q;\\n208:         dmcontrol_d = dmcontrol_q;\\n209:         cmderr_d    = cmderr_q;\\n210:         command_d   = command_q;\\n211:         progbuf_d   = progbuf_q;\\n212:         data_d      = data_q;\\n213:         sbcs_d      = sbcs_q;\\n214:         sbaddr_d    = sbaddress_i;\\n215:         sbdata_d    = sbdata_q;\\n216: \\n217:         resp_queue_data         = 32'b0;\\n218:         cmd_valid_o             = 1'b0;\\n219:         sbaddress_write_valid_o = 1'b0;\\n220:         sbdata_read_valid_o     = 1'b0;\\n221:         sbdata_write_valid_o    = 1'b0;\\n222: \\n223:         // reads\\n224:         if (dmi_req_ready_o && dmi_req_valid_i && dtm_op == dm::DTM_READ) begin\\n225:             unique case ({1'b0, dmi_req_i.addr}) inside\\n226:                 [(dm::Data0):DataEnd]: begin\\n227:                     if (dm::DataCount > 0) begin\\n228:                         resp_queue_data = data_q[dmi_req_i.addr[4:0]];\\n229:                     end\\n230:                     if (!cmdbusy_i) begin\\n231:                         // check whether we need to re-execute the command (just give a cmd_valid)\\n232:                         cmd_valid_o = abstractauto_q.autoexecdata[dmi_req_i.addr[3:0] - int'\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 2,
+      "tool": "read_file",
+      "args": {
+        "limit": 170,
+        "offset": 430,
+        "path": "src/debug/dm_csrs.sv"
+      },
+      "status": "ok",
+      "path": "src/debug/dm_csrs.sv",
+      "error": null,
+      "content": "430:             sbcs_d.sberror = sberror_i;\n431:         end\n432:         // update read data\n433:         if (sbdata_valid_i) begin\n434:             sbdata_d = sbdata_i;\n435:         end\n436: \n437:         // dmcontrol\n438:         // TODO(zarubaf) we currently do not implement the hartarry mask\n439:         dmcontrol_d.hasel           = 1'b0;\n440:         // we do not support resetting an individual hart\n441:         dmcontrol_d.hartreset       = 1'b0;\n442:         dmcontrol_d.setresethaltreq = 1'b0;\n443:         dmcontrol_d.clrresethaltreq = 1'b0;\n444:         dmcontrol_d.zero1           = '0;\n445:         dmcontrol_d.zero0           = '0;\n446:         // Non-writeable, clear only\n447:         dmcontrol_d.ackhavereset    = 1'b0;\n448:         // static values for dcsr\n449:         sbcs_d.sbversion            = 3'b1;\n450:         sbcs_d.sbbusy               = sbbusy_i;\n451:         sbcs_d.sbasize              = 7'd64; // bus is 64 bit wide\n452:         sbcs_d.sbaccess128          = 1'b0;\n453:         sbcs_d.sbaccess64           = 1'b0;\n454:         sbcs_d.sbaccess32           = 1'b0;\n455:         sbcs_d.sbaccess16           = 1'b0;\n456:         sbcs_d.sbaccess8            = 1'b0;\n457:         sbcs_d.sbaccess             = 1'b0;\n458:     end\n459: \n460:     // output multiplexer\n461:     always_comb begin\n462:         selected_hart = hartsel_o[HartSelLen-1:0];\n463:         // default assignment\n464:         haltreq_o = '0;\n465:         resumereq_o = '0;\n466:         haltreq_o[selected_hart] = dmcontrol_q.haltreq;\n467:         resumereq_o[selected_hart] = dmcontrol_q.resumereq;\n468:     end\n469: \n470:     assign dmactive_o = dmcontrol_q.dmactive;\n471:     assign cmd_o      = command_q;\n472:     assign progbuf_o  = progbuf_q;\n473:     assign data_o     = data_q;\n474: \n475:     assign resp_queue_pop = dmi_resp_ready_i & ~resp_queue_empty;\n476: \n477:     logic ndmreset_n;\n478: \n479:     assign ndmreset_o = dmcontrol_q.ndmreset;\n480: \n481:     // response FIFO\n482:     fifo_v2 #(\n483:         .dtype            ( logic [31:0]         ),\n484:         .DEPTH            ( 2                    )\n485:     ) i_fifo (\n486:         .clk_i            ( clk_i                ),\n487:         .rst_ni           ( dmi_rst_ni           ), // reset only when system is re-set\n488:         .flush_i          ( 1'b0                 ), // we do not need to flush this queue\n489:         .testmode_i       ( testmode_i           ),\n490:         .full_o           ( resp_queue_full      ),\n491:         .empty_o          ( resp_queue_empty     ),\n492:         .alm_full_o       (                      ),\n493:         .alm_empty_o      (                      ),\n494:         .data_i           ( resp_queue_data      ),\n495:         .push_i           ( resp_queue_push      ),\n496:         .data_o           ( dmi_resp_o.data      ),\n497:         .pop_i            ( resp_queue_pop       )\n498:     );\n499: \n500:     always_ff @(posedge clk_i or negedge rst_ni) begin\n501:         // PoR\n502:         if (~rst_ni) begin\n503:             dmcontrol_q    <= '0;\n504:             havereset_q    <= '1;\n505:             // this is the only write-able bit during reset\n506:             cmderr_q       <= dm::CmdErrNone;\n507:             command_q      <= '0;\n508:             abstractauto_q <= '0;\n509:             progbuf_q      <= '0;\n510:             data_q         <= '0;\n511:             sbcs_q         <= '0;\n512:             sbaddr_q       <= '0;\n513:             sbdata_q       <= '0;\n514:         end else begin\n515:             havereset_q    <= havereset_d;\n516:             // synchronous re-set of debug module, active-low, except for dmactive\n517:             if (!dmcontrol_q.dmactive) begin\n518:                 dmcontrol_q.haltreq          <= '0;\n519:                 dmcontrol_q.resumereq        <= '0;\n520:                 dmcontrol_q.hartreset        <= '0;\n521:                 dmcontrol_q.zero1            <= '0;\n522:                 dmcontrol_q.hasel            <= '0;\n523:\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 3,
+      "tool": "read_file",
+      "args": {
+        "limit": 150,
+        "offset": 296,
+        "path": "src/debug/dm_csrs.sv"
+      },
+      "status": "ok",
+      "path": "src/debug/dm_csrs.sv",
+      "error": null,
+      "content": "296:         // write\n297:         if (dmi_req_ready_o && dmi_req_valid_i && dtm_op == dm::DTM_WRITE) begin\n298:             unique case (dm::dm_csr_t'({1'b0, dmi_req_i.addr})) inside\n299:                 [(dm::Data0):DataEnd]: begin\n300:                     // attempts to write them while busy is set does not change their value\n301:                     if (!cmdbusy_i && dm::DataCount > 0) begin\n302:                         data_d[dmi_req_i.addr[4:0]] = dmi_req_i.data;\n303:                         // check whether we need to re-execute the command (just give a cmd_valid)\n304:                         cmd_valid_o = abstractauto_q.autoexecdata[dmi_req_i.addr[3:0] - int'(dm::Data0)];\n305:                     end\n306:                 end\n307:                 dm::DMControl: begin\n308:                     automatic dm::dmcontrol_t dmcontrol;\n309:                     dmcontrol = dm::dmcontrol_t'(dmi_req_i.data);\n310:                     // clear the havreset of the selected hart\n311:                     if (dmcontrol.ackhavereset) begin\n312:                         havereset_d[selected_hart] = 1'b0;\n313:                     end\n314:                     dmcontrol_d = dmi_req_i.data;\n315:                 end\n316:                 dm::DMStatus:; // write are ignored to R/O register\n317:                 dm::Hartinfo:; // hartinfo is R/O\n318:                 // only command error is write-able\n319:                 dm::AbstractCS: begin // W1C\n320:                     // Gets set if an abstract command fails. The bits in this\n321:                     // field remain set until they are cleared by writing 1 to\n322:                     // them. No abstract command is started until the value is\n323:                     // reset to 0.\n324:                     automatic dm::abstractcs_t a_abstractcs;\n325:                     a_abstractcs = dm::abstractcs_t'(dmi_req_i.data);\n326:                     // reads during abstract command execution are not allowed\n327:                     if (!cmdbusy_i) begin\n328:                         cmderr_d = dm::cmderr_t'(~a_abstractcs.cmderr & cmderr_q);\n329:                     end else if (cmderr_q == dm::CmdErrNone) begin\n330:                         cmderr_d = dm::CmdErrBusy;\n331:                     end\n332: \n333:                 end\n334:                 dm::Command: begin\n335:                     // writes are ignored if a command is already busy\n336:                     if (!cmdbusy_i) begin\n337:                         cmd_valid_o = 1'b1;\n338:                         command_d = dm::command_t'(dmi_req_i.data);\n339:                     // if there was an attempted to write during a busy execution\n340:                     // and the cmderror field is zero set the busy error\n341:                     end else if (cmderr_q == dm::CmdErrNone) begin\n342:                         cmderr_d = dm::CmdErrBusy;\n343:                     end\n344:                 end\n345:                 dm::AbstractAuto: begin\n346:                     // this field can only be written legally when there is no command executing\n347:                     if (!cmdbusy_i) begin\n348:                         abstractauto_d = {dmi_req_i.data[31:16], 4'b0, dmi_req_i.data[11:0]};\n349:                     end else if (cmderr_q == dm::CmdErrNone) begin\n350:                         cmderr_d = dm::CmdErrBusy;\n351:                     end\n352:                 end\n353:                 [(dm::ProgBuf0):ProgBufEnd]: begin\n354:                     // attempts to write them while busy is set does not change their value\n355:                     if (!cmdbusy_i) begin\n356:                         progbuf_d[dmi_req_i.addr[4:0]] = dmi_req_i.data;\n357:                         // check whether we need to re-execute the command (just give a cmd_valid)\n358:                         // this should probably throw an error if executed during another command was busy\n359:                         // TODO(zarubaf): check if offset is correct - without it this may assign Xes\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 120,
+        "path": "src/debug/dmi_jtag_tap.sv"
+      },
+      "status": "ok",
+      "path": "src/debug/dmi_jtag_tap.sv",
+      "error": null,
+      "content": "120:     // ----------------\n121:     // - Bypass\n122:     // - IDCODE\n123:     // - DTM CS\n124:     // Define IDCODE Value\n125:     localparam IDCODE_VALUE = 32'h249511C3;\n126:     // 0001             version\n127:     // 0100100101010001 part number (IQ)\n128:     // 00011100001      manufacturer id (flextronics)\n129:     // 1                required by standard\n130:     logic [31:0] idcode_d, idcode_q;\n131:     logic        idcode_select;\n132:     logic        bypass_select;\n133:     dtmcs_t      dtmcs_d, dtmcs_q;\n134:     logic        bypass_d, bypass_q;  // this is a 1-bit register\n135: \n136:     assign dmi_reset_o = dtmcs_q.dmireset;\n137: \n138:     always_comb begin\n139:         idcode_d = idcode_q;\n140:         bypass_d = bypass_q;\n141:         dtmcs_d  = dtmcs_q;\n142: \n143:         if (capture_dr_o) begin\n144:             if (idcode_select) idcode_d = IDCODE_VALUE;\n145:             if (bypass_select) bypass_d = 1'b0;\n146:             if (dtmcs_select_o) begin\n147:                 dtmcs_d  = '{\n148:                                 zero1        : '0,\n149:                                 dmihardreset : 1'b0,\n150:                                 dmireset     : 1'b0,\n151:                                 zero0        : '0,\n152:                                 idle         : 'd1,         // 1: Enter Run-Test/Idle and leave it immediately\n153:                                 dmistat      : dmi_error_i, // 0: No error, 1: Op failed, 2: too fast\n154:                                 abits        : 'd7, // The size of address in dmi\n155:                                 version      : 'd1  // Version described in spec version 0.13 (and later?)\n156:                             };\n157:             end\n158:         end\n159: \n160:         if (shift_dr_o) begin\n161:             if (idcode_select)  idcode_d = {td_i, idcode_q[31:1]};\n162:             if (bypass_select)  bypass_d = td_i;\n163:             if (dtmcs_select_o) dtmcs_d  = {td_i, dtmcs_q[31:1]};\n164:         end\n165: \n166:         if (test_logic_reset_o) begin\n167:             idcode_d = IDCODE_VALUE;\n168:             bypass_d = 1'b0;\n169:         end\n170:     end\n171: \n172:     // ----------------\n173:     // Data reg select\n174:     // ----------------\n175:     always_comb begin\n176:         dmi_access_o   = 1'b0;\n177:         dtmcs_select_o = 1'b0;\n178:         idcode_select  = 1'b0;\n179:         bypass_select  = 1'b0;\n180:         case (jtag_ir_q)\n181:             BYPASS0:   bypass_select  = 1'b1;\n182:             IDCODE:    idcode_select  = 1'b1;\n183:             DTMCSR:    dtmcs_select_o = 1'b1;\n184:             DMIACCESS: dmi_access_o   = 1'b1;\n185:             BYPASS1:   bypass_select  = 1'b1;\n186:             default:   bypass_select  = 1'b1;\n187:         endcase\n188:     end\n189: \n190:     // ----------------\n191:     // Output select\n192:     // ----------------\n193:     logic tdo_mux;\n194: \n195:     always_comb begin\n196:         // we are shifting out the IR register\n197:         if (shift_ir) begin\n198:             tdo_mux = jtag_ir_shift_q[0];\n199:         // here we are shifting the DR register\n200:         end else begin\n201:           case (jtag_ir_q)    // synthesis parallel_case\n202:             IDCODE:         tdo_mux = idcode_q[0];     // Reading ID code\n203:             DTMCSR:         tdo_mux = dtmcs_q[0];\n204:             DMIACCESS:      tdo_mux = dmi_tdo_i;       // Read from DMI TDO\n205:             default:        tdo_mux = bypass_q;      // BYPASS instruction\n206:           endcase\n207:         end\n208: \n209:     end\n210: \n211:     // DFT\n212:     logic tck_n, tck_ni;\n213: \n214:     cluster_clock_inverter i_tck_inv (\n215:         .clk_i ( tck_i  ),\n216:         .clk_o ( tck_ni )\n217:     );\n218: \n219:     pulp_clock_mux2 i_dft_tck_mux (\n220:         .clk0_i    ( tck_ni     ),\n221:         .clk1_i    ( tck_i      ), // bypass the inverted clock for testing\n222:         .clk_sel_i ( testmode_i ),\n223:         .clk_o     ( tck_n      )\n224:     );\n225: \n\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 230,
+        "offset": 1,
+        "path": "src/debug/dm_top.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"1: /* Copyright 2018 ETH Zurich and University of Bologna.\\n2:  * Copyright and related rights are licensed under the Solderpad Hardware\\n3:  * License, Version 0.51 (the “License”); you may not use this file except in\\n4:  * compliance with the License.  You may obtain a copy of the License at\\n5:  * http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\\n6:  * or agreed to in writing, software, hardware and materials distributed under\\n7:  * this License is distributed on an “AS IS” BASIS, WITHOUT WARRANTIES OR\\n8:  * CONDITIONS OF ANY KIND, either express or implied. See the License for the\\n9:  * specific language governing permissions and limitations under the License.\\n10:  *\\n11:  * File:   dm_top.sv\\n12:  * Author: Florian Zaruba <zarubaf@iis.ee.ethz.ch>\\n13:  * Date:   30.6.2018\\n14:  *\\n15:  * Description: Top-level of debug module (DM). This is an AXI-Slave.\\n16:  *              DTM protocol is equal to SiFives debug protocol to leverage\\n17:  *              SW infrastructure re-use. As of version 0.13\\n18:  */\\n19: \\n20: module dm_top #(\\n21:     parameter int NrHarts      = -1,\\n22:     parameter int AxiIdWidth   = -1,\\n23:     parameter int AxiAddrWidth = -1,\\n24:     parameter int AxiDataWidth = -1,\\n25:     parameter int AxiUserWidth = -1\\n26: ) (\\n27:     input  logic               clk_i,       // clock\\n28:     input  logic               rst_ni,      // asynchronous reset active low, connect PoR here, not the system reset\\n29:     input  logic               testmode_i,\\n30:     output logic               ndmreset_o,  // non-debug module reset\\n31:     output logic               dmactive_o,  // debug module is active\\n32:     output logic [NrHarts-1:0] debug_req_o, // async debug request\\n33:     input  logic [NrHarts-1:0] unavailable_i, // communicate whether the hart is unavailable (e.g.: power down)\\n34: \\n35:     // bus slave, for an execution based technique\\n36:     input  ariane_axi::req_t   axi_s_req_i,\\n37:     output ariane_axi::resp_t  axi_s_resp_o,\\n38: \\n39:     // bus master, for system bus accesses\\n40:     output ariane_axi::req_t   axi_m_req_o,\\n41:     input  ariane_axi::resp_t  axi_m_resp_i,\\n42: \\n43:     // Connection to DTM - compatible to RocketChip Debug Module\\n44:     input  logic               dmi_rst_ni,\\n45:     input  logic               dmi_req_valid_i,\\n46:     output logic               dmi_req_ready_o,\\n47:     input  dm::dmi_req_t       dmi_req_i,\\n48: \\n49:     output logic               dmi_resp_valid_o,\\n50:     input  logic               dmi_resp_ready_i,\\n51:     output dm::dmi_resp_t      dmi_resp_o\\n52: );\\n53: \\n54:     // Debug CSRs\\n55:     dm::hartinfo_t [NrHarts-1:0]      hartinfo;\\n56:     logic [NrHarts-1:0]               halted;\\n57:     // logic [NrHarts-1:0]               running;\\n58:     logic [NrHarts-1:0]               resumeack;\\n59:     logic [NrHarts-1:0]               haltreq;\\n60:     logic [NrHarts-1:0]               resumereq;\\n61:     logic                             cmd_valid;\\n62:     dm::command_t                     cmd;\\n63: \\n64:     logic                             req;\\n65:     logic                             we;\\n66:     logic [63:0]                      addr;\\n67:     logic [7:0]                       be;\\n68:     logic [63:0]                      wdata;\\n69:     logic [63:0]                      rdata;\\n70: \\n71:     logic                             cmderror_valid;\\n72:     dm::cmderr_t                      cmderror;\\n73:     logic                             cmdbusy;\\n74:     logic [dm::ProgBufSize-1:0][31:0] progbuf;\\n75:     logic [dm::DataCount-1:0][31:0]   data_csrs_mem;\\n76:     logic [dm::DataCount-1:0][31:0]   data_mem_csrs;\\n77:     logic                             data_valid;\\n78:     logic [19:0]                      hartsel;\\n79:     // System Bus Access Module\\n80:     logic [63:0]                      sbaddress_csrs_sba;\\n81:     logic [63:0]       \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 4,
+      "tool": "read_file",
+      "args": {
+        "limit": 170,
+        "offset": 120,
+        "path": "tb/ariane_testharness.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_testharness.sv",
+      "error": null,
+      "content": "120:     // Converts to DPI calls\n121:     SimJTAG i_SimJTAG (\n122:         .clock                ( clk_i                ),\n123:         .reset                ( ~rst_ni              ),\n124:         .enable               ( jtag_enable[0]       ),\n125:         .init_done            ( init_done            ),\n126:         .jtag_TCK             ( jtag_TCK             ),\n127:         .jtag_TMS             ( jtag_TMS             ),\n128:         .jtag_TDI             ( jtag_TDI             ),\n129:         .jtag_TRSTn           ( jtag_TRSTn           ),\n130:         .jtag_TDO_data        ( jtag_TDO_data        ),\n131:         .jtag_TDO_driven      ( jtag_TDO_driven      ),\n132:         .exit                 ( jtag_exit            )\n133:     );\n134: \n135:     dmi_jtag i_dmi_jtag (\n136:         .clk_i            ( clk_i           ),\n137:         .rst_ni           ( rst_ni          ),\n138:         .testmode_i       ( test_en         ),\n139:         .jtag_key         ( jtag_key        ), \n140:         .dmi_req_o        ( jtag_dmi_req    ),\n141:         .dmi_req_valid_o  ( jtag_req_valid  ),\n142:         .dmi_req_ready_i  ( debug_req_ready ),\n143:         .dmi_resp_i       ( debug_resp      ),\n144:         .dmi_resp_ready_o ( jtag_resp_ready ),\n145:         .dmi_resp_valid_i ( jtag_resp_valid ),\n146:         .dmi_rst_no       (                 ), // not connected\n147:         .tck_i            ( jtag_TCK        ),\n148:         .tms_i            ( jtag_TMS        ),\n149:         .trst_ni          ( jtag_TRSTn      ),\n150:         .td_i             ( jtag_TDI        ),\n151:         .td_o             ( jtag_TDO_data   ),\n152:         .tdo_oe_o         ( jtag_TDO_driven ),\n153: \t.umode_o          ( ariane_umode    ) \n154:     );\n155: \n156:     // SiFive's SimDTM Module\n157:     // Converts to DPI calls\n158:     logic [1:0] debug_req_bits_op;\n159:     assign dmi_req.op = dm::dtm_op_t'(debug_req_bits_op);\n160: \n161:     if (InclSimDTM) begin\n162:         SimDTM i_SimDTM (\n163:             .clk                  ( clk_i                ),\n164:             .reset                ( ~rst_ni              ),\n165:             .debug_req_valid      ( dmi_req_valid        ),\n166:             .debug_req_ready      ( debug_req_ready      ),\n167:             .debug_req_bits_addr  ( dmi_req.addr         ),\n168:             .debug_req_bits_op    ( debug_req_bits_op    ),\n169:             .debug_req_bits_data  ( dmi_req.data         ),\n170:             .debug_resp_valid     ( dmi_resp_valid       ),\n171:             .debug_resp_ready     ( dmi_resp_ready       ),\n172:             .debug_resp_bits_resp ( debug_resp.resp      ),\n173:             .debug_resp_bits_data ( debug_resp.data      ),\n174:             .exit                 ( dmi_exit             )\n175:         );\n176:     end else begin\n177:         assign dmi_req_valid = '0;\n178:         assign debug_req_bits_op = '0;\n179:         assign dmi_exit = 1'b0;\n180:     end\n181: \n182:     ariane_axi::req_t    dm_axi_m_req,  dm_axi_s_req;\n183:     ariane_axi::resp_t   dm_axi_m_resp, dm_axi_s_resp;\n184: \n185:     // debug module\n186:     dm_top #(\n187:         // current implementation only supports 1 hart\n188:         .NrHarts              ( 1                         ),\n189:         .AxiIdWidth           ( AXI_ID_WIDTH_SLAVES       ),\n190:         .AxiAddrWidth         ( AXI_ADDRESS_WIDTH         ),\n191:         .AxiDataWidth         ( AXI_DATA_WIDTH            ),\n192:         .AxiUserWidth         ( AXI_USER_WIDTH            )\n193:     ) i_dm_top (\n194: \n195:         .clk_i                ( clk_i                ),\n196:         .rst_ni               ( rst_ni               ), // PoR\n197:         .testmode_i           ( test_en              ),\n198:         .ndmreset_o           ( ndmreset             ),\n199:         .dmactive_o           (                      ), // active debug session\n200:         .debug_req_o          ( debug_req_core       ),\n201:         .unavailable_i        ( '0                   ),\n202:      \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 5,
+      "tool": "read_file",
+      "args": {
+        "limit": 90,
+        "offset": 150,
+        "path": "src/debug/dm_top.sv"
+      },
+      "status": "ok",
+      "path": "src/debug/dm_top.sv",
+      "error": null,
+      "content": "150:     dm_sba i_dm_sba (\n151:         .clk_i                   ( clk_i                 ),\n152:         .rst_ni                  ( rst_ni                ),\n153:         .dmactive_i              ( dmactive_o            ),\n154:         .axi_req_o               ( axi_m_req_o           ),\n155:         .axi_resp_i              ( axi_m_resp_i          ),\n156:         .sbaddress_i             ( sbaddress_csrs_sba    ),\n157:         .sbaddress_o             ( sbaddress_sba_csrs    ),\n158:         .sbaddress_write_valid_i ( sbaddress_write_valid ),\n159:         .sbreadonaddr_i          ( sbreadonaddr          ),\n160:         .sbautoincrement_i       ( sbautoincrement       ),\n161:         .sbaccess_i              ( sbaccess              ),\n162:         .sbreadondata_i          ( sbreadondata          ),\n163:         .sbdata_i                ( sbdata_write          ),\n164:         .sbdata_read_valid_i     ( sbdata_read_valid     ),\n165:         .sbdata_write_valid_i    ( sbdata_write_valid    ),\n166:         .sbdata_o                ( sbdata_read           ),\n167:         .sbdata_valid_o          ( sbdata_valid          ),\n168:         .sbbusy_o                ( sbbusy                ),\n169:         .sberror_valid_o         ( sberror_valid         ),\n170:         .sberror_o               ( sberror               )\n171:     );\n172: \n173:     dm_mem #(\n174:         .NrHarts (NrHarts)\n175:     ) i_dm_mem (\n176:         .clk_i                   ( clk_i                 ),\n177:         .rst_ni                  ( rst_ni                ),\n178:         .debug_req_o             ( debug_req_o           ),\n179:         .hartsel_i               ( hartsel               ),\n180:         .haltreq_i               ( haltreq               ),\n181:         .resumereq_i             ( resumereq             ),\n182:         .halted_o                ( halted                ),\n183:         .resuming_o              ( resumeack             ),\n184:         .cmd_valid_i             ( cmd_valid             ),\n185:         .cmd_i                   ( cmd                   ),\n186:         .cmderror_valid_o        ( cmderror_valid        ),\n187:         .cmderror_o              ( cmderror              ),\n188:         .cmdbusy_o               ( cmdbusy               ),\n189:         .progbuf_i               ( progbuf               ),\n190:         .data_i                  ( data_csrs_mem         ),\n191:         .data_o                  ( data_mem_csrs         ),\n192:         .data_valid_o            ( data_valid            ),\n193:         .req_i                   ( req                   ),\n194:         .we_i                    ( we                    ),\n195:         .addr_i                  ( addr                  ),\n196:         .wdata_i                 ( wdata                 ),\n197:         .be_i                    ( be                    ),\n198:         .rdata_o                 ( rdata                 )\n199:     );\n200: \n201:     AXI_BUS #(\n202:         .AXI_ID_WIDTH   ( AxiIdWidth   ),\n203:         .AXI_ADDR_WIDTH ( AxiAddrWidth ),\n204:         .AXI_DATA_WIDTH ( AxiDataWidth ),\n205:         .AXI_USER_WIDTH ( AxiUserWidth )\n206:     ) slave();\n207: \n208:     axi_slave_connect_rev i_axi_slave_connect_rev (\n209:       .axi_req_i (axi_s_req_i),\n210:       .axi_resp_o(axi_s_resp_o),\n211:       .slave(slave));\n212: \n213:     axi2mem #(\n214:         .AXI_ID_WIDTH   ( AxiIdWidth   ),\n215:         .AXI_ADDR_WIDTH ( AxiAddrWidth ),\n216:         .AXI_DATA_WIDTH ( AxiDataWidth ),\n217:         .AXI_USER_WIDTH ( AxiUserWidth )\n218:     ) i_axi2mem (\n219:         .clk_i      ( clk_i    ),\n220:         .rst_ni     ( rst_ni   ),\n221:         .slave      ( slave    ),\n222:         .req_o      ( req      ),\n223:         .we_o       ( we       ),\n224:         .addr_o     ( addr     ),\n225:         .be_o       ( be       ),\n226:         .data_o     ( wdata    ),\n227:         .data_i     ( rdata    )\n228:     );\n229: \n230: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 6,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 150,
+        "path": "src/csr_regfile.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"150:         // a read access exception can only occur if we attempt to read a CSR which does not exist\\n151:         read_access_exception = 1'b0;\\n152:         csr_rdata = 64'b0;\\n153:         // feed through address of performance counter\\n154:         perf_addr_o = csr_addr.address;\\n155: \\n156:         if (csr_read) begin\\n157:             unique case (csr_addr.address)\\n158:                 riscv::CSR_FFLAGS: begin\\n159:                     if (mstatus_q.fs == riscv::Off) begin\\n160:                         read_access_exception = 1'b1;\\n161:                     end else begin\\n162:                         csr_rdata = {59'b0, fcsr_q.fflags};\\n163:                     end\\n164:                 end\\n165:                 riscv::CSR_FRM: begin\\n166:                     if (mstatus_q.fs == riscv::Off) begin\\n167:                         read_access_exception = 1'b1;\\n168:                     end else begin\\n169:                         csr_rdata = {61'b0, fcsr_q.frm};\\n170:                     end\\n171:                 end\\n172:                 riscv::CSR_FCSR: begin\\n173:                     if (mstatus_q.fs == riscv::Off) begin\\n174:                         read_access_exception = 1'b1;\\n175:                     end else begin\\n176:                         csr_rdata = {56'b0, fcsr_q.frm, fcsr_q.fflags};\\n177:                     end\\n178:                 end\\n179:                 // non-standard extension\\n180:                 riscv::CSR_FTRAN: begin\\n181:                     if (mstatus_q.fs == riscv::Off) begin\\n182:                         read_access_exception = 1'b1;\\n183:                     end else begin\\n184:                         csr_rdata = {57'b0, fcsr_q.fprec};\\n185:                     end\\n186:                 end\\n187:                 // debug registers\\n188:                 riscv::CSR_DCSR:               csr_rdata = {32'b0, dcsr_q};\\n189:                 riscv::CSR_DPC:                csr_rdata = dpc_q;\\n190:                 riscv::CSR_DSCRATCH0:          csr_rdata = dscratch0_q;\\n191:                 riscv::CSR_DSCRATCH1:          csr_rdata = dscratch1_q;\\n192:                 // trigger module registers\\n193:                 riscv::CSR_TSELECT:; // not implemented\\n194:                 riscv::CSR_TDATA1:;  // not implemented\\n195:                 riscv::CSR_TDATA2:;  // not implemented\\n196:                 riscv::CSR_TDATA3:;  // not implemented\\n197:                 // supervisor registers\\n198:                 riscv::CSR_SSTATUS: begin\\n199:                     csr_rdata = mstatus_q & ariane_pkg::SMODE_STATUS_READ_MASK;\\n200:                 end\\n201:                 riscv::CSR_SIE:                csr_rdata = mie_q & mideleg_q;\\n202:                 riscv::CSR_SIP:                csr_rdata = mip_q & mideleg_q;\\n203:                 riscv::CSR_STVEC:              csr_rdata = stvec_q;\\n204:                 riscv::CSR_SCOUNTEREN:         csr_rdata = 64'b0; // not implemented\\n205:                 riscv::CSR_SSCRATCH:           csr_rdata = sscratch_q;\\n206:                 riscv::CSR_SEPC:               csr_rdata = sepc_q;\\n207:                 riscv::CSR_SCAUSE:             csr_rdata = scause_q;\\n208:                 riscv::CSR_STVAL:              csr_rdata = stval_q;\\n209:                 riscv::CSR_SATP:                csr_rdata = satp_q;\\n210:                  \\n211:                 // machine mode registers\\n212:                 riscv::CSR_MSTATUS:            csr_rdata = mstatus_q;\\n213:                 riscv::CSR_MISA:               csr_rdata = ISA_CODE;\\n214:                 riscv::CSR_MEDELEG:            csr_rdata = medeleg_q;\\n215:                 riscv::CSR_MIDELEG:            csr_rdata = mideleg_q;\\n216:                 riscv::CSR_MIE:                csr_rdata = mie_q;\\n217:                 riscv::CSR_MTVEC:              csr_rdata = mtvec_q;\\n218:                 riscv::CSR_MCOUNTEREN:         csr_rdata = 64'b0; // not implemented\\n219:        \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 6,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 330,
+        "path": "src/csr_regfile.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"330:         dirty_fp_state_csr      = 1'b0;\\n331: \\n332:         // check for correct access rights and that we are writing\\n333:         if (csr_we) begin\\n334:             unique case (csr_addr.address)\\n335:                 // Floating-Point\\n336:                 riscv::CSR_FFLAGS: begin\\n337:                     if (mstatus_q.fs == riscv::Off) begin\\n338:                         update_access_exception = 1'b1;\\n339:                     end else begin\\n340:                         dirty_fp_state_csr = 1'b1;\\n341:                         fcsr_d.fflags = csr_wdata[4:0];\\n342:                         // this instruction has side-effects\\n343:                         flush_o = 1'b1;\\n344:                     end\\n345:                 end\\n346:                 riscv::CSR_FRM: begin\\n347:                     if (mstatus_q.fs == riscv::Off) begin\\n348:                         update_access_exception = 1'b1;\\n349:                     end else begin\\n350:                         dirty_fp_state_csr = 1'b1;\\n351:                         fcsr_d.frm    = csr_wdata[2:0];\\n352:                         // this instruction has side-effects\\n353:                         flush_o = 1'b1;\\n354:                     end\\n355:                 end\\n356:                 riscv::CSR_FCSR: begin\\n357:                     if (mstatus_q.fs == riscv::Off) begin\\n358:                         update_access_exception = 1'b1;\\n359:                     end else begin\\n360:                         dirty_fp_state_csr = 1'b1;\\n361:                         fcsr_d[7:0] = csr_wdata[7:0]; // ignore writes to reserved space\\n362:                         // this instruction has side-effects\\n363:                         flush_o = 1'b1;\\n364:                     end\\n365:                 end\\n366:                 riscv::CSR_FTRAN: begin\\n367:                     if (mstatus_q.fs == riscv::Off) begin\\n368:                         update_access_exception = 1'b1;\\n369:                     end else begin\\n370:                         dirty_fp_state_csr = 1'b1;\\n371:                         fcsr_d.fprec = csr_wdata[6:0]; // ignore writes to reserved space\\n372:                         // this instruction has side-effects\\n373:                         flush_o = 1'b1;\\n374:                     end\\n375:                 end\\n376:                 // debug CSR\\n377:                 riscv::CSR_DCSR: begin\\n378:                     dcsr_d = csr_wdata[31:0];\\n379:                     // debug is implemented\\n380:                     dcsr_d.xdebugver = 4'h4;\\n381:                     // privilege level\\n382:                     dcsr_d.prv = priv_lvl_q;\\n383:                     // currently not supported\\n384:                     dcsr_d.nmip      = 1'b0;\\n385:                     dcsr_d.stopcount = 1'b0;\\n386:                     dcsr_d.stoptime  = 1'b0;\\n387:                 end\\n388:                 riscv::CSR_DPC:                dpc_d = csr_wdata;\\n389:                 riscv::CSR_DSCRATCH0:          dscratch0_d = csr_wdata;\\n390:                 riscv::CSR_DSCRATCH1:          dscratch1_d = csr_wdata;\\n391:                 // trigger module CSRs\\n392:                 riscv::CSR_TSELECT:; // not implemented\\n393:                 riscv::CSR_TDATA1:;  // not implemented\\n394:                 riscv::CSR_TDATA2:;  // not implemented\\n395:                 riscv::CSR_TDATA3:;  // not implemented\\n396:                 // sstatus is a subset of mstatus - mask it accordingly\\n397:                 riscv::CSR_SSTATUS: begin\\n398:                     mask = ariane_pkg::SMODE_STATUS_WRITE_MASK;\\n399:                     mstatus_d = (mstatus_q & ~mask) | (csr_wdata & mask);\\n400:                     // hardwire to zero if floating point extension is not present\\n401:                     if (!FP_PRESENT) begin\\n402:                         mstatus_d.fs = riscv::Off;\\n403:                     end\\n404:                     // hardwired extension reg\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 6,
+      "tool": "read_file",
+      "args": {
+        "limit": 230,
+        "offset": 600,
+        "path": "src/csr_regfile.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"600:             priv_lvl_d = trap_to_priv_lvl;\\n601:         end\\n602: \\n603:         // ------------------------------\\n604:         // Debug\\n605:         // ------------------------------\\n606:         // Explains why Debug Mode was entered.\\n607:         // When there are multiple reasons to enter Debug Mode in a single cycle, hardware should set cause to the cause with the highest priority.\\n608:         // 1: An ebreak instruction was executed. (priority 3)\\n609:         // 2: The Trigger Module caused a breakpoint exception. (priority 4)\\n610:         // 3: The debugger requested entry to Debug Mode. (priority 2)\\n611:         // 4: The hart single stepped because step was set. (priority 1)\\n612:         // we are currently not in debug mode and could potentially enter\\n613:         if (!debug_mode_q) begin\\n614:             dcsr_d.prv = priv_lvl_o;\\n615:             // trigger module fired\\n616: \\n617:             // caused by a breakpoint\\n618:             if (ex_i.valid && ex_i.cause == riscv::BREAKPOINT) begin\\n619:                 // check that we actually want to enter debug depending on the privilege level we are currently in\\n620:                 unique case (priv_lvl_o)\\n621:                     riscv::PRIV_LVL_M: begin\\n622:                         debug_mode_d = dcsr_q.ebreakm;\\n623:                         set_debug_pc_o = dcsr_q.ebreakm;\\n624:                     end\\n625:                     riscv::PRIV_LVL_S: begin\\n626:                         debug_mode_d = dcsr_q.ebreaks;\\n627:                         set_debug_pc_o = dcsr_q.ebreaks;\\n628:                     end\\n629:                     riscv::PRIV_LVL_U: begin\\n630:                         debug_mode_d = dcsr_q.ebreaku;\\n631:                         set_debug_pc_o = dcsr_q.ebreaku;\\n632:                     end\\n633:                     default:;\\n634:                 endcase\\n635:                 // save PC of next this instruction e.g.: the next one to be executed\\n636:                 dpc_d = pc_i;\\n637:                 dcsr_d.cause = dm::CauseBreakpoint;\\n638:             end\\n639: \\n640:             // we've got a debug request (and we have an instruction which we can associate it to)\\n641:             // don't interrupt the AMO\\n642:             if (debug_req_i && commit_instr_i[0].valid) begin\\n643:                 // save the PC\\n644:                 dpc_d = pc_i;\\n645:                 // enter debug mode\\n646:                 debug_mode_d = 1'b1;\\n647:                 // jump to the base address\\n648:                 set_debug_pc_o = 1'b1;\\n649:                 // save the cause as external debug request\\n650:                 dcsr_d.cause = dm::CauseRequest;\\n651:             end\\n652: \\n653:             // single step enable and we just retired an instruction\\n654:             if (dcsr_q.step && commit_ack_i[0]) begin\\n655:                 // valid CTRL flow change\\n656:                 if (commit_instr_i[0].fu == CTRL_FLOW) begin\\n657:                     // we saved the correct target address during execute\\n658:                     dpc_d = commit_instr_i[0].bp.predict_address;\\n659:                 // exception valid\\n660:                 end else if (ex_i.valid) begin\\n661:                     dpc_d = trap_vector_base_o;\\n662:                 // return from environment\\n663:                 end else if (eret_o) begin\\n664:                     dpc_d = epc_o;\\n665:                 // consecutive PC\\n666:                 end else begin\\n667:                     dpc_d = commit_instr_i[0].pc + (commit_instr_i[0].is_compressed ? 'h2 : 'h4);\\n668:                 end\\n669:                 debug_mode_d = 1'b1;\\n670:                 set_debug_pc_o = 1'b1;\\n671:                 dcsr_d.cause = dm::CauseSingleStep;\\n672:             end\\n673:         end\\n674:         // go in halt-state again when we encounter an exception\\n675:         if (debug_mode_q && ex_i.valid && ex_i.cause == riscv::BREAK\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 7,
+      "tool": "read_file",
+      "args": {
+        "limit": 180,
+        "offset": 736,
+        "path": "src/csr_regfile.sv"
+      },
+      "status": "unknown",
+      "path": null,
+      "error": null,
+      "content": "{\"tool\": \"read_file\", \"status\": \"ok\", \"content\": \"736:     // ---------------------------\\n737:     always_comb begin : csr_op_logic\\n738:         csr_wdata = csr_wdata_i;\\n739:         csr_we    = 1'b1;\\n740:         csr_read  = 1'b1;\\n741:         mret      = 1'b0;\\n742:         sret      = 1'b0;\\n743:         dret      = 1'b0;\\n744: \\n745:         unique case (csr_op_i)\\n746:             CSR_WRITE: csr_wdata = csr_wdata_i;\\n747:             CSR_SET:   csr_wdata = csr_wdata_i | csr_rdata;\\n748:             CSR_CLEAR: csr_wdata = (~csr_wdata_i) & csr_rdata;\\n749:             CSR_READ:  csr_we    = 1'b0;\\n750:             SRET: begin\\n751:                 // the return should not have any write or read side-effects\\n752:                 csr_we   = 1'b0;\\n753:                 csr_read = 1'b0;\\n754:                 sret     = 1'b1; // signal a return from supervisor mode\\n755:             end\\n756:             MRET: begin\\n757:                 // the return should not have any write or read side-effects\\n758:                 csr_we   = 1'b0;\\n759:                 csr_read = 1'b0;\\n760:                 mret     = 1'b1; // signal a return from machine mode\\n761:             end\\n762:             DRET: begin\\n763:                 // the return should not have any write or read side-effects\\n764:                 csr_we   = 1'b0;\\n765:                 csr_read = 1'b0;\\n766:                 dret     = 1'b1; // signal a return from debug mode\\n767:             end\\n768:             default: begin\\n769:                 csr_we   = 1'b0;\\n770:                 csr_read = 1'b0;\\n771:             end\\n772:         endcase\\n773:         // if we are retiring an exception do not return from exception\\n774:         if (ex_i.valid) begin\\n775:             mret = 1'b0;\\n776:             sret = 1'b0;\\n777:             dret = 1'b0;\\n778:         end\\n779:     end\\n780: \\n781:     logic interrupt_global_enable;\\n782:     // --------------------------------------\\n783:     // Exception Control & Interrupt Control\\n784:     // --------------------------------------\\n785:     always_comb begin : exception_ctrl\\n786:         automatic logic [63:0] interrupt_cause;\\n787:         interrupt_cause = '0;\\n788:         // wait for interrupt register\\n789:         wfi_d = wfi_q;\\n790: \\n791:         csr_exception_o = {\\n792:             64'b0, 64'b0, 1'b0\\n793:         };\\n794:         // -----------------\\n795:         // Interrupt Control\\n796:         // -----------------\\n797:         // TODO(zarubaf): Move interrupt handling to commit stage.\\n798:         // we decode an interrupt the same as an exception, hence it will be taken if the instruction did not\\n799:         // throw any previous exception.\\n800:         // we have three interrupt sources: external interrupts, software interrupts, timer interrupts (order of precedence)\\n801:         // for two privilege levels: Supervisor and Machine Mode\\n802:         // Supervisor Timer Interrupt\\n803:         if (mie_q[riscv::S_TIMER_INTERRUPT[5:0]] && mip_q[riscv::S_TIMER_INTERRUPT[5:0]])\\n804:             interrupt_cause = riscv::S_TIMER_INTERRUPT;\\n805:         // Supervisor Software Interrupt\\n806:         if (mie_q[riscv::S_SW_INTERRUPT[5:0]] && mip_q[riscv::S_SW_INTERRUPT[5:0]])\\n807:             interrupt_cause = riscv::S_SW_INTERRUPT;\\n808:         // Supervisor External Interrupt\\n809:         // The logical-OR of the software-writable bit and the signal from the external interrupt controller is\\n810:         // used to generate external interrupts to the supervisor\\n811:         if (mie_q[riscv::S_EXT_INTERRUPT[5:0]] && (mip_q[riscv::S_EXT_INTERRUPT[5:0]] | irq_i[1]))\\n812:             interrupt_cause = riscv::S_EXT_INTERRUPT;\\n813:         // Machine Timer Interrupt\\n814:         if (mip_q[riscv::M_TIMER_INTERRUPT[5:0]] && mie_q[riscv::M_TIMER_INTERRUPT[5:0]])\\n815:             interrupt_cause = riscv::M_TIMER_INTERRUPT;\\n816:         // Machine Mode Software Interrupt\\n817:         if (mip_q[risc\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 8,
+      "tool": "read_file",
+      "args": {
+        "limit": 100,
+        "offset": 900,
+        "path": "src/csr_regfile.sv"
+      },
+      "status": "ok",
+      "path": "src/csr_regfile.sv",
+      "error": null,
+      "content": "900:         // we are imposing an additional alignment-constraint of 64 * 4 bytes since\n901:         // we want to spare the costly addition\n902:         if ((mtvec_q[0] || stvec_q[0]) && csr_exception_o.cause[63]) begin\n903:             trap_vector_base_o[7:2] = csr_exception_o.cause[5:0];\n904:         end\n905: \n906:         epc_o = mepc_q;\n907:         // we are returning from supervisor mode, so take the sepc register\n908:         if (sret) begin\n909:             epc_o = sepc_q;\n910:         end\n911:         // we are returning from debug mode, to take the dpc register\n912:         if (dret) begin\n913:             epc_o = dpc_q;\n914:         end\n915:     end\n916: \n917:     // -------------------\n918:     // Output Assignments\n919:     // -------------------\n920:     always_comb begin\n921:         // When the SEIP bit is read with a CSRRW, CSRRS, or CSRRC instruction, the value\n922:         // returned in the rd destination register contains the logical-OR of the software-writable\n923:         // bit and the interrupt signal from the interrupt controller.\n924:         csr_rdata_o = csr_rdata;\n925: \n926:         unique case (csr_addr.address)\n927:             riscv::CSR_MIP: csr_rdata_o = csr_rdata | (irq_i[1] << riscv::IRQ_S_EXT);\n928:             // in supervisor mode we also need to check whether we delegated this bit\n929:             riscv::CSR_SIP: begin\n930:                 csr_rdata_o = csr_rdata\n931:                             | ((irq_i[1] & mideleg_q[riscv::IRQ_S_EXT]) << riscv::IRQ_S_EXT);\n932:             end\n933:             default:;\n934:         endcase\n935:     end\n936: \n937:     // in debug mode we execute with privilege level M\n938:     assign priv_lvl_o       = (debug_mode_q || umode_i) ? riscv::PRIV_LVL_M : priv_lvl_q;\n939:     // FPU outputs\n940:     assign fflags_o         = fcsr_q.fflags;\n941:     assign frm_o            = fcsr_q.frm;\n942:     assign fprec_o          = fcsr_q.fprec;\n943:     // MMU outputs\n944:     assign satp_ppn_o       = satp_q.ppn;\n945:     assign asid_o           = satp_q.asid[ASID_WIDTH-1:0];\n946:     assign sum_o            = mstatus_q.sum;\n947:     // we support bare memory addressing and SV39\n948:     assign en_translation_o = (satp_q.mode == 4'h8 && priv_lvl_o != riscv::PRIV_LVL_M)\n949:                               ? 1'b1\n950:                               : 1'b0;\n951:     assign mxr_o            = mstatus_q.mxr;\n952:     assign tvm_o            = mstatus_q.tvm;\n953:     assign tw_o             = mstatus_q.tw;\n954:     assign tsr_o            = mstatus_q.tsr;\n955:     assign halt_csr_o       = wfi_q;\n956:     assign icache_en_o      = icache_q[0] & (~debug_mode_q);\n957:     assign dcache_en_o      = dcache_q[0];\n958:     // determine if mprv needs to be considered if in debug mode\n959:     assign mprv             = (debug_mode_q && !dcsr_q.mprven) ? 1'b0 : mstatus_q.mprv;\n960:     assign debug_mode_o     = debug_mode_q;\n961:     assign single_step_o    = dcsr_q.step;\n962: \n963:     // sequential process\n964:     always_ff @(posedge clk_i or negedge rst_ni) begin\n965:         if (~rst_ni) begin\n966:             priv_lvl_q             <= riscv::PRIV_LVL_M;\n967:             // floating-point registers\n968:             fcsr_q                 <= 64'b0;\n969:             // debug signals\n970:             debug_mode_q           <= 1'b0;\n971:             dcsr_q                 <= '0;\n972:             dcsr_q.prv             <= riscv::PRIV_LVL_M;\n973:             dpc_q                  <= 64'b0;\n974:             dscratch0_q            <= 64'b0;\n975:             dscratch1_q            <= 64'b0;\n976:             // machine mode registers\n977:             mstatus_q              <= 64'b0;\n978:             // set to boot address + direct mode + 4 byte offset which is the initial trap\n979:             mtvec_rst_load_q       <= 1'b1;\n980:             mtvec_q                <= '0;\n981:             medeleg_q              <= 64'b0;\n982:             mideleg_q              <= 64'b0;\n983:          \n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 8,
+      "tool": "read_file",
+      "args": {
+        "limit": 100,
+        "offset": 1000,
+        "path": "src/csr_regfile.sv"
+      },
+      "status": "ok",
+      "path": "src/csr_regfile.sv",
+      "error": null,
+      "content": "1000:             instret_q              <= 64'b0;\n1001:             // aux registers\n1002:             en_ld_st_translation_q <= 1'b0;\n1003:             // wait for interrupt\n1004:             wfi_q                  <= 1'b0;\n1005:         end else begin\n1006:             priv_lvl_q             <= priv_lvl_d;\n1007:             // floating-point registers\n1008:             fcsr_q                 <= fcsr_d;\n1009:             // debug signals\n1010:             debug_mode_q           <= debug_mode_d;\n1011:             dcsr_q                 <= dcsr_d;\n1012:             dpc_q                  <= dpc_d;\n1013:             dscratch0_q            <= dscratch0_d;\n1014:             dscratch1_q            <= dscratch1_d;\n1015:             // machine mode registers\n1016:             mstatus_q              <= mstatus_d;\n1017:             mtvec_rst_load_q       <= 1'b0;\n1018:             mtvec_q                <= mtvec_d;\n1019:             medeleg_q              <= medeleg_d;\n1020:             mideleg_q              <= mideleg_d;\n1021:             mip_q                  <= mip_d;\n1022:             mie_q                  <= mie_d;\n1023:             mepc_q                 <= mepc_d;\n1024:             mcause_q               <= mcause_d;\n1025:             mscratch_q             <= mscratch_d;\n1026:             mtval_q                <= mtval_d;\n1027:             dcache_q               <= dcache_d;\n1028:             icache_q               <= icache_d;\n1029:             // supervisor mode registers\n1030:             sepc_q                 <= sepc_d;\n1031:             scause_q               <= scause_d;\n1032:             stvec_q                <= stvec_d;\n1033:             sscratch_q             <= sscratch_d;\n1034:             stval_q                <= stval_d;\n1035:             satp_q                 <= satp_d;\n1036:             // timer and counters\n1037:             cycle_q                <= cycle_d;\n1038:             instret_q              <= instret_d;\n1039:             // aux registers\n1040:             en_ld_st_translation_q <= en_ld_st_translation_d;\n1041:             // wait for interrupt\n1042:             wfi_q                  <= wfi_d;\n1043:         end\n1044:     end\n1045: \n1046:     //-------------\n1047:     // Assertions\n1048:     //-------------\n1049:     //pragma translate_off\n1050:     `ifndef VERILATOR\n1051:         // check that eret and ex are never valid together\n1052:         assert property (\n1053:           @(posedge clk_i) !(eret_o && ex_i.valid))\n1054:         else begin $error(\"eret and exception should never be valid at the same time\"); $stop(); end\n1055:     `endif\n1056:     //pragma translate_on\n1057: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 8,
+      "tool": "read_file",
+      "args": {
+        "limit": 120,
+        "offset": 468,
+        "path": "src/csr_regfile.sv"
+      },
+      "status": "ok",
+      "path": "src/csr_regfile.sv",
+      "error": null,
+      "content": "468:                 end\n469:                 // mask the register so that unsupported interrupts can never be set\n470:                 riscv::CSR_MIE: begin\n471:                     mask = riscv::MIP_SSIP | riscv::MIP_STIP | riscv::MIP_SEIP | riscv::MIP_MSIP | riscv::MIP_MTIP;\n472:                     mie_d = (mie_q & ~mask) | (csr_wdata & mask); // we only support supervisor and M-mode interrupts\n473:                 end\n474: \n475:                 riscv::CSR_MTVEC: begin\n476:                     mtvec_d = {csr_wdata[63:2], 1'b0, csr_wdata[0]};\n477:                     // we are in vector mode, this implementation requires the additional\n478:                     // alignment constraint of 64 * 4 bytes\n479:                     if (csr_wdata[0]) mtvec_d = {csr_wdata[63:8], 7'b0, csr_wdata[0]};\n480:                 end\n481:                 riscv::CSR_MCOUNTEREN:;\n482: \n483:                 riscv::CSR_MSCRATCH:           mscratch_d  = csr_wdata;\n484:                 riscv::CSR_MEPC:               mepc_d      = {csr_wdata[63:1], 1'b0};\n485:                 riscv::CSR_MCAUSE:             mcause_d    = csr_wdata;\n486:                 riscv::CSR_MTVAL:              mtval_d     = csr_wdata;\n487:                 riscv::CSR_MIP: begin\n488:                     mask = riscv::MIP_SSIP | riscv::MIP_STIP | riscv::MIP_SEIP;\n489:                     mip_d = (mip_q & ~mask) | (csr_wdata & mask);\n490:                 end\n491:                 // performance counters\n492:                 riscv::CSR_MCYCLE:             cycle_d     = csr_wdata;\n493:                 riscv::CSR_MINSTRET:           instret     = csr_wdata;\n494:                 riscv::CSR_DCACHE:             dcache_d    = csr_wdata[0]; // enable bit\n495:                 riscv::CSR_ICACHE:             icache_d    = csr_wdata[0]; // enable bit\n496:                 riscv::CSR_L1_ICACHE_MISS,\n497:                 riscv::CSR_L1_DCACHE_MISS,\n498:                 riscv::CSR_ITLB_MISS,\n499:                 riscv::CSR_DTLB_MISS,\n500:                 riscv::CSR_LOAD,\n501:                 riscv::CSR_STORE,\n502:                 riscv::CSR_EXCEPTION,\n503:                 riscv::CSR_EXCEPTION_RET,\n504:                 riscv::CSR_BRANCH_JUMP,\n505:                 riscv::CSR_CALL,\n506:                 riscv::CSR_RET,\n507:                 riscv::CSR_MIS_PREDICT: begin\n508:                                         perf_data_o = csr_wdata;\n509:                                         perf_we_o   = 1'b1;\n510:                 end\n511:                 default: update_access_exception = 1'b1;\n512:             endcase\n513:         end\n514: \n515:         mstatus_d.sxl  = riscv::XLEN_64;\n516:         mstatus_d.uxl  = riscv::XLEN_64;\n517: \n518:         // mark the floating point extension register as dirty\n519:         if (FP_PRESENT && (dirty_fp_state_csr || dirty_fp_state_i)) begin\n520:             mstatus_d.fs = riscv::Dirty;\n521:         end\n522: \n523:         // write the floating point status register\n524:         if (csr_write_fflags_i) begin\n525:             fcsr_d.fflags = csr_wdata_i[4:0] | fcsr_q.fflags;\n526:         end\n527:         // ---------------------\n528:         // External Interrupts\n529:         // ---------------------\n530:         // Machine Mode External Interrupt Pending\n531:         mip_d[riscv::IRQ_M_EXT] = irq_i[0];\n532:         // Machine software interrupt\n533:         mip_d[riscv::IRQ_M_SOFT] = ipi_i;\n534:         // Timer interrupt pending, coming from platform timer\n535:         mip_d[riscv::IRQ_M_TIMER] = time_irq_i;\n536: \n537:         // -----------------------\n538:         // Manage Exception Stack\n539:         // -----------------------\n540:         // update exception CSRs\n541:         // we got an exception update cause, pc and stval register\n542:         trap_to_priv_lvl = riscv::PRIV_LVL_M;\n543:         // Exception is taken and we are not in debug mode\n544:         // exceptions in debug mode don't update any fields\n545:         if (!debug_mode_q && ex_i.valid) begin\n546:\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 9,
+      "tool": "read_file",
+      "args": {
+        "limit": 70,
+        "offset": 1,
+        "path": "src/rom2/rom2.sv"
+      },
+      "status": "ok",
+      "path": "src/rom2/rom2.sv",
+      "error": null,
+      "content": "1:  /*\n2:  * ROM2: Which have all the keys.\n3:  */\n4: \n5: module rom2 (\n6:    input  logic         clk_i,\n7:    input  logic         rst_ni,\n8:    input  logic         req_i,\n9:    input  logic         we_i,\n10:    input  logic [63:0]  addr_i,\n11:    input  logic [63:0]  wdata_i,\n12:    output logic [63:0]  rdata_o,\n13:    output logic [3:0][191:0]  secure_reg // Ideally [1:0] should be [RomSize-1:0]. In this case RomSize is 2.\n14: );\n15:     localparam int RomSize = 4;\n16: \n17: // Store key values here. // Replication of fuse. \n18:     const logic [RomSize-1:0][191:0] mem = {\n19:         192'h00000000_00000000_00000000_00000000_0000f8f8_ff6fe00f, // 3rd location for Access control master 1. First 4 bits for peripheral 0, next 4 for p1 and so on.\n20:         192'h00000000_00000000_00000000_00000000_0000fff8_ff6ff00f, // 2nd location for Access control master 0. First 4 bits for peripheral 0, next 4 for p1 and so on.\n21:         192'h2b7e1516_28aed2a6_abf71588_09cf4f3c_2b7e1516_28aed2a6, // 1st location for JTAG\n22:         192'h55555555_28aed2a6_abf71588_09cf4f3c_2b7e1516_28aed2a6  // oth location for AES\n23:     };\n24: \n25: // Secure registers. Key values copied from fuse to these registers on reset.\n26: //    logic [RomSize-1:0][191:0] secure_reg;\n27: \n28:     logic [$clog2(RomSize)-1:0] raddr_q;\n29: \n30: // We can read and write initial 64 bits.\n31: // On reset, key values will be copied to registers.\n32:     always_ff @ (posedge clk_i) begin\n33:         if (~rst_ni) begin\n34:             secure_reg <= mem;\n35:         end else begin\n36:         if(req_i) begin\n37:             if (!we_i) begin\n38:                 raddr_q <= addr_i[$clog2(RomSize)-1+3:3];\n39:             end else begin\n40:                 secure_reg[addr_i[$clog2(RomSize)-1+3:3]] <= wdata_i;\n41:             end\n42:         end\n43:         end\n44:     end\n45:     // this prevents spurious Xes from propagating into\n46:     // the speculative fetch stage of the core\n47:     assign rdata_o = (raddr_q < RomSize) ? secure_reg[raddr_q] : '0;\n48: \n49: \n50: endmodule",
+      "truncated": false
+    },
+    {
+      "step": 9,
+      "tool": "read_file",
+      "args": {
+        "limit": 120,
+        "offset": 160,
+        "path": "tb/ariane_peripherals.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_peripherals.sv",
+      "error": null,
+      "content": "160:         .NUM_SOURCES        ( ariane_soc::NumSources        )\n161:     ) i_plic (\n162:         .clk_i              ( clk_i                  ),\n163:         .rst_ni             ( rst_ni                 ),\n164:         .irq_sources_i      ( irq_sources            ),\n165:         .eip_targets_o      ( irq_o                  ),\n166:         .external_bus_io    ( reg_bus                )\n167:     );\n168:     \n169: \n170: ///////////////////////////////////////////////////////////////////////////////////////\n171:     // ---------------\n172:     // ROM2_FUSE peripheral\n173:     // It has all the keys in fuse registers.\n174:     // ---------------\n175:     //logic [63:0]                  rom2_addr;\n176:     //logic [64-1:0]                rom2_rdata;\n177:     logic                         rom2_req;\n178:     logic [AxiAddrWidth-1:0]      rom2_addr;\n179:     logic                         rom2_we;\n180:     logic [31:0]                  pkey_loc_o;\n181:     logic [3:0][191:0]            key_reg_out;\n182:     logic [AxiDataWidth-1:0]    rom2_rdata;\n183:     logic [AxiDataWidth-1:0]    rom2_wdata;\n184: \n185:  \n186:     axi2mem #(\n187:         .AXI_ID_WIDTH   ( AxiIdWidth          ),\n188:         .AXI_ADDR_WIDTH ( AxiAddrWidth        ),\n189:         .AXI_DATA_WIDTH ( AxiDataWidth        ),\n190:         .AXI_USER_WIDTH ( AxiUserWidth        )\n191:     ) i_axi2rom2 (\n192:         .clk_i  ( clk_i                    ),\n193:         .rst_ni ( rst_ni                   ),\n194:         .slave  ( rom2_fuse                ),\n195:         .req_o  ( rom2_req                 ),\n196:         .we_o   ( rom2_we                  ),\n197:         .addr_o ( rom2_addr                ),\n198:         .be_o   (                          ),\n199:         .data_o ( rom2_wdata               ),\n200:         .data_i ( rom2_rdata               )\n201:     );\n202: \n203: \n204:     rom2 i_rom2 (\n205:         .clk_i      ( clk_i      ),\n206:         .rst_ni     ( rst_ni     ),\n207:         .req_i      ( rom2_req   ),\n208:         .we_i       ( rom2_we    ),\n209:         .addr_i     ( rom2_addr  ),\n210:         .wdata_i    ( rom2_wdata ),\n211:         .rdata_o    ( rom2_rdata ), // this will go to peripheral\n212:         .secure_reg ( key_reg_out)\n213:     );\n214:     \n215:     assign jtag_key = key_reg_out[1][31:0];\n216:     assign access_ctrl_reg[0] = key_reg_out[2][47:0];\n217:     assign access_ctrl_reg[1] = key_reg_out[3][47:0];\n218: \n219: \n220: ///////////////////////////////////////////////////////////////////////////////////////\n221:     // ---------------\n222:     // 4. pkt.\n223:     // It is the peripheral key table. It will take peripheral id from the apllication and provide location of key in rom2\n224:     // \n225:     // ---------------\n226: \n227:     REG_BUS #(\n228:         .ADDR_WIDTH ( 32 ),\n229:         .DATA_WIDTH ( 32 )\n230:     ) reg_bus_pkt (clk_i);\n231:     \n232:     logic         pkt_penable;\n233:     logic         pkt_pwrite;\n234:     logic [31:0]  pkt_paddr;\n235:     logic         pkt_psel;\n236:     logic [31:0]  pkt_pwdata;\n237:     logic [31:0]  pkt_prdata;\n238:     logic         pkt_pready;\n239:     logic         pkt_pslverr;\n240: \n241:     axi2apb_64_32 #(\n242:         .AXI4_ADDRESS_WIDTH ( AxiAddrWidth  ),\n243:         .AXI4_RDATA_WIDTH   ( AxiDataWidth  ),\n244:         .AXI4_WDATA_WIDTH   ( AxiDataWidth  ),\n245:         .AXI4_ID_WIDTH      ( AxiIdWidth    ),\n246:         .AXI4_USER_WIDTH    ( AxiUserWidth  ),\n247:         .BUFF_DEPTH_SLAVE   ( 2             ),\n248:         .APB_ADDR_WIDTH     ( 32            )\n249:     ) i_axi2apb_64_32_pkt (\n250:         .ACLK      ( clk_i          ),\n251:         .ARESETn   ( rst_ni         ),\n252:         .test_en_i ( 1'b0           ),\n253:         .AWID_i    ( pkt.aw_id     ),\n254:         .AWADDR_i  ( pkt.aw_addr   ),\n255:         .AWLEN_i   ( pkt.aw_len    ),\n256:         .AWSIZE_i  ( pkt.aw_size   ),\n257:         .AWBURST_i ( pkt.aw_burst  ),\n258:         .AWLOCK_i  ( pkt.aw_lock   ),\n259:         .AWCACH\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 9,
+      "tool": "read_file",
+      "args": {
+        "limit": 130,
+        "offset": 1,
+        "path": "tb/ariane_soc_pkg.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_soc_pkg.sv",
+      "error": null,
+      "content": "1: // Copyright 2018 ETH Zurich and University of Bologna.\n2: // Copyright and related rights are licensed under the Solderpad Hardware\n3: // License, Version 0.51 (the \"License\"); you may not use this file except in\n4: // compliance with the License.  You may obtain a copy of the License at\n5: // http://solderpad.org/licenses/SHL-0.51. Unless required by applicable law\n6: // or agreed to in writing, software, hardware and materials distributed under\n7: // this License is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR\n8: // CONDITIONS OF ANY KIND, either express or implied. See the License for the\n9: // specific language governing permissions and limitations under the License.\n10: //\n11: // Author: Florian Zaruba, ETH Zurich\n12: // Description: Contains SoC information as constants\n13: package ariane_soc;\n14:     // M-Mode Hart, S-Mode Hart\n15:     localparam NumTargets = 2;\n16:     // Uart, SPI, Ethernet and AES\n17:     localparam NumSources = 4;\n18:     localparam PLICIdWidth = 3;\n19:     localparam ParameterBitwidth = PLICIdWidth;\n20: \n21:     typedef enum int unsigned {\n22:         DRAM     = 0,\n23:         GPIO     = 1,\n24:         Ethernet = 2,\n25:         SPI      = 3,\n26:         AES      = 4,    \n27:         UART     = 5,   \n28:         PLIC     = 6,  \n29:         CLINT    = 7, \n30:         PKT      = 8,\n31:         ROM2     = 9,\n32:         ROM      = 10, \n33:         Debug    = 11\n34:     } axi_slaves_t;\n35: \n36:     localparam NB_PERIPHERALS = Debug + 1;\n37: \n38:     localparam logic[63:0] DebugLength    = 64'h1000;\n39:     localparam logic[63:0] ROMLength      = 64'h10000;\n40:     localparam logic[63:0] ROM2Length     = 64'h10000;\n41:     localparam logic[63:0] PKTLength      = 64'h10000;\n42:     localparam logic[63:0] CLINTLength    = 64'hC0000;\n43:     localparam logic[63:0] PLICLength     = 64'h3FF_FFFF;\n44:     localparam logic[63:0] UARTLength     = 64'h111000; \n45:     localparam logic[63:0] AESLength      = 64'h1000;\n46:     localparam logic[63:0] SPILength      = 64'h800000;\n47:     localparam logic[63:0] EthernetLength = 64'h10000;\n48:     localparam logic[63:0] GPIOLength     = 64'h1000;\n49:     localparam logic[63:0] DRAMLength     = 64'h8000000; // 128 MByte of DDR\n50:     localparam logic[63:0] SRAMLength     = 64'h1800000;  // 24 MByte of SRAM\n51:     // Instantiate AXI protocol checkers\n52:     localparam bit GenProtocolChecker = 1'b0;\n53: \n54:     typedef enum logic [63:0] {\n55:         DebugBase    = 64'h0000_0000,\n56:         ROMBase      = 64'h0001_0000,\n57:         ROM2Base     = 64'h0021_0000, \n58:         PKTBase      = 64'h0041_0000, \n59:         CLINTBase    = 64'h0200_0000,\n60:         PLICBase     = 64'h0C00_0000,\n61:         UARTBase     = 64'h1000_0000,\n62:         AESBase      = 64'h1010_0000,  \n63:         SPIBase      = 64'h2000_0000,\n64:         EthernetBase = 64'h3000_0000,\n65:         GPIOBase     = 64'h4000_0000,\n66:         DRAMBase     = 64'h8000_0000\n67:     } soc_bus_start_t;\n68: \n69:     // Different AES Key ID's this information is public.\n70:     localparam logic[63:0] AESKey_0    = 64'h0000;\n71:     localparam logic[63:0] AESKey_1    = 64'h1000;\n72:     localparam logic[63:0] AESKey_2    = 64'h2000;\n73:     localparam logic[63:0] AESKey_3    = 64'h3000;\n74:     localparam logic[63:0] AESKey_4    = 64'h4000;\n75:     localparam logic[63:0] AESKey_5    = 64'h5000;\n76: endpackage",
+      "truncated": false
+    },
+    {
+      "step": 9,
+      "tool": "read_file",
+      "args": {
+        "limit": 110,
+        "offset": 300,
+        "path": "tb/ariane_peripherals.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_peripherals.sv",
+      "error": null,
+      "content": "300:         .PSEL      ( pkt_psel      ),\n301:         .PWDATA    ( pkt_pwdata    ),\n302:         .PRDATA    ( pkt_prdata    ),\n303:         .PREADY    ( pkt_pready    ),\n304:         .PSLVERR   ( pkt_pslverr   )\n305:     );\n306: \n307:     apb_to_reg i_apb_to_reg_pkt (\n308:         .clk_i     ( clk_i        ),\n309:         .rst_ni    ( rst_ni       ),\n310:         .penable_i ( pkt_penable ),\n311:         .pwrite_i  ( pkt_pwrite  ),\n312:         .paddr_i   ( pkt_paddr   ),\n313:         .psel_i    ( pkt_psel    ),\n314:         .pwdata_i  ( pkt_pwdata  ),\n315:         .prdata_o  ( pkt_prdata  ),\n316:         .pready_o  ( pkt_pready  ),\n317:         .pslverr_o ( pkt_pslverr ),\n318:         .reg_o     ( reg_bus_pkt )\n319:     );\n320: \n321:     pkt_wrapper #(\n322:     ) i_pkt_wrapper (\n323:         .clk_i              ( clk_i                  ),\n324:         .rst_ni             ( rst_ni                 ),\n325:         .pkey_loc_o         ( pkey_loc_o             ),\n326:         .external_bus_io    ( reg_bus_pkt            )\n327:     );\n328: \n329: /////////////////////////////////////////////////////////////////////////////////////////\n330: //    // ---------------\n331: //    // Peripheral Key Table (pkt)\n332: //    // ---------------\n333: //    logic                         pkt_req;\n334: //    logic [AXI_ADDRESS_WIDTH-1:0] pkt_addr;\n335: //    logic [AXI_DATA_WIDTH-1:0]    pkt_rdata;\n336: //\n337: //    axi2mem #(\n338: //        .AXI_ID_WIDTH   ( AXI_ID_WIDTH_SLAVES ),\n339: //        .AXI_ADDR_WIDTH ( AXI_ADDRESS_WIDTH   ),\n340: //        .AXI_DATA_WIDTH ( AXI_DATA_WIDTH      ),\n341: //        .AXI_USER_WIDTH ( AXI_USER_WIDTH      )\n342: //    ) i_axi2pkt (\n343: //        .clk_i  ( clk_i                   ),\n344: //        .rst_ni ( ndmreset_n              ),\n345: //        .slave  ( master[ariane_soc::PKT]),\n346: //        .req_o  ( pkt_req                  ),\n347: //        .we_o   (                         ),\n348: //        .addr_o ( pkt_addr                 ),\n349: //        .be_o   (                         ),\n350: //        .data_o (                         ),\n351: //        .data_i ( pkt_rdata                )\n352: //    );\n353: //\n354: //    pkt i_pkt (\n355: //        .clk_i      ( clk_i     ),\n356: //        .req_i      ( pkt_req   ),\n357: //        .addr_i     ( pkt_addr  ),\n358: //        .pkey_loc_o    ( rom2_addr )\n359: //    );\n360: //\n361: ///////////////////////////////////////////////////////////////////////////////////////\n362: //  Interface for AES (Similar to PLIC)\n363: \n364:     // ---------------\n365:     // 4. AES\n366:     // ---------------\n367: \n368:     REG_BUS #(\n369:         .ADDR_WIDTH ( 32 ),\n370:         .DATA_WIDTH ( 32 )\n371:     ) reg_bus_aes (clk_i);\n372:     \n373:     //logic [191:0] aes_key_in;\n374:     logic         aes_penable;\n375:     logic         aes_pwrite;\n376:     logic [31:0]  aes_paddr;\n377:     logic         aes_psel;\n378:     logic [31:0]  aes_pwdata;\n379:     logic [31:0]  aes_prdata;\n380:     logic         aes_pready;\n381:     logic         aes_pslverr;\n382: \n383:     axi2apb_64_32 #(\n384:         .AXI4_ADDRESS_WIDTH ( AxiAddrWidth  ),\n385:         .AXI4_RDATA_WIDTH   ( AxiDataWidth  ),\n386:         .AXI4_WDATA_WIDTH   ( AxiDataWidth  ),\n387:         .AXI4_ID_WIDTH      ( AxiIdWidth    ),\n388:         .AXI4_USER_WIDTH    ( AxiUserWidth  ),\n389:         .BUFF_DEPTH_SLAVE   ( 2             ),\n390:         .APB_ADDR_WIDTH     ( 32            )\n391:     ) i_axi2apb_64_32_aes (\n392:         .ACLK      ( clk_i          ),\n393:         .ARESETn   ( rst_ni         ),\n394:         .test_en_i ( 1'b0           ),\n395:         .AWID_i    ( aes.aw_id     ),\n396:         .AWADDR_i  ( aes.aw_addr   ),\n397:         .AWLEN_i   ( aes.aw_len    ),\n398:         .AWSIZE_i  ( aes.aw_size   ),\n399:         .AWBURST_i ( aes.aw_burst  ),\n400:         .AWLOCK_i  ( aes.aw_lock   ),\n401:         .AWCACHE_i ( aes.aw_cache  ),\n402:         .AWPROT_i  ( aes.aw_prot   ),\n403:         .AWREGION_i( aes.aw_region ),\n[TRUNCATED]",
+      "truncated": true
+    },
+    {
+      "step": 9,
+      "tool": "read_file",
+      "args": {
+        "limit": 90,
+        "offset": 440,
+        "path": "tb/ariane_peripherals.sv"
+      },
+      "status": "ok",
+      "path": "tb/ariane_peripherals.sv",
+      "error": null,
+      "content": "440:         .PWRITE    ( aes_pwrite    ),\n441:         .PADDR     ( aes_paddr     ),\n442:         .PSEL      ( aes_psel      ),\n443:         .PWDATA    ( aes_pwdata    ),\n444:         .PRDATA    ( aes_prdata    ),\n445:         .PREADY    ( aes_pready    ),\n446:         .PSLVERR   ( aes_pslverr   )\n447:     );\n448: \n449:     apb_to_reg i_apb_to_reg_aes (\n450:         .clk_i     ( clk_i        ),\n451:         .rst_ni    ( rst_ni       ),\n452:         .penable_i ( aes_penable ),\n453:         .pwrite_i  ( aes_pwrite  ),\n454:         .paddr_i   ( aes_paddr   ),\n455:         .psel_i    ( aes_psel    ),\n456:         .pwdata_i  ( aes_pwdata  ),\n457:         .prdata_o  ( aes_prdata  ),\n458:         .pready_o  ( aes_pready  ),\n459:         .pslverr_o ( aes_pslverr ),\n460:         .reg_o     ( reg_bus_aes )\n461:     );\n462: \n463:     aes_wrapper #(\n464:     ) i_aes_wrapper (\n465:         .clk_i              ( clk_i                  ),\n466:         .rst_ni             ( rst_ni                 ),\n467:         .key_in             (key_reg_out[0]          ),\n468:         .external_bus_io    ( reg_bus_aes            )\n469:     );\n470: \n471: ///////////////////////////////////////////////////////////////////////////////////////\n472:     // ---------------\n473:     // 2. UART\n474:     // ---------------\n475:     logic         uart_penable;\n476:     logic         uart_pwrite;\n477:     logic [31:0]  uart_paddr;\n478:     logic         uart_psel;\n479:     logic [31:0]  uart_pwdata;\n480:     logic [31:0]  uart_prdata;\n481:     logic         uart_pready;\n482:     logic         uart_pslverr;\n483: \n484:     axi2apb_64_32 #(\n485:         .AXI4_ADDRESS_WIDTH ( AxiAddrWidth ),\n486:         .AXI4_RDATA_WIDTH   ( AxiDataWidth ),\n487:         .AXI4_WDATA_WIDTH   ( AxiDataWidth ),\n488:         .AXI4_ID_WIDTH      ( AxiIdWidth   ),\n489:         .AXI4_USER_WIDTH    ( AxiUserWidth ),\n490:         .BUFF_DEPTH_SLAVE   ( 2            ),\n491:         .APB_ADDR_WIDTH     ( 32           )\n492:     ) i_axi2apb_64_32_uart (\n493:         .ACLK      ( clk_i          ),\n494:         .ARESETn   ( rst_ni         ),\n495:         .test_en_i ( 1'b0           ),\n496:         .AWID_i    ( uart.aw_id     ),\n497:         .AWADDR_i  ( uart.aw_addr   ),\n498:         .AWLEN_i   ( uart.aw_len    ),\n499:         .AWSIZE_i  ( uart.aw_size   ),\n500:         .AWBURST_i ( uart.aw_burst  ),\n501:         .AWLOCK_i  ( uart.aw_lock   ),\n502:         .AWCACHE_i ( uart.aw_cache  ),\n503:         .AWPROT_i  ( uart.aw_prot   ),\n504:         .AWREGION_i( uart.aw_region ),\n505:         .AWUSER_i  ( uart.aw_user   ),\n506:         .AWQOS_i   ( uart.aw_qos    ),\n507:         .AWVALID_i ( uart.aw_valid  ),\n508:         .AWREADY_o ( uart.aw_ready  ),\n509:         .WDATA_i   ( uart.w_data    ),\n510:         .WSTRB_i   ( uart.w_strb    ),\n511:         .WLAST_i   ( uart.w_last    ),\n512:         .WUSER_i   ( uart.w_user    ),\n513:         .WVALID_i  ( uart.w_valid   ),\n514:         .WREADY_o  ( uart.w_ready   ),\n515:         .BID_o     ( uart.b_id      ),\n516:         .BRESP_o   ( uart.b_resp    ),\n517:         .BVALID_o  ( uart.b_valid   ),\n518:         .BUSER_o   ( uart.b_user    ),\n519:         .BREADY_i  ( uart.b_ready   ),\n520:         .ARID_i    ( uart.ar_id     ),\n521:         .ARADDR_i  ( uart.ar_addr   ),\n522:         .ARLEN_i   ( uart.ar_len    ),\n523:         .ARSIZE_i  ( uart.ar_size   ),\n524:         .ARBURST_i ( uart.ar_burst  ),\n525:         .ARLOCK_i  ( uart.ar_lock   ),\n526:         .ARCACHE_i ( uart.ar_cache  ),\n527:         .ARPROT_i  ( uart.ar_prot   ),\n528:         .ARREGION_i( uart.ar_region ),\n529:         .ARUSER_i  ( uart.ar_user   ),",
+      "truncated": false
+    },
+    {
+      "step": 10,
+      "tool": "model_message",
+      "args": {},
+      "status": "ok",
+      "content": "{\n  \"scope_id\": \"rtl_permission_scope_debug_csr_peripherals\",\n  \"module2_inspection_results\": [\n    {\n      \"obligation_id\": \"PERM-DBG-JTAG-AUTH-001\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"External JTAG/debug requester through SimJTAG/TAP\",\n      \"operation\": \"read/write DMI registers and shift DMI responses out over TDO\",\n      \"object\": \"DMI request/response path into dm_top/dm_csrs, including debug CSRs and SBA controls\",\n      \"expected_guard\": \"DMI requests and returned response data should be gated by JTAG authentication such as jtag_key/pass_chk before dmi_req_valid_o can issue and before response data is shifted out.\",\n      \"observed_behavior\": \"Authentication exists but is incomplete. In dmi_jtag, DTM_READ is gated by pass_chk, but DTM_WRITE transitions to Write without checking pass_chk. dmi_req_valid is asserted in Write and Read states. Response data is captured into data_d on dmi_resp_valid and shifted through dmi_tdo/dr_q when DMIACCESS is selected, without pass_chk gating. dm_csrs also reports dmstatus.authenticated = 1'b1 unconditionally and has no pass_chk input.\",\n      \"path\": \"td_i/tck/tms -> dmi_jtag_tap DMIACCESS -> dmi_jtag dr_q/state_q -> dmi_cdc -> dm_top -> dm_csrs; response dm_csrs -> dmi_cdc -> dmi_jtag data_q/dr_q -> dmi_tdo -> dmi_jtag_tap td_o\",\n      \"state_condition\": \"pass_chk false/unauthenticated; dmi_access asserted by TAP IR DMIACCESS; update_dr with DTM_WRITE still enters Write; dmi_req_valid asserted; capture_dr/shift_dr can expose data_q over TDO.\",\n      \"impact\": \"An unauthenticated JTAG requester can issue DMI writes and can potentially receive/shift stale or returned DMI data, enabling debug CSR/SBA control despite an apparent key check.\",\n      \"rtl_evidence\": [\n        \"src/debug/dmi_jtag.sv:106-114: Idle state accepts dmi_access/update_dr; read checks pass_chk, write does not.\",\n        \"src/debug/dmi_jtag.sv:125-146: Read and Write states assert dmi_req_valid.\",\n        \"src/debug/dmi_jtag.sv:132-136: dmi_resp_valid loads dmi_resp.data into data_d.\",\n        \"src/debug/dmi_jtag.sv:187-205: dmi_tdo = dr_q[0]; shift_dr shifts DMI register when dmi_access, no pass_chk condition.\",\n        \"src/debug/dmi_jtag.sv:263-281: dmi_cdc forwards jtag_dmi_valid_i to core_dmi_valid_o.\",\n        \"src/debug/dmi_jtag_tap.sv:175-185 and 201-205: DMIACCESS selects dmi_access_o and dmi_tdo_i to TDO.\",\n        \"src/debug/dm_csrs.sv:168-172: dmstatus.authenticated hardwired to 1'b1.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM-DBG-HALT-AUTH-002\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"External debugger via JTAG/DMI\",\n      \"operation\": \"halt, resume, enter debug mode, and control debug CSRs/commands\",\n      \"object\": \"haltreq_o, resumereq_o, debug_req_o, dmcontrol state, csr_regfile debug_mode_q/dpc/dscratch\",\n      \"expected_guard\": \"Halt/resume/debug-mode entry should require authorized DMI/debug access plus legal dmactive and hart-selection state.\",\n      \"observed_behavior\": \"dm_csrs accepts DMControl writes directly from DMI and drives haltreq/resumereq from dmcontrol_q. No pass_chk or authorization input reaches dm_csrs/dm_top. dm_top forwards haltreq/resumereq to dm_mem, which drives debug_req_o. csr_regfile enters debug mode whenever debug_req_i is asserted with a valid committed instruction. The only upstream authentication is the incomplete dmi_jtag read-only pass_chk gate; unauthenticated DMI writes can program DMControl.\",\n      \"path\": \"JTAG DMI write -> dmi_jtag Write state -> dmi_cdc -> dm_top.dmi_req_i -> dm_csrs DMControl write -> haltreq_o/resumereq_o -> dm_mem -> debug_req_o -> csr_regfile.debug_req_i -> debug_mode_q\",\n      \"state_condition\": \"dmactive asserted or being written; selected_hart selected from hartsel; pass_chk false; DMControl write with haltreq/resumereq bits.\",\n      \"impact\": \"An unauthenticated external requester can request halt/resume or force debug entry, changing processor execution state and enabling access to debug-mode state.\",\n      \"rtl_evidence\": [\n        \"src/debug/dmi_jtag.sv:110-114: only DTM_READ checks pass_chk; DTM_WRITE does not.\",\n        \"src/debug/dm_csrs.sv:307-315: DMControl write assigns dmcontrol_d = dmi_req_i.data.\",\n        \"src/debug/dm_csrs.sv:460-467: haltreq_o/resumereq_o are driven from dmcontrol_q for selected_hart.\",\n        \"src/debug/dm_csrs.sv:470: dmactive_o = dmcontrol_q.dmactive.\",\n        \"src/debug/dm_top.sv:102-148: dm_csrs connected to DMI and hart-control signals.\",\n        \"src/debug/dm_top.sv:173-188: dm_mem consumes haltreq/resumereq and drives debug_req_o.\",\n        \"src/csr_regfile.sv:640-650: debug_req_i causes debug_mode_d=1 and set_debug_pc_o=1.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM-DBG-SBA-RANGE-003\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"Debug Module SBA requester controlled through DMI\",\n      \"operation\": \"debug-initiated system-bus read/write, read-on-address/data, and autoincrement\",\n      \"object\": \"System bus address space reachable from sbaddress/sbdata through dm_sba AXI master\",\n      \"expected_guard\": \"SBA should require authorized debug access and enforce address/range/access-type policy for protected memory/peripheral regions.\",\n      \"observed_behavior\": \"dm_csrs exposes sbaddress, sbdata, sbreadonaddr, sbreadondata, sbautoincrement and sbaccess fields from DMI-visible registers. dm_top connects these directly to dm_sba, which drives the AXI master port. The inspected RTL shows no address-range or privilege/security attribute check on sbaddress, autoincrement, or read/write access. The only visible SBA guard is dmactive_i into dm_sba and sberror/busy handling; dm_sba internals were not available in the listed visible files.\",\n      \"path\": \"DMI write/read -> dm_csrs SBA register decode -> sbaddress/sbdata/control signals -> dm_top.i_dm_sba -> axi_m_req_o -> testharness slave[1]/SoC fabric\",\n      \"state_condition\": \"dmactive set; sbreadonaddr/sbreadondata/sbautoincrement enabled; arbitrary sbaddress and sbaccess values; pass_chk false possible due DMI write bypass.\",\n      \"impact\": \"Debug SBA can initiate AXI transactions to the SoC address map without visible range mediation, potentially reading/writing protected memory/peripherals such as ROM2/AES/PLIC/DRAM.\",\n      \"rtl_evidence\": [\n        \"src/debug/dm_csrs.sv:153-159: sbautoincrement_o, sbreadonaddr_o, sbreadondata_o, sbaccess_o, sbdata_o, sbaddress_o directly assigned from sbcs_q/sbaddr_q/sbdata_q.\",\n        \"src/debug/dm_csrs.sv:363-407: DMI writes update SBCS, SBAddress0/1, SBData0/1 and generate write-valid signals.\",\n        \"src/debug/dm_csrs.sv:254-290: DMI reads can access SBCS, SBAddress, and SBData; SBData0 read asserts sbdata_read_valid_o.\",\n        \"src/debug/dm_top.sv:150-170: dm_sba receives SBA controls and drives axi_req_o/axi_resp_i.\",\n        \"tb/ariane_testharness.sv:215: debug AXI master connected via axi_master_connect to slave[1].\",\n        \"tb/ariane_soc_pkg.sv:54-66: SoC map includes Debug, ROM, ROM2, PKT, CLINT, PLIC, UART, AES, SPI, Ethernet, GPIO, DRAM bases.\"\n      ]\n    },\n    {\n      \"obligation_id\": \"PERM-DM-BUSY-RACE-004\",\n      \"status\": \"candidate_violation\",\n      \"subject\": \"DMI requester\",\n      \"operation\": \"update command/SBA/control state while operations are busy or across reset/active transitions\",\n      \"object\": \"dm_csrs state: dmcontrol, command, abstractauto, progbuf/data, sbaddr_d, sbdata_d, resp_queue_data/FIFO, cmdbusy/sbbusy, dmactive_o, ndmreset_o\",\n      \"expected_guard\": \"Busy operations should block or error configuration writes; reset/dmactive changes should clear stale responses and permission-bearing state.\",\n      \"observed_behavior\": \"Abstract command paths mostly check cmdbusy and set CmdErrBusy. However, SBA busy handling sets sbbusyerror but then unconditionally executes a following begin block that updates SBCS/SBAddress/SBData and can assert SBA valid signals even while sbbusy_i is true. DMControl writes are accepted withou\n[TRUNCATED]",
+      "truncated": true
+    }
+  ]
+}

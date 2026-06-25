@@ -1,0 +1,391 @@
+{
+  "scope_id": "current_rtl_permission_scope",
+  "obligations": [
+    {
+      "obligation_id": "PERM-DBG-001",
+      "reason": "Visible RTL contains a complete JTAG/DMI debug path, jtag_key/pass_chk signals, and debug control outputs. The analysis should verify that debug commands cannot reach hart-control outputs unless the authentication/authorization guard is actually used on the command path.",
+      "subject": "external debug requester",
+      "operation": "trigger halt/resume or enter debug mode",
+      "object": "hart debug entry/control state (debug_req_o, haltreq_o, resumereq_o, debug_mode_q, dpc/dscratch debug CSRs)",
+      "expected_guard": "DMI/JTAG operations that can halt/resume harts or enter debug mode should be gated by an explicit debug authentication/authorization condition, such as pass_chk/jtag_key validation and/or lifecycle/test authorization, before asserting debug_req_o/haltreq_o/resumereq_o.",
+      "candidate_path": "JTAG TAP -> dmi_jtag -> dm_top/dm_csrs -> debug control outputs -> csr_regfile debug_req_i/debug_mode_q",
+      "state_conditions_to_check": [
+        "pass_chk value and reset/update behavior",
+        "testmode_i influence on TAP/DMI path",
+        "dmactive_o/dmi_rst_ni/reset gating",
+        "selected_hart/hartsel validity",
+        "cmdbusy or error handling during command issuance"
+      ],
+      "required_evidence_slots": [
+        "subject: external JTAG/DMI requester via tck/tms/td_i or SimJTAG/SimDTM",
+        "operation: DMI write/read selecting debug control registers or issuing commands",
+        "object: haltreq/resumereq/debug_req/debug_mode state",
+        "expected guard: pass_chk/jtag_key/lifecycle/test authorization",
+        "observed behavior: RTL condition driving request/control outputs",
+        "path/reachability: TAP to DMI to dm_csrs/dm_top to csr_regfile",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/csr_regfile.sv",
+        "tb/ariane_testharness.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer lists jtag_key and pass_chk but does not show assignments or whether they gate all DMI operations."
+    },
+    {
+      "obligation_id": "PERM-DBG-SBA-002",
+      "reason": "dm_csrs exposes sbaddress_o, sbdata_o, sbreadonaddr_o, sbreadondata_o, sbdata_write_valid_o and dm_top instantiates dm_sba with AXI connectivity. Debug SBA is a high-risk alternate master path requiring authorization and address mediation.",
+      "subject": "debug module system bus master",
+      "operation": "read/write system bus via debug SBA",
+      "object": "system bus memory and MMIO reachable through sbaddress/sbdata and AXI master signals",
+      "expected_guard": "System bus access from the debug module should be authorized by debug authentication and constrained by address/range/access-policy checks or SoC fabric permissions before reads/writes to protected memory/MMIO regions are issued.",
+      "candidate_path": "DMI/JTAG -> dm_csrs system bus access registers -> dm_sba in dm_top -> AXI master interface -> SoC memory/peripherals",
+      "state_conditions_to_check": [
+        "dmactive_o and dmi reset state",
+        "sbbusy_i handling and writes during active transfers",
+        "sbautoincrement behavior across address boundaries",
+        "sbreadonaddr/sbreadondata automatic reads",
+        "sberror_valid_i/sberror_i policy/error generation",
+        "AXI address width/truncation or bridge decode behavior"
+      ],
+      "required_evidence_slots": [
+        "subject: DMI/JTAG requester",
+        "operation: SBA read or write through sbaddress/sbdata registers",
+        "object: AXI-addressed memory/peripheral region",
+        "expected guard: debug auth plus range/policy check",
+        "observed behavior: conditions creating req/we/addr/wdata on dm_sba/AXI",
+        "path/reachability: DMI register writes to AXI master interface",
+        "impact: ability to read/write protected regions if unmediated",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dmi_jtag.sv",
+        "tb/ariane_testharness.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "The dm_sba module implementation is instantiated but not present in the fact-layer file list; analysis may need to inspect available connections and any imported implementation."
+    },
+    {
+      "obligation_id": "PERM-DBG-CMD-003",
+      "reason": "dm_csrs exposes command-valid, data paths, hart status, and selected_hart state. The analysis should check that command execution and data exposure are not driven merely by DMI writes without authorization and target-state mediation.",
+      "subject": "external DMI requester",
+      "operation": "execute abstract command or read/write debug data",
+      "object": "hart architectural/debug state reachable through cmd_valid_o, data_o/data_i, cmderror, halted/resumeack status",
+      "expected_guard": "Abstract debug commands and data register accesses should require active authenticated debug mode, target-hart availability/selection checks, and command-busy/error mediation before exposing or modifying hart/register state.",
+      "candidate_path": "DMI/JTAG -> dm_csrs command/data registers -> abstract command outputs -> hart/debug memory interface",
+      "state_conditions_to_check": [
+        "selected_hart/hartsel_o bounds for NrHarts",
+        "halted_i/unavailable_i/resumeack_i checks",
+        "cmdbusy_i and cmderror_valid_i sequencing",
+        "dmactive reset/clear semantics",
+        "resp_queue_full/empty behavior for DMI responses"
+      ],
+      "required_evidence_slots": [
+        "subject: DMI/JTAG requester",
+        "operation: command/data register read or write",
+        "object: selected hart register/debug state",
+        "expected guard: authenticated active debug session plus halted/available/cmdready conditions",
+        "observed behavior: cmd_valid_o/data_o/data_valid_i/cmd error logic",
+        "path/reachability: DMI case decode to command/data outputs",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dm_top.sv",
+        "src/debug/dmi_jtag.sv",
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control",
+        "state lifecycle"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer shows command/data/control ports but not the decode details or downstream abstract command implementation."
+    },
+    {
+      "obligation_id": "PERM-CSR-PRIV-004",
+      "reason": "csr_regfile has CSR address/data inputs, read_access_exception, csr_we, privilege-related umode_i, debug_mode_q, and many protected CSR state registers/outputs that affect trap routing, translation, interrupts, debug, and cache behavior. The visible RTL should be checked for complete privilege mediation at decode and write sites.",
+      "subject": "software executing CSR operations",
+      "operation": "read/write privileged CSR",
+      "object": "privileged CSRs: mtvec, medeleg, mideleg, mie/mip, mstatus-derived controls, satp/asid, dpc, dscratch0/1, cache-enable CSRs, performance CSRs",
+      "expected_guard": "Writes and reads of privileged CSRs should be mediated by current privilege/mode checks (including umode_i, debug_mode_q, CSR address privilege encoding, read/write access exceptions) and by debug-mode-only rules for dpc/dscratch/dcsr-like state.",
+      "candidate_path": "csr_regfile CSR decode/write path (csr_addr_i, csr_we, csr_wdata_i) -> machine/supervisor/debug CSRs and permission outputs",
+      "state_conditions_to_check": [
+        "umode_i and any supervisor/machine privilege indicators",
+        "read_access_exception and illegal write exception generation",
+        "csr_we gating for all CSR update cases",
+        "debug_mode_q gating for dpc/dscratch/debug CSRs",
+        "reset defaults for permission-affecting CSRs",
+        "mret/sret/dret mode-transition updates"
+      ],
+      "required_evidence_slots": [
+        "subject: software CSR instruction path with current privilege/debug state",
+        "operation: CSR read/write",
+        "object: specific privileged CSR/register/output",
+        "expected guard: privilege level/debug mode/CSR access exception",
+        "observed behavior: decode/write-enable/read-mux conditions",
+        "path/reachability: csr_addr_i to state update/read data",
+        "impact: changed access policy, trap vector, translation or debug state",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Debug / JTAG / Test Access",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer only lists selected CSR-related signals; exact privilege decode must be inspected in source."
+    },
+    {
+      "obligation_id": "PERM-CSR-VM-005",
+      "reason": "The CSR regfile exports multiple signals that directly control address translation and supervisor/user memory permissions. The analysis should verify that their update paths are restricted by privilege and that mode transitions cannot unintentionally enable unsafe access policy.",
+      "subject": "software CSR requester",
+      "operation": "configure memory translation/access policy",
+      "object": "virtual-memory and memory-permission policy state (satp_ppn_o, asid_o, en_translation_o, en_ld_st_translation_o, SUM, MXR, MPRV, TVM/TW/TSR)",
+      "expected_guard": "Only appropriately privileged software should modify translation and memory-access policy controls; supervisor actions that machine mode can restrict via TVM/TW/TSR-like controls should be blocked when the corresponding restriction bits are set.",
+      "candidate_path": "csr_regfile writes to satp/mstatus controls -> en_translation_o/en_ld_st_translation_o/sum_o/mxr_o/tvm_o/tw_o/tsr_o/satp_ppn_o/asid_o",
+      "state_conditions_to_check": [
+        "umode_i/supervisor/machine mode encoding",
+        "mret/sret updates to privilege and MPRV-like behavior",
+        "tvm_o/tw_o/tsr_o derivation and use",
+        "SUM/MXR reset and write behavior",
+        "satp mode/PPN/ASID write masks",
+        "flush_o behavior after policy changes"
+      ],
+      "required_evidence_slots": [
+        "subject: software CSR write or return-from-trap operation",
+        "operation: write/modify translation policy CSR or mode bits",
+        "object: translation/access policy outputs",
+        "expected guard: machine/supervisor privilege and TVM/TW/TSR restrictions",
+        "observed behavior: update/use of satp, mstatus bits, en_translation logic",
+        "path/reachability: CSR decode to output signals",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/csr_regfile.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP",
+        "state lifecycle"
+      ],
+      "priority": "high",
+      "uncertainty": "Privilege-mode representation beyond umode_i is not fully visible in the fact layer."
+    },
+    {
+      "obligation_id": "PERM-RESET-DBG-006",
+      "reason": "The fact layer shows multiple reset domains and debug reset controls: dmi_rst_ni, dmi_reset_o, dmactive_o, ndmreset_o, test_logic_reset, rst_ni, and internal SBA/data registers. Reset/lifecycle handling is a common source of permission bypass or stale exposure.",
+      "subject": "debug/JTAG reset controller",
+      "operation": "reset, activate/deactivate debug module, clear debug state",
+      "object": "debug module active/reset state, DMI request/response state, SBA address/data registers, hart debug state",
+      "expected_guard": "External debug reset controls should be authorized and should not leave security-sensitive debug/SBA state active or stale after dmactive deassertion, dmi reset, non-debug reset, or ndmreset transitions.",
+      "candidate_path": "DMI/JTAG reset controls -> dm_csrs ndmreset_o/dmactive_o/dmi_reset -> top-level resets and csr_regfile/debug state",
+      "state_conditions_to_check": [
+        "dmactive_o reset default and clear behavior",
+        "ndmreset_o assertion conditions",
+        "dmi_rst_ni vs rst_ni domain crossing",
+        "dmi_reset_o/dmihardreset/dmireset behavior",
+        "sbaddr_d/sbdata_d/data registers after reset",
+        "debug_mode_q/dpc_q/dscratch reset or retention",
+        "response queue flush on reset"
+      ],
+      "required_evidence_slots": [
+        "subject: external JTAG/DMI requester or reset source",
+        "operation: assert/reset/clear debug module state",
+        "object: debug/SBA/control/data state",
+        "expected guard: authorization plus secure reset defaults/clearing",
+        "observed behavior: reset assignments and state retention",
+        "path/reachability: JTAG reset/DMI reset to affected registers and outputs",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/debug/dm_csrs.sv",
+        "src/debug/dmi_jtag.sv",
+        "src/debug/dmi_jtag_tap.sv",
+        "src/debug/dm_top.sv",
+        "src/csr_regfile.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Reset / Lifecycle / State Residue",
+        "Debug / JTAG / Test Access",
+        "state lifecycle"
+      ],
+      "priority": "medium",
+      "uncertainty": "Reset assignments are not included in the fact layer; source inspection required."
+    },
+    {
+      "obligation_id": "PERM-JTAG-KEY-007",
+      "reason": "The fact layer shows a jtag_key output from ariane_peripherals, a jtag_key input to dmi_jtag, ROM2 signals including pkey_loc_o, and APB-to-reg instances. The analysis should check whether the key source or key-location is writable/readable by unprivileged MMIO paths or has unsafe reset constants.",
+      "subject": "software/MMIO requester and external JTAG requester",
+      "operation": "configure/read/expose debug authentication key material or key pointer",
+      "object": "jtag_key and any ROM2/public-key/key-location data controlling debug authentication",
+      "expected_guard": "The JTAG authentication key or key-location/configuration registers should be protected from unauthorized APB/MMIO writes and reads, with reset defaults that do not enable debug access by default.",
+      "candidate_path": "ariane_peripherals APB/reg interfaces -> jtag_key output and ROM2 pkey_loc_o/rom2_rdata -> dmi_jtag jtag_key/pass_chk",
+      "state_conditions_to_check": [
+        "jtag_key reset/default value",
+        "whether jtag_key can be overwritten after boot or after lock",
+        "whether key value is readable on APB or other outputs",
+        "ROM2 we_i handling for supposed read-only key/code content",
+        "pkey_loc_o derivation and use",
+        "testmode_i influence on key check"
+      ],
+      "required_evidence_slots": [
+        "subject: APB/MMIO/software requester or external debug requester",
+        "operation: read/write key register or use key for pass check",
+        "object: jtag_key/pkey_loc_o/ROM2 key data",
+        "expected guard: privileged/locked write access and non-exposure of secret key",
+        "observed behavior: APB decode/register update/read mux and pass_chk derivation",
+        "path/reachability: APB/ROM2 to jtag_key to DMI auth",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_peripherals.sv",
+        "src/rom2/rom2.sv",
+        "src/debug/dmi_jtag.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control",
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "high",
+      "uncertainty": "The fact layer suggests key-related signals but does not include register map details or pass_chk computation."
+    },
+    {
+      "obligation_id": "PERM-ROM2-WP-008",
+      "reason": "rom2 has req_i, we_i, addr_i, wdata_i, and rdata_o despite being named ROM, and ariane_peripherals connects rom2_we/rom2_wdata/rom2_addr. The analysis should check whether write attempts are blocked and whether address decode restricts access to intended readers/writers.",
+      "subject": "SoC bus/APB requester",
+      "operation": "write or overwrite ROM/key/boot data",
+      "object": "ROM2 contents and outputs including rdata_o and pkey_loc_o-related material",
+      "expected_guard": "ROM2 or boot/key material should be read-only or write-protected for unauthorized masters; any write enable reaching rom2.we_i should be ignored or mediated by a privileged lifecycle/debug/programming guard.",
+      "candidate_path": "APB/AXI fabric in ariane_peripherals/testharness -> ROM2 instance -> rdata_o/pkey_loc_o and we_i",
+      "state_conditions_to_check": [
+        "rom2.we_i handling in rom2.sv",
+        "req_i/address alignment/bounds checks",
+        "reset/init contents and raddr_q behavior",
+        "address decode in ariane_peripherals around i_rom2",
+        "whether writes can affect pkey_loc_o/jtag_key-related data"
+      ],
+      "required_evidence_slots": [
+        "subject: bus master via APB/AXI/reg bridge",
+        "operation: write ROM2 address or read key/boot data",
+        "object: ROM2 memory/data output",
+        "expected guard: read-only enforcement or privileged programming guard",
+        "observed behavior: we_i use/ignore and memory update/read logic",
+        "path/reachability: bus decode to rom2_req/we/addr/wdata",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_peripherals.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Lock / Sticky Bit / Write Protection",
+        "Crypto / Secret State Exposure",
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "rom2 implementation is short but exact write behavior and bus decode must be inspected."
+    },
+    {
+      "obligation_id": "PERM-APB-AES-009",
+      "reason": "ariane_peripherals contains APB-to-reg bridges for AES and packet-related interfaces with aes_prdata/aes_pwdata/aes_pwrite/aes_psel and pkt_* signals. Even if implementation modules are external, visible wrapper decode should be checked for whether protected registers are globally accessible or mediated.",
+      "subject": "software/APB requester",
+      "operation": "read/write security-sensitive peripheral registers",
+      "object": "AES/key-related APB registers and other packet/security configuration registers connected through aes_* and pkt_* APB signals",
+      "expected_guard": "Security-sensitive peripheral register banks, especially AES/key/config/status paths, should require intended privilege/address mediation and should avoid exposing secret key/intermediate/plaintext state through APB read data unless explicitly permitted.",
+      "candidate_path": "APB-to-reg interfaces for packet/AES/peripheral regions -> protected crypto/config registers and read muxes",
+      "state_conditions_to_check": [
+        "APB address ranges for AES/pkt regions",
+        "psel/penable/pwrite gating",
+        "read data mux values for key or secret registers",
+        "write-enable masking or lock bits if present",
+        "reset defaults of control/enable registers"
+      ],
+      "required_evidence_slots": [
+        "subject: APB bus requester/software",
+        "operation: read or write AES/packet security register",
+        "object: key/config/plaintext/intermediate/status register or control signal",
+        "expected guard: privilege/range/lock/access-control check and read masking for secrets",
+        "observed behavior: APB decode/read mux/write enables in wrapper",
+        "path/reachability: bus bridge to target signals/modules",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Only wrapper-level signals and bridge instances are listed; target peripheral implementations may be outside scope."
+    },
+    {
+      "obligation_id": "PERM-FABRIC-010",
+      "reason": "The fact layer shows multiple AXI connect instances, debug master/slave wiring, AXI clock converters, SPI/Ethernet AXI slave signals including awprot/arprot-like attributes. The analysis should check address-range enforcement and security attribute preservation at visible wrapper boundaries.",
+      "subject": "AXI bus master (CPU/debug/peripheral)",
+      "operation": "route read/write transactions across fabric",
+      "object": "SoC address map regions reachable via AXI master/slave connects, including debug module, CLINT, boot ROM, peripherals, SPI/Ethernet bridges",
+      "expected_guard": "Bus fabric should preserve requester identity/security attributes and enforce address ranges so debug, DMA-like peripherals, or external-facing controllers cannot access protected memory/MMIO outside their authorized regions.",
+      "candidate_path": "AXI fabric connections for debug master/slave, peripherals, SPI/Ethernet -> address decode and prot/user attributes",
+      "state_conditions_to_check": [
+        "base/length constants in ariane_soc_pkg.sv",
+        "debug master connection to system fabric",
+        "AXI awprot/arprot/user signal handling or tie-offs",
+        "address truncation from 64-bit to 32-bit peripheral buses",
+        "overlapping address ranges",
+        "reset/enable of external-facing controllers"
+      ],
+      "required_evidence_slots": [
+        "subject: CPU, debug SBA master, or peripheral/DMA-like requester",
+        "operation: AXI read/write route",
+        "object: protected memory/MMIO region",
+        "expected guard: address decode, range check, requester/security attributes or PMP-like mediation",
+        "observed behavior: connect module wiring and decode constants",
+        "path/reachability: master to slave route",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "tb/ariane_peripherals.sv",
+        "src/debug/dm_top.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "Debug / JTAG / Test Access",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "medium",
+      "uncertainty": "Some connect module implementations are not in the provided file list; visible instantiation wiring and package constants should still be checked."
+    }
+  ]
+}

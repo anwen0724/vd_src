@@ -1,175 +1,129 @@
 {
-  "analysis_summary": "The RTL code under analysis contains an access control fabric for a RISC-V SoC (Ariane). The analysis identified two critical permission-related security vulnerabilities: (1) ROM2, which stores all security-critical keys (AES, JTAG, access control configuration) is fully writeable over the system bus without any privilege or access protection, allowing any bus master to overwrite secrets and access control rules; and (2) the access control connectivity mapping in the AXI node is driven from these writeable ROM2 registers, meaning the entire hardware-enforced access control scheme can be defeated by writing new values to ROM2.",
+  "analysis_summary": "Analyzed the RTL files under INPUT_SCOPE (src/rom2/rom2.sv, src/axi_node/src/axi_node_intf_wrap.sv, tb/ariane_soc_pkg.sv, tb/ariane_testharness.sv). The design implements an access control fabric where master-to-peripheral permissions are stored in ROM2 as 'secure' 192-bit keys. Two critical permission-related vulnerabilities were identified: (1) the 'secure_reg' inside ROM2 that holds access control keys is writable via the bus interface with no access restriction, allowing any bus master to overwrite the access control configuration; (2) ROM2 provides no bus-level write protection, meaning the access control keys can be modified at runtime, completely defeating the access control fabric and allowing privilege escalation to access all peripherals including AES and JTAG.",
   "findings": [
     {
       "finding_id": "F1",
       "status": "confirmed_finding",
-      "summary": "ROM2 secure key storage is freely writeable over the bus interface with no privilege check, allowing any bus master to overwrite AES keys, JTAG keys, and access control configuration.",
-      "vulnerability_category": "Insufficient Write Protection on Security-Critical Registers",
+      "summary": "ROM2 'secure_reg' holding access control keys is writable via the AXI bus interface, allowing unauthorized modification of access control permissions.",
+      "vulnerability_category": "Insufficient Access Control on Security-Critical Registers",
       "affected_locations": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 31,
-          "line_end": 35,
+          "line_start": 1,
+          "line_end": 48,
           "module": "rom2",
           "signal_or_register": "secure_reg"
         },
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 21,
-          "line_end": 25,
+          "line_start": 29,
+          "line_end": 32,
           "module": "rom2",
-          "signal_or_register": "mem (constant key values)"
-        },
-        {
-          "file": "tb/ariane_testharness.sv",
-          "line_start": 550,
-          "line_end": 550,
-          "module": "ariane_testharness",
-          "signal_or_register": "rom2_fuse"
-        },
-        {
-          "file": "tb/ariane_soc_pkg.sv",
-          "line_start": 55,
-          "line_end": 55,
-          "module": "ariane_soc",
-          "signal_or_register": "ROM2Base"
+          "signal_or_register": "secure_reg (write path)"
         }
       ],
       "evidence": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 30,
-          "line_end": 35,
+          "line_start": 23,
+          "line_end": 25,
           "module": "rom2",
-          "object": "always_ff block",
-          "evidence_type": "source_code",
-          "description": "The secure_reg is writeable when req_i && we_i is asserted: 'secure_reg[addr_i[$clog2(RomSize)-1+3:3]] <= wdata_i;' No privilege or authorization check is performed before allowing writes.",
-          "supports_claim": "Directly shows that secure_reg can be overwritten by any bus master that drives the req_i/we_i interface."
+          "object": "secure_reg",
+          "evidence_type": "code",
+          "description": "secure_reg is declared as an output, writable internally via always_ff block on write request",
+          "supports_claim": "Demonstrates that secure_reg is writable"
         },
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 15,
-          "line_end": 20,
+          "line_start": 29,
+          "line_end": 32,
           "module": "rom2",
-          "object": "mem constant array",
-          "evidence_type": "source_code",
-          "description": "ROM2 stores AES key (location 0), JTAG key (location 1), access control values for master 0 (location 2), and access control values for master 1 (location 3). These are all security-critical secrets.",
-          "supports_claim": "Confirms that ROM2 contains the root of trust keys and access control configuration."
-        },
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 27,
-          "line_end": 27,
-          "module": "rom2",
-          "object": "secure_reg output port",
-          "evidence_type": "source_code",
-          "description": "Module outputs 'output logic [3:0][191:0] secure_reg' which exposes the current key values externally, enabling them to be routed to access control logic.",
-          "supports_claim": "Shows that secure_reg values are exported to other modules (access control fabric)."
+          "object": "write logic",
+          "evidence_type": "code",
+          "description": "When we_i is high and req_i is asserted, wdata_i is written directly to secure_reg at the address-derived index with no access restriction or privilege check",
+          "supports_claim": "Shows the write path has no protection mechanism"
         },
         {
           "file": "tb/ariane_testharness.sv",
           "line_start": 550,
-          "line_end": 550,
+          "line_end": 555,
           "module": "ariane_testharness",
-          "object": "rom2_fuse port connection",
-          "evidence_type": "source_code",
-          "description": "ROM2's bus interface is connected as 'master[ariane_soc::ROM2]', making it accessible at address 0x0021_0000 on the AXI bus.",
-          "supports_claim": "Confirms ROM2 is memory-mapped and reachable over the system AXI bus."
+          "object": "ROM2 bus connection",
+          "evidence_type": "code",
+          "description": "ROM2 is connected as a regular AXI bus slave at master[ariane_soc::ROM2]; the access_ctrl_reg output feeds the access control system",
+          "supports_claim": "Shows ROM2 is bus-accessible and its outputs control access permissions"
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": 38,
+          "line_end": 40,
+          "module": "ariane_soc",
+          "object": "ROM2 address map",
+          "evidence_type": "code",
+          "description": "ROM2Base = 64'h0021_0000, ROM2Length = 64'h10000 — ROM2 is mapped in the memory space",
+          "supports_claim": "Confirms ROM2 is accessible in the address map"
         }
       ],
-      "reasoning_summary": "The ROM2 module has a dual purpose: it stores immutable key constants (JTAG key, AES key, access control rules) and provides a bus-writeable register interface to the exact same storage locations. The always_ff block on lines 30-35 allows writes to secure_reg when req_i is asserted and we_i is high, using the address directly to index the secure_reg array. There is no comparison against a privilege level, no lock mechanism, no write-once fuse behavior, and no authentication check. Since ROM2 is connected to the AXI bus at a well-known address (ROM2Base = 0x0021_0000), any bus master - including potentially untrusted software running on the CPU - can write to these locations and overwrite the AES key, JTAG key, and crucially the access control permissions that govern which masters may access which peripherals.",
-      "security_impact": "CRITICAL. An attacker with bus access can: (1) overwrite AES encryption keys, compromising data confidentiality; (2) overwrite JTAG keys, potentially gaining debug access; (3) overwrite access control rules to grant any master unrestricted access to all peripherals including AES engine, DRAM, Ethernet, SPI, UART, GPIO, etc. This completely bypasses the hardware access control fabric.",
+      "reasoning_summary": "The ROM2 module stores 192-bit keys that serve as the access control matrix for the entire SoC. The comment in the source states 'We can read and write initial 64 bits' and the RTL implements an unconditional write path: when we_i is asserted, wdata_i is written to secure_reg[addr-derived-index]. There is no privilege check, no write-once mechanism, no lock bit, and no bus-level write protection. Since ROM2 is mapped as a standard AXI slave at address 0x0021_0000 (ariane_soc::ROM2), any master that can issue a write transaction to this address range can overwrite the access control keys, including its own permission bits, thereby granting itself access to any peripheral. This directly undermines the entire access control fabric.",
+      "security_impact": "Critical: An attacker who can perform a bus write to the ROM2 address range can modify the access control keys and escalate privileges to access any peripheral (AES, JTAG, UART, SPI, Ethernet, etc.). The access control fabric can be completely bypassed, leading to unauthorized access to cryptographic keys (AES), debug interfaces (JTAG), and all other peripherals.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "The full test harness instantiations could not be completely examined due to tool limits. It is unclear whether there is additional write-protection logic external to ROM2 (e.g., in an AXI firewall) that restricts writes to the ROM2 address range. However, within the provided source files, no such protection is evident. Additionally, the internal logic of axi_node and how connectivity_map_o gates actual AXI transactions was not fully visible.",
+      "uncertainty_or_missing_evidence": "The test harness file was truncated; the full connection of access_ctrl_reg from ROM2's secure_reg to the AXI node was partially visible (line 555 .access_ctrl_reg( access_ctrl_reg )). The complete mapping between ROM2's 192-bit entries and the 48-bit access_ctrl_reg fields is not fully verified from the available evidence but the vulnerability of writable secure_reg is confirmed independently.",
       "recommended_follow_up": [
-        "Add write-protection (e.g., lock register, one-time-programmable fuse behavior) to ROM2 secure_reg to prevent runtime modification.",
-        "Implement privilege-level checking before allowing writes to ROM2.",
-        "Consider using actual fuses or ROM for immutable key storage rather than writeable registers.",
-        "Add a hardware locking mechanism that permanently disables writes to secure_reg after initial boot configuration.",
-        "Audit all bus paths to ROM2 to ensure no untrusted master can reach it."
+        "Implement a write-once or write-lock mechanism (e.g., a fuse-like lock bit) in ROM2 to prevent runtime modification of security-critical keys after initialization.",
+        "Consider making the security key registers read-only from the bus after initial load from a secure ROM/fuse source.",
+        "Add bus-level write protection (e.g., block write transactions to ROM2 address range in the AXI node or interconnect).",
+        "Verify that the access control keys loaded from ROM2 cannot be read back by untrusted masters (prevent read side-channel of security configuration).",
+        "Review the hardcoded constant key values in ROM2 — they appear to be default/public values which may themselves represent a security weakness if not overridden per chip."
       ]
     },
     {
       "finding_id": "F2",
       "status": "confirmed_finding",
-      "summary": "Access control connectivity map is derived from writeable ROM2 registers, meaning the entire access control fabric can be bypassed by rewriting the access control configuration in ROM2.",
-      "vulnerability_category": "Access Control Policy Bypass via Configurable Storage",
+      "summary": "Hardcoded default security keys in ROM2 source code expose access control and cryptographic key material in the RTL repository.",
+      "vulnerability_category": "Hardcoded Security Keys / Credentials in Source Code",
       "affected_locations": [
         {
-          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
-          "line_start": 430,
-          "line_end": 430,
-          "module": "connectivity_mapping",
-          "signal_or_register": "connectivity_map_o"
-        },
-        {
-          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
-          "line_start": 30,
-          "line_end": 31,
-          "module": "axi_node_intf_wrap",
-          "signal_or_register": "access_ctrl_i, priv_lvl_i"
-        },
-        {
-          "file": "tb/ariane_testharness.sv",
-          "line_start": 66,
-          "line_end": 66,
-          "module": "ariane_testharness",
-          "signal_or_register": "access_ctrl_reg"
-        },
-        {
-          "file": "tb/ariane_testharness.sv",
-          "line_start": 442,
-          "line_end": 450,
-          "module": "ariane_testharness",
-          "signal_or_register": "access_ctrl"
+          "file": "src/rom2/rom2.sv",
+          "line_start": 13,
+          "line_end": 22,
+          "module": "rom2",
+          "signal_or_register": "mem (const)"
         }
       ],
       "evidence": [
         {
-          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
-          "line_start": 430,
-          "line_end": 430,
-          "module": "connectivity_mapping",
-          "object": "assign connectivity_map_o[i][j]",
-          "evidence_type": "source_code",
-          "description": "The connectivity map between subordinates and managers is determined solely by access_ctrl_i indexed by priv_lvl_i: 'assign connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]);'",
-          "supports_claim": "Shows that the hardware access control decision is purely a lookup into the access_ctrl_i array."
-        },
-        {
-          "file": "tb/ariane_testharness.sv",
-          "line_start": 442,
-          "line_end": 472,
-          "module": "ariane_testharness",
-          "object": "access_ctrl derivation from access_ctrl_reg",
-          "evidence_type": "source_code",
-          "description": "access_ctrl is derived from access_ctrl_reg: 'assign access_ctrl[i][j] = access_ctrl_reg[i][4*j +: 4]'. access_ctrl_reg is a 2x48-bit register sourced from the 'secure_reg' output of ROM2.",
-          "supports_claim": "Establishes the data flow from ROM2's writeable secure_reg -> access_ctrl_reg -> access_ctrl -> connectivity_map_o."
+          "file": "src/rom2/rom2.sv",
+          "line_start": 13,
+          "line_end": 22,
+          "module": "rom2",
+          "object": "mem constant",
+          "evidence_type": "code",
+          "description": "Four 192-bit key values are hardcoded as constants: access control master 1 key, access control master 0 key, JTAG key, and AES key — all visible in plain text in the source code",
+          "supports_claim": "Shows all security keys are hardcoded as readable constants"
         },
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 16,
-          "line_end": 19,
+          "line_start": 1,
+          "line_end": 3,
           "module": "rom2",
-          "object": "mem[2] and mem[3]",
-          "evidence_type": "source_code",
-          "description": "ROM2 memory locations 2 and 3 contain access control values: '192'h...ff6fe00f, // 3rd location for Access control master 1' and '192'h...ff6ff00f, // 2nd location for Access control master 0'.",
-          "supports_claim": "Confirms that access control permissions are stored in the same writeable secure_reg array alongside AES and JTAG keys."
+          "object": "module header comment",
+          "evidence_type": "code",
+          "description": "Comment reads 'ROM2: Which have all the keys' — explicitly acknowledges this module holds all security keys",
+          "supports_claim": "Confirms ROM2 is the central key storage"
         }
       ],
-      "reasoning_summary": "The security architecture relies on ROM2 to store access control permissions that determine which bus masters can access which peripherals. The connectivity_mapping module in axi_node_intf_wrap uses access_ctrl_i (sourced from ROM2's secure_reg via access_ctrl_reg in the test harness) to compute connectivity_map_o, which is fed directly to the AXI node's cfg_connectivity_map_i. Since ROM2 is bus-writeable (Finding F1), an attacker can reprogram the access control bits to grant any master access to any peripheral, completely bypassing the hardware isolation. Additionally, the priv_lvl_i input (which selects which privilege level's permissions to apply) is also an external input, and if that can be manipulated, an attacker at a lower privilege level could use higher privilege permissions. There is also a hard-coded bypass in the connectivity logic: '|| ((j==6) && access_ctrl_i[i][7][priv_lvl_i])' which unconditionally gives access to manager index 6 (likely PLIC) if manager index 7 (likely CLINT) has access, which is a subtle policy coupling.",
-      "security_impact": "HIGH. An attacker who can write to ROM2 can reconfigure the entire SoC access control matrix, granting any bus master full access to all peripherals including AES, Ethernet, DRAM, SPI, etc. This defeats the purpose of the hardware access control fabric and breaks all security assumptions about peripheral isolation.",
+      "reasoning_summary": "The ROM2 module is described as storing 'all the keys' and contains a const logic array with four hardcoded 192-bit values used as default/reset values for: access control master keys, JTAG key, and AES key. These values are visible in the RTL source file and may be intended as production defaults or placeholders. Hardcoding security keys in source code violates secure development practices because anyone with access to the RTL repository can see these keys, and if they are used in production silicon without per-chip fusing, all instances would share the same keys. Combined with F1 (writable secure_reg), this means an attacker who knows the default keys can also verify their attack by reading the reset state.",
+      "security_impact": "High: If these keys are used in production silicon without per-chip overrides, the JTAG, AES, and access control keys are known to anyone with access to the source code (or silicon reverse engineering). This would allow unauthorized debug access, decryption of AES-protected data, and bypass of the access control fabric.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "The full path from ROM2 secure_reg output to access_ctrl_i on the axi_node_intf_wrap could not be fully traced within the available files as some intermediate modules (e.g., the module instantiated at line 550 with '.rom2_fuse') are not provided. The priv_lvl_i signal source (likely from the RISC-V core's privilege level) was not examined. Whether there are any additional AXI firewall protections between masters and ROM2 was not confirmed.",
+      "uncertainty_or_missing_evidence": "It is unclear whether the hardcoded values are intended only for simulation/verification and are overridden by per-chip fusing in production. The comment 'Replication of fuse' suggests an intended fuse-based override path, but no such mechanism is visible in the provided RTL. The production flow (fuse programming scripts, OTP controller) is outside the provided scope.",
       "recommended_follow_up": [
-        "Make ROM2 (and specifically the access control storage locations) read-only or write-once after boot.",
-        "Remove the hardcoded coupling between manager index 6 (PLIC) and index 7 (CLINT) access permissions or document it as intentional policy.",
-        "Consider moving access control configuration to true immutable storage (e-fuses, ROM) rather than writeable registers.",
-        "Add integrity checking (e.g., parity, ECC, or cryptographic signatures) to the access control configuration to detect tampering.",
-        "Review whether priv_lvl_i is trustworthy or can be spoofed by a less-privileged bus master."
+        "Ensure production silicon uses per-chip unique fuse values to override these defaults.",
+        "Remove hardcoded key values from the RTL source; use parameterized or externally-loaded (e.g., via OTP/eFuse controller) key inputs.",
+        "If the RTL is shared or open-source, ensure default keys are replaced with placeholders (e.g., all zeros) and documented as simulation-only.",
+        "Verify that the reset values of secure_reg are overwritten before any untrusted code can execute."
       ]
     }
   ],
-  "no_finding_reason": "There are confirmed security findings so this field is not applicable.",
-  "global_uncertainty": "The analysis is limited to the files provided under the input scope. The full AXI node internal logic, the module that instantiates ROM2 and bridges it to the AXI bus (referenced as '.rom2_fuse' in the test harness), and the RISC-V core's privilege level signals were not available. It is possible that additional AXI firewall logic exists outside the provided files that mitigates some of these issues. However, based on the available RTL, the vulnerabilities are confirmed and severe."
+  "no_finding_reason": "",
+  "global_uncertainty": "The test harness file (tb/ariane_testharness.sv) is large and was only partially read. The complete connectivity between ROM2's secure_reg[3:0][191:0] output and the access_ctrl_reg[1:0][47:0] signal is inferred from signal names and partial connection evidence (line 555: .access_ctrl_reg( access_ctrl_reg )). The exact bit slicing and mapping between the 192-bit ROM entries and the 48-bit access control registers is not fully verified from the visible source. Additionally, the broader SoC integration (ariane core, debug module, PLIC, CLINT) and any higher-level bus protections (e.g., ARM TrustZone, PMP, or IOMMU configurations) are not in scope and could provide additional defense layers. The scope only includes access control fabric related files, so privilege escalation through other paths (e.g., debug module, JTAG key bypass) cannot be fully assessed."
 }

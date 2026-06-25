@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from typing import Any, Callable
 
 from tools.file_tools import ReadSearchTools
 
@@ -11,7 +12,10 @@ from tools.file_tools import ReadSearchTools
 def build_langchain_file_tools(file_tools: ReadSearchTools):
     """Build LangChain tools backed by safe read/search-only file tools."""
 
-    from langchain_core.tools import tool
+    try:
+        from langchain_core.tools import tool
+    except ModuleNotFoundError:  # pragma: no cover - fallback for unit tests without LangChain installed.
+        tool = _local_tool
 
     @tool
     def list_dir(path: str = ".") -> str:
@@ -21,10 +25,10 @@ def build_langchain_file_tools(file_tools: ReadSearchTools):
         return json.dumps(asdict(result), ensure_ascii=False)
 
     @tool
-    def read_file(path: str) -> str:
+    def read_file(path: str, offset: int | None = None, limit: int | None = None) -> str:
         """Read a file under the current input scope."""
 
-        result = file_tools.read_file(path=path)
+        result = file_tools.read_file(path=path, offset=offset, limit=limit)
         return json.dumps(asdict(result), ensure_ascii=False)
 
     @tool
@@ -58,3 +62,16 @@ def build_langchain_file_tools(file_tools: ReadSearchTools):
         return json.dumps(asdict(result), ensure_ascii=False)
 
     return [list_dir, read_file, search_text]
+
+
+class _LocalTool:
+    def __init__(self, func: Callable[..., str]) -> None:
+        self.func = func
+        self.name = func.__name__
+
+    def invoke(self, args: dict[str, Any]) -> str:
+        return self.func(**args)
+
+
+def _local_tool(func: Callable[..., str]) -> _LocalTool:
+    return _LocalTool(func)

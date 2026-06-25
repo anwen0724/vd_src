@@ -1,39 +1,39 @@
 {
-  "analysis_summary": "Reviewed the RTL/source files under the provided scope for permission-related security issues. The visible source shows that ROM2 is used as a secure fuse/key store and as the source of access-control policy, but it exposes both read and write behavior through an AXI memory interface without local authorization checks. Because access-control registers are directly derived from ROM2 secure registers and then used by the AXI node permission/connectivity map, writes to ROM2 can alter SoC permissions. The AES wrapper also exposes its full ROM2-derived 192-bit key through readable registers.",
+  "analysis_summary": "The RTL/source under the provided scope contains permission-related security vulnerabilities. The primary issue is that ROM2 is used as a security-sensitive fuse/key/access-control store, but its contents are copied into mutable registers and exposed through a normal AXI/memory write path. Two ROM2 entries are explicitly labeled as access-control values and are wired into the SoC access-control matrix that drives the AXI node connectivity permissions. Therefore, a bus master that can write ROM2 can potentially modify the hardware permission policy. A second related issue is that sensitive key material is readable via bus-accessible paths, including direct ROM2 reads and AES wrapper registers that expose the full AES key. This can undermine permission/authentication mechanisms that rely on key secrecy, such as JTAG/debug access.",
   "findings": [
     {
       "finding_id": "PERM-001",
       "status": "confirmed_finding",
-      "summary": "ROM2 secure registers are writable through the AXI-facing memory path and directly drive the SoC access-control permission matrix.",
-      "vulnerability_category": "Permission bypass / mutable access-control policy storage",
+      "summary": "ROM2 stores access-control policy but exposes a bus-driven write path that can modify the registers used to configure AXI permissions.",
+      "vulnerability_category": "Improper access control / mutable security policy storage",
       "affected_locations": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 3,
-          "line_end": 13,
+          "line_start": 19,
+          "line_end": 20,
           "module": "rom2",
-          "signal_or_register": "secure_reg"
+          "signal_or_register": "mem"
         },
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 34,
-          "line_end": 40,
+          "line_start": 35,
+          "line_end": 41,
           "module": "rom2",
           "signal_or_register": "secure_reg"
-        },
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 47,
-          "line_end": 47,
-          "module": "rom2",
-          "signal_or_register": "rdata_o"
         },
         {
           "file": "tb/ariane_peripherals.sv",
-          "line_start": 204,
+          "line_start": 191,
+          "line_end": 212,
+          "module": "ariane_peripherals",
+          "signal_or_register": "rom2_fuse / rom2_req / rom2_we / key_reg_out"
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 216,
           "line_end": 217,
           "module": "ariane_peripherals",
-          "signal_or_register": "key_reg_out/access_ctrl_reg/jtag_key"
+          "signal_or_register": "access_ctrl_reg"
         },
         {
           "file": "tb/ariane_testharness.sv",
@@ -46,125 +46,127 @@
           "file": "src/axi_node/src/axi_node_intf_wrap.sv",
           "line_start": 430,
           "line_end": 430,
-          "module": "connectivity_mapping",
+          "module": "axi_node_intf_wrap",
           "signal_or_register": "connectivity_map_o"
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": 57,
+          "line_end": 57,
+          "module": "ariane_soc package",
+          "signal_or_register": "ROM2Base"
         }
       ],
       "evidence": [
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 1,
-          "line_end": 3,
+          "line_start": 19,
+          "line_end": 20,
           "module": "rom2",
-          "object": "ROM2 purpose comment",
-          "evidence_type": "source_comment",
-          "description": "ROM2 is described as containing all keys.",
-          "supports_claim": "Shows ROM2 is intended to hold security-sensitive key material."
+          "object": "mem",
+          "evidence_type": "source",
+          "description": "ROM2 stores access-control values for master 1 and master 0. Comments state that the first 4 bits correspond to peripheral 0, next 4 to peripheral 1, and so on.",
+          "supports_claim": "ROM2 contains access-control policy data, not merely ordinary memory."
         },
         {
           "file": "src/rom2/rom2.sv",
-          "line_start": 13,
-          "line_end": 13,
+          "line_start": 35,
+          "line_end": 41,
           "module": "rom2",
-          "object": "output logic [3:0][191:0] secure_reg",
-          "evidence_type": "source_code",
-          "description": "ROM2 exposes the secure register bank as an output port.",
-          "supports_claim": "Shows secure registers are externally visible to integration logic."
-        },
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 34,
-          "line_end": 34,
-          "module": "rom2",
-          "object": "secure_reg <= mem",
-          "evidence_type": "source_code",
-          "description": "On reset, secure_reg is initialized from constant fuse-like memory.",
-          "supports_claim": "Shows secure_reg stores the ROM2 key/access-control values."
-        },
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 37,
-          "line_end": 40,
-          "module": "rom2",
-          "object": "secure_reg[addr_i[$clog2(RomSize)-1+3:3]] <= wdata_i",
-          "evidence_type": "source_code",
-          "description": "After reset, a request with we_i asserted writes bus data directly into secure_reg indexed by address.",
-          "supports_claim": "Shows the secure register bank is writable without a local privilege, master, lock, or authorization check."
-        },
-        {
-          "file": "src/rom2/rom2.sv",
-          "line_start": 47,
-          "line_end": 47,
-          "module": "rom2",
-          "object": "assign rdata_o = (raddr_q < RomSize) ? secure_reg[raddr_q] : '0",
-          "evidence_type": "source_code",
-          "description": "ROM2 reads return secure_reg contents.",
-          "supports_claim": "Shows security-sensitive ROM2 contents are readable over the memory interface."
+          "object": "secure_reg write path",
+          "evidence_type": "source",
+          "description": "On reset, ROM2 copies constant fuse-like values into secure_reg, but after reset any req_i with we_i asserted writes wdata_i into secure_reg at a bus-derived address.",
+          "supports_claim": "The access-control/key store is mutable through the normal request/write interface without a visible authorization check."
         },
         {
           "file": "tb/ariane_peripherals.sv",
           "line_start": 191,
           "line_end": 212,
           "module": "ariane_peripherals",
-          "object": "i_axi2rom2 and i_rom2 connections",
-          "evidence_type": "source_code",
-          "description": "ROM2 is connected to AXI via axi2mem, with req/we/address/wdata/rdata connected to the rom2_fuse AXI slave path.",
-          "supports_claim": "Shows ROM2 is accessible through an AXI-facing memory path."
+          "object": "i_axi2rom2 and i_rom2",
+          "evidence_type": "source",
+          "description": "ariane_peripherals connects an AXI-facing axi2mem instance to the rom2 module, forwarding rom2_req, rom2_we, rom2_addr, and rom2_wdata into ROM2.",
+          "supports_claim": "ROM2 write controls are derived from the bus-facing interface."
         },
         {
           "file": "tb/ariane_peripherals.sv",
-          "line_start": 215,
+          "line_start": 216,
           "line_end": 217,
           "module": "ariane_peripherals",
-          "object": "jtag_key/access_ctrl_reg assignments from key_reg_out",
-          "evidence_type": "source_code",
-          "description": "ROM2 secure register outputs drive security-critical values: jtag_key and two access-control registers.",
-          "supports_claim": "Shows ROM2 secure register contents directly determine JTAG key and access-control policy."
+          "object": "access_ctrl_reg",
+          "evidence_type": "source",
+          "description": "Access-control registers are directly assigned from ROM2-derived key_reg_out entries.",
+          "supports_claim": "Modifying ROM2 secure_reg entries can modify the access-control registers."
         },
         {
           "file": "tb/ariane_testharness.sv",
           "line_start": 450,
           "line_end": 450,
           "module": "ariane_testharness",
-          "object": "assign access_ctrl[i][j] = access_ctrl_reg[i][4*j +: 4]",
-          "evidence_type": "source_code",
-          "description": "The test harness expands access_ctrl_reg bitfields into the access_ctrl permission matrix.",
-          "supports_claim": "Shows ROM2-derived access-control register bits become the active permission matrix."
+          "object": "access_ctrl",
+          "evidence_type": "source",
+          "description": "The test harness expands access_ctrl_reg into per-peripheral access-control fields.",
+          "supports_claim": "The ROM2-derived access-control registers become the SoC access-control matrix."
         },
         {
           "file": "src/axi_node/src/axi_node_intf_wrap.sv",
           "line_start": 430,
           "line_end": 430,
-          "module": "connectivity_mapping",
-          "object": "connectivity_map_o assignment",
-          "evidence_type": "source_code",
-          "description": "The AXI connectivity map is derived from access_ctrl_i indexed by current privilege level.",
-          "supports_claim": "Shows the ROM2-derived permission matrix controls AXI connectivity/permission decisions."
+          "module": "axi_node_intf_wrap",
+          "object": "connectivity_map_o",
+          "evidence_type": "source",
+          "description": "The AXI node connectivity map is generated directly from access_ctrl_i indexed by current privilege level, with a special case for PLIC/CLINT-related access.",
+          "supports_claim": "The access-control matrix controls bus connectivity/permissions."
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": 57,
+          "line_end": 57,
+          "module": "ariane_soc package",
+          "object": "ROM2Base",
+          "evidence_type": "source",
+          "description": "ROM2 is assigned a memory-mapped base address.",
+          "supports_claim": "ROM2 is part of the SoC memory map and can be addressed as a peripheral region."
         }
       ],
-      "reasoning_summary": "ROM2 acts as the root storage for both key material and access-control policy. However, its internal secure_reg array can be written via req_i/we_i/wdata_i without any local authorization, privilege-level, master-ID, lock-state, or write-once restriction. Integration code wires secure_reg entries into access_ctrl_reg, and the AXI node uses those bits to build the connectivity map by privilege level. Therefore, any actor able to reach ROM2 writes can modify the live permission policy and potentially grant itself or another master access to protected peripherals.",
-      "security_impact": "A malicious or compromised bus master that can issue writes to the ROM2 address range may alter access-control registers, bypass master/peripheral/privilege isolation, enable unauthorized peripheral access, modify the JTAG key, or corrupt AES key material. This undermines the SoC permission model because the root of the access-control policy is itself writable through a bus-facing interface.",
+      "reasoning_summary": "ROM2 is intended to hold security-sensitive fuse/key data and explicitly includes access-control entries. Those entries are copied to secure_reg and then used to drive access_ctrl_reg, which is expanded into the AXI node access-control matrix. However, secure_reg is writable whenever req_i and we_i are asserted, and these signals are connected to a bus-facing axi2mem path. No lock, privilege check, authentication check, write-once mechanism, or separation between fuse contents and mutable bus registers is visible. Therefore, any bus master with write access to the ROM2 region can potentially alter the permission policy enforced by the interconnect.",
+      "security_impact": "An attacker that can reach the ROM2 write path may modify access_ctrl_reg values and thereby change the AXI connectivity permissions. This can grant unauthorized access to protected peripherals such as AES, ROM2, debug, PLIC/CLINT, or other memory-mapped regions, undermining the hardware permission model.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "The visible source does not include the full implementation of the underlying axi_node or axi2mem modules, nor runtime software configuration. The files reviewed do not prove which masters can initially access ROM2 under the default policy. However, the ROM2 module itself lacks local enforcement, and the source directly shows writable security-policy storage feeding the AXI permission map.",
+      "uncertainty_or_missing_evidence": "The visible code does not fully prove which masters or privilege levels can initially access ROM2 under the default access-control values, and some instantiated IP such as axi2mem/axi_node internals are not present in full. However, no protection is visible inside ROM2 or the shown integration path, and ROM2 directly drives the permission matrix.",
       "recommended_follow_up": [
-        "Make ROM2 fuse-derived security registers read-only after reset or enforce one-time-programming semantics if mutation is required.",
-        "Add local authorization checks in ROM2 for any write path, independent of upstream interconnect policy.",
-        "Separate access-control policy storage from software-accessible memory space or protect it with immutable hardware policy.",
-        "Verify reset/default access_ctrl settings and prove no untrusted master can write ROM2 before policy is locked."
+        "Make ROM2 access-control/fuse contents immutable after reset or after a secure lock event.",
+        "Remove or strictly gate the ROM2 write path; require a hardware root-of-trust-only update mechanism if field updates are needed.",
+        "Ensure the ROM2 memory region itself is inaccessible to untrusted masters and lower privilege levels in the initial immutable access policy.",
+        "Add explicit hardware authorization checks for ROM2 writes, independent of the mutable access-control values stored in ROM2.",
+        "Consider separating access-control fuses from bus-readable/writable key storage and formally verifying that untrusted agents cannot modify the access matrix."
       ]
     },
     {
       "finding_id": "PERM-002",
       "status": "confirmed_finding",
-      "summary": "The AES wrapper exposes the full ROM2-derived 192-bit AES key through normal readable registers.",
-      "vulnerability_category": "Sensitive key disclosure through permissionless register read",
+      "summary": "Secret key material is readable via ROM2 and AES peripheral register interfaces.",
+      "vulnerability_category": "Sensitive key exposure / improper access control",
       "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 47,
+          "line_end": 47,
+          "module": "rom2",
+          "signal_or_register": "rdata_o / secure_reg"
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 215,
+          "line_end": 215,
+          "module": "ariane_peripherals",
+          "signal_or_register": "jtag_key"
+        },
         {
           "file": "tb/ariane_peripherals.sv",
           "line_start": 467,
           "line_end": 467,
           "module": "ariane_peripherals",
-          "signal_or_register": "key_reg_out[0]"
+          "signal_or_register": "key_in"
         },
         {
           "file": "src/aes/aes_wrapper.sv",
@@ -183,58 +185,69 @@
       ],
       "evidence": [
         {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 47,
+          "line_end": 47,
+          "module": "rom2",
+          "object": "rdata_o",
+          "evidence_type": "source",
+          "description": "ROM2 read data is assigned directly from secure_reg indexed by the captured read address.",
+          "supports_claim": "ROM2 key/access-control storage is readable through the ROM2 read interface."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 215,
+          "line_end": 215,
+          "module": "ariane_peripherals",
+          "object": "jtag_key",
+          "evidence_type": "source",
+          "description": "JTAG key is assigned from ROM2-derived key_reg_out.",
+          "supports_claim": "ROM2 contains a key used for JTAG/debug-related access."
+        },
+        {
           "file": "tb/ariane_peripherals.sv",
           "line_start": 467,
           "line_end": 467,
           "module": "ariane_peripherals",
-          "object": ".key_in (key_reg_out[0])",
-          "evidence_type": "source_code",
-          "description": "AES wrapper receives its key input from ROM2 secure register entry 0.",
-          "supports_claim": "Shows the AES key comes from ROM2 secure register storage."
+          "object": "key_in",
+          "evidence_type": "source",
+          "description": "AES wrapper receives key_in from ROM2-derived key_reg_out[0].",
+          "supports_claim": "AES key material is sourced from ROM2 secure storage."
         },
         {
           "file": "src/aes/aes_wrapper.sv",
           "line_start": 57,
           "line_end": 57,
           "module": "aes_wrapper",
-          "object": "assign key_big = key_in",
-          "evidence_type": "source_code",
-          "description": "AES wrapper assigns the external key input directly into key_big.",
-          "supports_claim": "Shows key_big is the ROM2-derived AES key."
+          "object": "key_big",
+          "evidence_type": "source",
+          "description": "AES wrapper assigns key_big directly from key_in.",
+          "supports_claim": "The key exposed by AES registers is the actual key input from ROM2."
         },
         {
           "file": "src/aes/aes_wrapper.sv",
           "line_start": 129,
           "line_end": 139,
           "module": "aes_wrapper",
-          "object": "external_bus_io.rdata = key_big[...] cases 16 through 21",
-          "evidence_type": "source_code",
-          "description": "AES read-side register map returns all six 32-bit chunks of the 192-bit key.",
-          "supports_claim": "Shows the full AES key is exposed through readable bus registers."
-        },
-        {
-          "file": "src/aes/aes_wrapper.sv",
-          "line_start": 49,
-          "line_end": 50,
-          "module": "aes_wrapper",
-          "object": "external_bus_io.ready/error assignments",
-          "evidence_type": "source_code",
-          "description": "AES wrapper always reports ready and no error on its register interface.",
-          "supports_claim": "Shows no local error response is generated for key-register accesses."
+          "object": "external_bus_io.rdata",
+          "evidence_type": "source",
+          "description": "AES wrapper read mux returns all six 32-bit slices of key_big on external_bus_io.rdata at readable register offsets.",
+          "supports_claim": "The AES key is readable through normal peripheral register reads."
         }
       ],
-      "reasoning_summary": "The AES key is security-sensitive material sourced from ROM2 secure registers. The AES wrapper maps key_big into readable register addresses 16 through 21, exposing the complete 192-bit key over the peripheral register bus. No local privilege check, lock bit, debug-only condition, or redaction is visible in the AES wrapper.",
-      "security_impact": "Any bus agent permitted to read the AES peripheral can recover the full AES key. This compromises confidentiality of data protected by the AES engine and undermines assumptions that ROM2-derived key material remains secret inside hardware.",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "The visible source does not prove which masters or privilege levels can access AES by default. Upstream AXI permissions may reduce exploitability for some actors, but the AES block itself contains no local protection against key readback.",
+      "reasoning_summary": "Key material from ROM2 is exposed on bus-readable paths. ROM2 directly returns secure_reg contents on reads, and the AES wrapper maps all 192 bits of key_big to readable registers. Because key_big is assigned from key_in and key_in is wired from ROM2-derived key_reg_out[0], the AES key can be read through the AES peripheral. ROM2 also feeds jtag_key, indicating that ROM2 stores debug/JTAG-related secrets. If these keys are used to authenticate privileged access, exposing them can enable permission bypass.",
+      "security_impact": "An attacker that can read ROM2 or the AES peripheral can extract AES key material and possibly JTAG/debug-related secrets. This may compromise encrypted data, enable debug authentication bypass, or weaken other key-based permission mechanisms.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The full default access matrix and the complete dmi_jtag implementation are not visible, so the exact set of agents that can read ROM2/AES and the exact use of jtag_key cannot be fully proven. The key exposure itself is explicit in the visible RTL.",
       "recommended_follow_up": [
-        "Remove key readback from the AES register map and return zero or an error for key register addresses.",
-        "Keep key material internal to the AES block or load it through a write-only/key-ladder path.",
-        "Add local access checks for sensitive AES status/debug registers if any must remain readable.",
-        "Verify that software-visible AES documentation and tests do not depend on key readback."
+        "Do not expose secret keys on bus-readable register maps; return zero or an error for key register reads.",
+        "Restrict ROM2 read access to only trusted hardware paths or remove direct software-visible reads of secret entries.",
+        "Separate public identifiers from secret keys; only expose non-sensitive key IDs to software.",
+        "Review JTAG/debug authentication logic to ensure the JTAG key cannot be read by software or untrusted masters.",
+        "Add access-control checks inside AES and ROM2 peripherals, not only at the external interconnect."
       ]
     }
   ],
   "no_finding_reason": "",
-  "global_uncertainty": "Analysis was limited to visible files under the provided scope and used only read/search inspection. The full implementations of some instantiated modules, runtime firmware behavior, and complete reset-time access policy behavior were not visible. Findings are based on direct source evidence in the scoped RTL."
+  "global_uncertainty": "The analysis is limited to files under the provided input scope. Some instantiated modules and external IP internals are not fully visible, including complete axi2mem/axi_node behavior and dmi_jtag authentication semantics. The findings are based on visible source evidence showing unprotected writable and readable paths in security-sensitive modules and their integration into the permission system."
 }

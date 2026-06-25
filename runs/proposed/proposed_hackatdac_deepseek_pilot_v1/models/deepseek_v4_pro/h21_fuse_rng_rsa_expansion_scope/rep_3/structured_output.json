@@ -1,0 +1,335 @@
+{
+  "analysis_summary": "The proposed method produced 6 finding(s) from 8 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "Debug mode bypass in rng_wrapper write path defeats reglk_ctrl lock protection for RNG polynomial registers.",
+      "vulnerability_category": "write / RNG wrapper's polynomial/seed configuration registers (e.g., poly128, seed) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any AXI master when debug_mode_i = 1 Operation: write Object: RNG wrapper's polynomial/seed configuration registers (e.g., poly128, seed) Expected guard: Lock bit (reglk_ctrl) should gate write enables; debug writes must be blocked when lock is set Observed behavior: The RNG wrapper's write path uses a debug_mode_i bypass: when debug_mode_i is high, writes proceed regardless of the lock bit. Path: AXI write request → rng_wrapper address decode → case(address[8:3]) write logic contains `debug_mode_i ? wdata : (reglk_ctrl_i[5] ? ...)` for polynomial registers Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "If debug_mode_i is asserted, the lock protection is completely bypassed, allowing unrestricted modification of RNG configuration/seed registers. This violates the expected guard that lock bits should always be enforced.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Debug mode bypass in rng_wrapper read path allows unrestricted reading of RNG seeds and intermediate entropy, defeating the reglk_ctrl lock.",
+      "vulnerability_category": "read / RNG seed registers (seed128_big_o, seed64_big_o, seed32_big_o, seed16_big_o) and internal rand_seg outputs / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any AXI master when debug_mode_i = 1 Operation: read Object: RNG seed registers (seed128_big_o, seed64_big_o, seed32_big_o, seed16_big_o) and internal rand_seg outputs Expected guard: Debug reads must be blocked for security-sensitive RNG internal registers; access should require authentication or be limited to non-debug mode Observed behavior: The RNG wrapper's read path uses a debug_mode_i bypass: when debug_mode_i is high, sensitive seed/state values are returned unconditionally, overriding the lock bit. Path: AXI read request → rng_wrapper address decode → read mux returns `debug_mode_i ? seedX_big_o : (reglk_ctrl_i[7] ? 0 : seedX_big_o)` for seed and `debug_mode_i ? rand_seg : (reglk_ctrl_i[7] ? 0 : rand_seg)` for intermediate values Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "If debug_mode_i is asserted, the lock is ignored and sensitive RNG internal state (seeds, LFSR outputs) are directly readable via AXI. This can compromise future random values.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "potential_warning",
+      "summary": "The reset tree connects to each wrapper (e.g., rst_10 to rng_wrapper, rst_13 to rsa_wrapper). Wrappers use these resets to initialize some internal registers, but the default values of reglk_ctrl, key registers, and RNG seeds are not visible in the inspected files.",
+      "vulnerability_category": "reset / Lock registers (reglk_ctrl), key registers in RSA, RNG seed, PKT state / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rsa/rsa_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rsa/rsa_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Reset sequence (rst_ni, rst_10, rst_13, rst_5, etc.) Operation: reset Object: Lock registers (reglk_ctrl), key registers in RSA, RNG seed, PKT state Expected guard: After reset, lock bits must default to locked; key/seed registers must be cleared Observed behavior: The reset tree connects to each wrapper (e.g., rst_10 to rng_wrapper, rst_13 to rsa_wrapper). Wrappers use these resets to initialize some internal registers, but the default values of reglk_ctrl, key registers, and RNG seeds are not visible in the inspected files. Path: Reset signals (rst_1..rst_13) generated in rst_wrapper → distributed to peripheral wrappers Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Cannot determine if the reset defaults are safe",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The reset values of reglk_ctrl, RSA/AES key registers, and RNG seed registers are not provided in the fact layer or tool observations. Full inspection of rst_wrapper, reglk_wrapper, and individual register declarations is required.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "DMA/noc masters can reach all peripheral registers without per-master privilege separation, relying solely on the core's privilege level.",
+      "vulnerability_category": "read/write / Peripheral registers of RSA, RNG, AES, HMAC, PKT, lock/account control / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: DMA/noc masters via noc2_* signals Operation: read/write Object: Peripheral registers of RSA, RNG, AES, HMAC, PKT, lock/account control Expected guard: Address range or security attribute check to restrict DMA/noc accesses to non-security registers Observed behavior: Each peripheral's noc_axilite_bridge directly maps noc2_data to the peripheral's AXI interface without any per-request privilege or security attribute. The acct_ctrl_i is statically tied to the core's priv_lvl_i, not to the DMA master's privilege. Path: buf_ariane_*_noc2_data_i → noc_axilite_bridge → peripheral_axi_req → peripheral wrapper with acct_ctrl_i = acc_ctrl_c[priv_lvl_i][i] Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "A DMA master could access security-critical peripherals if the core is in a privileged mode. The lack of separate DMA privilege checking or address-range restrictions violates the expected guard.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Full details of the DMA engine's privilege handling and NoC routing are outside the provided scope; the violation assumes that DMA can issue requests while the core's priv_lvl_i is in a privileged mode.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "RSA wrapper lacks completion gating on msg_out reads; intermediate cryptographic state is exposed when the lock bit is not set.",
+      "vulnerability_category": "read / Intermediate RSA computation state (msg_out, mod_exp_finish_o) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/rsa/rsa_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rsa/rsa_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/rsa/rsa_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rsa/rsa_wrapper.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: AXI read request (ariane_axi or debug master) Operation: read Object: Intermediate RSA computation state (msg_out, mod_exp_finish_o) Expected guard: Reads should return only final result or zero until completion, with no debug override Observed behavior: The RSA wrapper's read path exposes msg_out and exe_finish_o (as mod_exp_finish_o) using only the lock bit reglk_ctrl[3] as a guard. There is no check of the computation completion status; if the lock bit is not set, the intermediate msg_out can be read at any time. Path: AXI read to rsa_wrapper → case(address[10:3]) returns reglk_ctrl_i[3] ? 0 : msg_out[...] for addresses 131-194, and returns exe_finish_o at address 195 without completion gating Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker who can keep the lock bit unset can monitor msg_out during modular exponentiation, recovering intermediate state and potentially the decrypted result before completion.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "DMA/noc master can read bootrom if the core's privilege level permits it, with no separate DMA authentication or address-range restriction.",
+      "vulnerability_category": "read / Bootrom content (rom_rdata) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: DMA/noc master via noc_axilite_bridge, debug master (blocked) Operation: read Object: Bootrom content (rom_rdata) Expected guard: Bootrom reads from non-core sources must be blocked or require authentication; bootrom should be outside debug-accessible space Observed behavior: Debug master is blocked (OBL-001). However, the DMA/noc path through the bootrom's noc_axilite_bridge leads to the same axi2rom interface, which gates rom_req with acc_ctrl_c[priv_lvl_i][0] (line 517). This gate is based on the core's privilege level, not the DMA master's identity. Hence a DMA transaction can read bootrom if the core's priv_lvl_i allows it. Path: buf_ariane_bootrom_noc2_data_i → noc_axilite_bridge → br_master → axi2rom → rom_req_acct & acc_ctrl_c[priv_lvl_i][0] → bootrom instance → rom_rdata Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "DMA can read the bootrom content whenever the core is in a privileged mode, bypassing intended source-based restrictions.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

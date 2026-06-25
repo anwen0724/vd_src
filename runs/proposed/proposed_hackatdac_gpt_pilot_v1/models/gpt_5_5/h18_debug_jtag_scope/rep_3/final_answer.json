@@ -1,0 +1,741 @@
+{
+  "analysis_summary": "The proposed method produced 7 finding(s) from 8 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "potential_warning",
+      "summary": "AXI debug BIU/module can generate AXI master read/write requests from JTAG-selected commands without any visible authentication, lifecycle, or address-range guard inside the inspected AXI debug module/BIU; however SoC-level reachability of adv_dbg_if AXI master into the current PULPissimo integration was not confirmed by the provided observations.",
+      "vulnerability_category": "read/write via AXI master: adbg_axi_module transitions from STATE_idle to STATE_Rbegin/STATE_Wready when module_cmd && module_select_i && update_dr_i && burst_read/burst_write; adbg_axi_biu latches addr_i/data_i/wr_reg on strobe_i && rdy_o and issues AXI valid/ready handshakes / AXI address supplied by JTAG/debug command, exposed on axi_master_ar_addr/axi_master_aw_addr; potential SoC AXI address space if integrated / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external JTAG/debug requester using TAP-selected debug module signals (module_select_i/update_dr_i/capture_dr_i/shift_dr_i) Operation: read/write via AXI master: adbg_axi_module transitions from STATE_idle to STATE_Rbegin/STATE_Wready when module_cmd && module_select_i && update_dr_i && burst_read/burst_write; adbg_axi_biu latches addr_i/data_i/wr_reg on strobe_i && rdy_o and issues AXI valid/ready handshakes Object: AXI address supplied by JTAG/debug command, exposed on axi_master_ar_addr/axi_master_aw_addr; potential SoC AXI address space if integrated Expected guard: debug authentication/authorization or lifecycle/debug-enable gating before JTAG-originated AXI read/write transactions are issued Observed behavior: No auth, lifecycle, privilege, or address-range predicate is shown in the inspected AXI issue path. The start condition is strobe_i && rdy_o in adbg_axi_biu and module_cmd && module_select_i && update_dr_i in adbg_axi_module. AXI addresses are directly assigned from addr_reg; attributes are fixed constants. Reset makes rdy_o high, enabling a later strobe. Path: TAP/debug selection -> adbg_axi_module -> adbg_axi_biu -> axi_master_* ports. Internal chain is evidenced; current SoC/top-level connection to protected AXI targets remains uncertain. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If the AXI debug master is connected to the SoC fabric, an external JTAG actor could read or write arbitrary reachable AXI locations, including protected memory/registers, without the expected debug authorization or range policy.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Top-level integration of adv_dbg_if/adbg_top AXI master into pulpissimo was not established by observations; search observations for adv_dbg_if/jtag_axireg were empty despite fact-layer modules. Downstream AXI address map and target protection are not shown.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "The JTAG LINT debug path is connected into pulp_soc as a master on s_lint_debug_bus and can issue LINT read/write requests based on JTAG scan/control signals without any visible debug authentication or address-range/access policy in lint_jtag_wrap, adbg_lintonly_top, adbg_lint_module, or adbg_lint_biu.",
+      "vulnerability_category": "read/write via LINT debug bus: lint_req_o/lint_wen_o/lint_add_o/lint_wdata_o/lint_be_o / pulp_soc s_lint_debug_bus and downstream LINT/TCDM/local interconnect targets reachable from that bus / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external JTAG LINT debug requester driving tck_i/tdi_i and TAP-derived jtag_shift/update/capture/axireg_sel signals Operation: read/write via LINT debug bus: lint_req_o/lint_wen_o/lint_add_o/lint_wdata_o/lint_be_o Object: pulp_soc s_lint_debug_bus and downstream LINT/TCDM/local interconnect targets reachable from that bus Expected guard: debug authorization plus address-range/access policy restricting JTAG LINT requests to permitted debug regions Observed behavior: lint_jtag_wrap directly instantiates adbg_lintonly_top and connects its lint_req/add/wen/wdata/be outputs to jtag_lint_master. In pulp_soc, i_lint_jtag connects jtag_lint_master to s_lint_debug_bus. adbg_lint_biu latches addr/data/be on strobe_i && rdy_o and assigns them directly to lint_add_o/lint_wdata_o/lint_be_o; lint_aux_o is tied to zero. No auth, lifecycle, debug enable, or range check is visible in the wrapper/BIU evidence. Path: External JTAG TAP signals in pulp_soc -> lint_jtag_wrap -> adbg_lintonly_top -> adbg_lint_module/adbg_lint_biu -> s_lint_debug_bus Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An external JTAG user could issue debug LINT transactions into the SoC debug/local interconnect path and potentially read or modify reachable memory/register targets without the expected authorization or range restriction.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Downstream LINT/TCDM address decode and any later interconnect access matrix were not provided; exact protected target set is unknown.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "The TAP/debug selection path can route scan traffic to debug output based on public JTAG instruction selection, with reset defaulting to IDCODE but update_ir loading arbitrary shifted instructions including DEBUG; no authentication/lifecycle predicate is visible before debug_select/TDO routing.",
+      "vulnerability_category": "select/enable debug module and route scan data over TDO / debug_select/debug_tdo_i routing and downstream bus-master-capable debug modules / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "rtl/pulpissimo/jtag_tap_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "rtl/pulpissimo/jtag_tap_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external JTAG TAP controller driven by TMS/TCK/TDI/TRST Operation: select/enable debug module and route scan data over TDO Object: debug_select/debug_tdo_i routing and downstream bus-master-capable debug modules Expected guard: only authorized or lifecycle-enabled debug instructions should select bus-master/debug modules; unselected modules should not drive TDO or issue transactions Observed behavior: JTAG IR resets to IDCODE, but update_ir loads jtag_ir from TDI. TDO mux routes debug_tdo_i whenever latched_jtag_ir equals DEBUG. No auth/debug-enable/lifecycle condition appears in the observed decode or TDO mux. TDO output enable is shift_ir | shift_dr. Path: adbg_tap_top JTAG pads -> jtag_ir/latched_jtag_ir decode -> DEBUG case selecting debug_tdo_i; debug_select_o is a visible TAP output in the module interface. PULPissimo jtag_tap_top similarly provides axireg_sel_o and scan output to debug wrapper without an auth input in the shown port list. Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An external JTAG actor can select the debug scan path and thereby enable downstream debug bus access or readback paths without an authorization gate, making later AXI/LINT debug operations externally reachable.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Full definition of DEBUG opcode in adbg_tap_defines.v was truncated after the supported-instruction list; complete debug_select_o assignment logic was not shown. However observed TDO mux establishes DEBUG instruction routing.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "potential_warning",
+      "summary": "OR1K debug modules and CPU debug/status ports exist in the fact layer and adv_dbg_if/adbg_top interfaces, but current SoC connectivity and detailed OR1K BIU/status-control behavior were not sufficiently observed to determine whether JTAG-originated CPU control is reachable or guarded.",
+      "vulnerability_category": "read/write/control CPU debug state through cpu_addr/data/stall/stb/we/rst/status signals / CPU debug registers/status/control and execution halt/reset controls / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "static_facts",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "static_facts",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external JTAG OR1K debug requester, if OR1K module is TAP-selected and connected Operation: read/write/control CPU debug state through cpu_addr/data/stall/stb/we/rst/status signals Object: CPU debug registers/status/control and execution halt/reset controls Expected guard: CPU halt/debug authorization and privilege/lifecycle gating before reading/writing CPU registers or controlling execution Observed behavior: Fact layer lists adbg_or1k_module, adbg_or1k_biu, and adbg_or1k_status_reg. adv_dbg_if/adbg_top expose CPU debug signals including cpu_stall_o, cpu_stb_o, cpu_we_o, cpu_rst_o. Only a partial status_reg read was provided; no complete evidence of auth guard, OR1K FSM behavior, or top-level CPU connection was provided. Path: Potential path is TAP -> adbg_top/adbg_or1k_module -> adbg_or1k_biu/status_reg -> CPU debug interface, but reachability in current PULPissimo configuration was not closed. Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If connected, unauthorized external JTAG control of OR1K/CPU debug state could halt/reset execution or read/write CPU-visible debug resources without lifecycle/privilege approval.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need complete OR1K module/BIU/status_reg behavior, reset values, status set/clear conditions, module_select/strobe guards, and top-level CPU connectivity.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "Debug read data from AXI/LINT BIUs is latched into module shift-register/TDO paths and externally routed by the TAP when the debug instruction/path is selected, with no visible authorization guard. Readback is conditioned on transaction readiness/validity but not on permission to observe protected data.",
+      "vulnerability_category": "capture and shift read data over module_tdo_o/TDO / AXI/LINT bus response data and debug internal error/status data; potentially protected memory/register contents if reachable downstream / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lintonly_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lintonly_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: external TDO observer/JTAG requester Operation: capture and shift read data over module_tdo_o/TDO Object: AXI/LINT bus response data and debug internal error/status data; potentially protected memory/register contents if reachable downstream Expected guard: readback of protected data should require authorization and should not expose stale/unauthorized data after errors, reset, or deselection Observed behavior: AXI BIU latches read data when !wr_reg && axi_master_r_valid; LINT BIU latches read data when data_o_en is asserted from response FSM. AXI module selects BIU data into data_out_shift_reg in read-status/read-burst states and shifts it to module TDO; TAP mux routes debug_tdo_i to tdo_pad_o for DEBUG instruction. Resets clear BIU data registers, but no auth guard is visible for TDO readout. Path: AXI/LINT response data -> data_out_reg/data_o -> adbg_*_module data_out_shift_reg/module_tdo_o -> debug_tdo_i/dbg_axi_scan_out_i -> TAP TDO Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An external JTAG observer could extract contents returned by reachable SoC bus reads, including sensitive memory or MMIO data, without a debug authorization check; stale-data risk is reduced by reset clearing but not by permission enforcement.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Full shift-register reset/deselection behavior for all modules and downstream protected target identity are not fully shown. OR1K read-data path was not inspected in detail.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "potential_warning",
+      "summary": "Observed reset behavior generally clears debug data/state registers and selects IDCODE in the TAP, but reset does not implement or require reauthorization before later debug selection/transactions. Cross-domain and top-level lifecycle/debug-enable reset integration is not sufficiently evidenced.",
+      "vulnerability_category": "reset/transition into or out of debug-accessible state / debug select/instruction state, transaction FSMs, ready/data/error/status registers / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_tap_top.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_biu.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG reset/system reset environment using trstn_i/trstn_pad_i and SoC rstn_i/axi_aresetn Operation: reset/transition into or out of debug-accessible state Object: debug select/instruction state, transaction FSMs, ready/data/error/status registers Expected guard: reset/debug mode transitions should not enable debug access by default or leave authorized/readable stale state after reset Observed behavior: TAP reset/test_logic_reset sets latched_jtag_ir to IDCODE and TDO low; AXI module resets module_state to STATE_idle and internal error register to zero; AXI and LINT BIUs reset latched addr/data/write state to zero and rdy_o to 1. These are mostly safe defaults for stale state, but rdy_o=1 permits a subsequent unauthenticated strobe and no explicit authorization state or lifecycle recheck is visible. Path: trstn_pad_i/trstn_i into TAP/modules and rstn_i/axi_aresetn into BIU clock domains Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If system policy expects debug to remain disabled after reset until authenticated, the observed design could become debug-accessible immediately after reset through normal JTAG selection; stale read-data exposure appears partly mitigated by data-register reset in inspected BIUs.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Need full top-level reset integration, lifecycle/test/debug-enable policy signals, OR1K status reset details, and all synchronizer/reset-domain behavior.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F7",
+      "status": "confirmed_finding",
+      "summary": "pulp_soc routes the JTAG LINT wrapper master directly onto s_lint_debug_bus without a visible wrapper-level requester-identity, debug authorization, or address-range check. The downstream address map/interconnect policy was not provided, but separation is not enforced at the observed crossing.",
+      "vulnerability_category": "route JTAG/debug requests into SoC buses / s_lint_debug_bus and downstream APB/L2/TCDM/ROM/peripheral regions reachable through the SoC interconnect / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG/debug bus master entering SoC interconnect through lint_jtag_wrap Operation: route JTAG/debug requests into SoC buses Object: s_lint_debug_bus and downstream APB/L2/TCDM/ROM/peripheral regions reachable through the SoC interconnect Expected guard: wrappers/interconnect should preserve requester identity and enforce separation between JTAG debug, CPU, DMA, and peripheral access domains Observed behavior: pulp_soc declares separate APB, memory, and XBAR_TCDM bus objects including s_lint_debug_bus and s_lint_jtag_bus. i_lint_jtag connects its XBAR_TCDM_BUS.Master directly to s_lint_debug_bus. lint_jtag_wrap passes adbg_lintonly_top outputs directly to the bus master. No observed signal carries authenticated requester identity or range policy in this crossing. Path: JTAG TAP outputs jtag_tck_i/jtag_axireg_tdi_i/jtag_axireg_sel_i -> pulp_soc.i_lint_jtag -> lint_jtag_wrap -> s_lint_debug_bus -> SoC interconnect Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "External JTAG requests can enter the SoC debug/local interconnect domain as bus transactions without wrapper-level permission enforcement, potentially bypassing intended separation from CPU/DMA/peripheral domains if downstream fabric accepts the debug master.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Need downstream interconnect/crossbar decode and access-matrix implementation to enumerate exact reachable targets and determine whether any later protection blocks access.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "1 evidence slot(s) remained incomplete after closure checking."
+}

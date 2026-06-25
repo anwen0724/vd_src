@@ -1,0 +1,338 @@
+{
+  "scope_id": "current_rtl_scope_permission_obligations",
+  "obligations": [
+    {
+      "obligation_id": "PERM_AES_READBACK_SECRET_STATE",
+      "reason": "The fact layer shows key_in is assigned to key_big and multiple external_bus_io.rdata cases return key_big slices and inter_state slices. This requires checking whether the visible RTL has any authorization or lock guard on these read addresses and whether the APB path makes them externally readable.",
+      "subject": "software-visible APB/register bus master through ariane_peripherals AES window",
+      "operation": "read/expose",
+      "object": "AES key input key_in/key_big and AES inter_state; also plaintext/state registers if treated as sensitive",
+      "expected_guard": "Key and intermediate AES state readback should be blocked or mediated by an explicit privilege/debug authorization/lock policy; only non-secret status/ciphertext should be software-readable unless the design intentionally exposes keys under a guard.",
+      "candidate_path": "APB/regbus -> aes_wrapper external_bus_io address decode -> external_bus_io.rdata",
+      "state_conditions_to_check": [
+        "reset values of state/start registers",
+        "ct_valid/start relationship if inter_state is read during operation",
+        "whether key_in is constant, fused, debug-only, or externally secret"
+      ],
+      "required_evidence_slots": [
+        "subject/requester on external_bus_io/APB path",
+        "read address decode values for key_big/inter_state cases",
+        "object signal source and sensitivity",
+        "expected guard and observed guard or absence",
+        "reachability from ariane_peripherals AES APB signals",
+        "source line locations for mux assignments"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/aes/aes_wrapper.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Crypto / Secret State Exposure",
+        "CSR / MMIO Access Control",
+        "evidence closure: subject, operation, object, guard, read mux, source locations"
+      ],
+      "priority": "high",
+      "uncertainty": "Need inspect complete aes_wrapper port/interface declarations and ariane_peripherals AES instantiation/address mapping to confirm external reachability and any upstream privilege filtering."
+    },
+    {
+      "obligation_id": "PERM_AES_CONFIG_TRIGGER_WRITE_GUARD",
+      "reason": "The fact layer shows external_bus_io.wdata writes directly update start, p_c, and state registers. Check whether this control/configuration path is intentionally accessible and whether any privilege/lock/address guard mediates writes.",
+      "subject": "software-visible APB/register bus master",
+      "operation": "write/configure/trigger",
+      "object": "AES control start and data/state input registers p_c[0:3], state[0:3]",
+      "expected_guard": "Writes that configure cryptographic operation state or trigger AES should be limited to authorized software context or protected by peripheral access-control/lock policy, and address decode should prevent unintended writes.",
+      "candidate_path": "APB/regbus -> aes_wrapper external_bus_io write path -> p_c/state/start registers -> AES core",
+      "state_conditions_to_check": [
+        "reset default of start/p_c/state",
+        "whether start self-clears or can remain asserted",
+        "whether writes during active AES operation are blocked"
+      ],
+      "required_evidence_slots": [
+        "write enable and address decode",
+        "subject/requester path from APB bridge",
+        "object registers updated",
+        "guard conditions used in write always block",
+        "impact on AES core inputs/start",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/aes/aes_wrapper.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need complete write-case conditions and interface signals; fact layer indicates assignments but not enclosing if/case guards."
+    },
+    {
+      "obligation_id": "PERM_JTAG_DMI_DEBUG_ACCESS_AUTH",
+      "reason": "The testharness contains SimJTAG, dmi_jtag, SimDTM, debug_req signals, ndmreset, and AXI master debug connections. Check whether the debug subject can reach protected assets and whether authorization or lifecycle/test_en gates the path.",
+      "subject": "JTAG/DMI debug requester",
+      "operation": "read/write/control via debug",
+      "object": "SoC memory/peripheral address space including bootrom, rom2, AES registers, and privileged control state reachable via debug",
+      "expected_guard": "JTAG/DMI debug access to protected memory/peripheral regions should be mediated by debug authentication/authorization, lifecycle/test mode, or access-control policy before issuing core debug requests or AXI master transactions.",
+      "candidate_path": "JTAG/SimDTM/dmi_jtag -> debug module/AXI master connections -> SoC memory/peripheral/ROM address map",
+      "state_conditions_to_check": [
+        "reset and ndmreset behavior",
+        "test_en/init_done conditions",
+        "debug_req_valid/ready and dmi_req_valid reachability",
+        "whether debug remains active in normal mode"
+      ],
+      "required_evidence_slots": [
+        "debug subject source signals/instances",
+        "debug request/response handshake path",
+        "AXI master/slave connection path",
+        "protected object address decode",
+        "authorization/test/lifecycle guard use",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "tb/ariane_peripherals.sv",
+        "bootrom/bootrom.sv",
+        "src/rom2/rom2.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Fabric / Address Map / DMA / PMP",
+        "evidence closure"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer does not include full debug module internals; visible wrapper wiring must be inspected for gating and reachability."
+    },
+    {
+      "obligation_id": "PERM_DEBUG_RESET_STATE_RESIDUE",
+      "reason": "The testharness exposes ndmreset/ndmreset_n from debug-related logic, while AES and peripheral state have reset behavior. Check whether debug reset can be asserted without authorization and whether reset clears sensitive state or accidentally enables access paths.",
+      "subject": "JTAG/DMI debug requester or test harness reset logic",
+      "operation": "reset/override",
+      "object": "resettable protected state including AES state registers, key exposure path, debug control, and peripheral configuration",
+      "expected_guard": "Debug-triggered reset should not leave protected security state, keys, or access-control state in an unsafe or observable residue condition; reset assertion should be authorized or limited to debug-enabled lifecycle.",
+      "candidate_path": "Debug ndmreset/test reset path -> SoC/core/peripheral reset -> protected state after reset",
+      "state_conditions_to_check": [
+        "rst_ni and ndmreset_n sequencing",
+        "AES p_c/state/start reset values",
+        "key_in/key_big behavior across reset",
+        "debug_req_core after reset"
+      ],
+      "required_evidence_slots": [
+        "ndmreset source and sink",
+        "authorization guard for reset generation",
+        "list of protected registers reset/retained",
+        "observable outputs after reset",
+        "mode/test conditions",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_testharness.sv",
+        "src/aes/aes_wrapper.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Reset / Lifecycle / State Residue",
+        "Crypto / Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need inspect reset generator connections and whether key_in is resettable or external."
+    },
+    {
+      "obligation_id": "PERM_AXI_NODE_PRIV_RANGE_MEDIATION",
+      "reason": "The wrapper has priv_lvl_i, connectivity_mapping, multiple master/slave AXI channel valid/ready signals, and pass-through assignments for aw/ar attributes. Check whether routing decisions use privilege and address ranges on both read and write paths and whether any path bypasses connectivity_mapping.",
+      "subject": "AXI manager/master interface requester",
+      "operation": "route/read/write",
+      "object": "AXI subordinate regions and protected peripheral/memory windows routed through axi_node_intf_wrap",
+      "expected_guard": "AXI routing should enforce address-range and privilege/access rules consistently for read and write channels, preserving aw/ar protection attributes and priv_lvl_i decisions before asserting valid to protected subordinates.",
+      "candidate_path": "AXI node wrapper master/slave interface -> subordinate address decode/connectivity_mapping -> protected subordinate ports",
+      "state_conditions_to_check": [
+        "priv_lvl_i values and transitions",
+        "test_en_i effects",
+        "simultaneous read/write channel behavior",
+        "default route/error response for unauthorized addresses"
+      ],
+      "required_evidence_slots": [
+        "requester/master identity",
+        "aw/ar address and prot signal propagation",
+        "connectivity_mapping logic and priv_lvl_i use",
+        "subordinate valid generation guards",
+        "read/write symmetry",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Fact layer is truncated for axi node later assignments; complete module must be inspected for actual address decode and privilege checks."
+    },
+    {
+      "obligation_id": "PERM_TEST_ENABLE_BYPASS_CHECK",
+      "reason": "Visible ports/signals include test_en_i in axi_node_intf_wrap and test_en in ariane_testharness. Check if test_en affects access-control decisions, reset, scan/debug routing, or valid/ready gating and whether it is properly constrained.",
+      "subject": "test interface or harness control",
+      "operation": "override/bypass",
+      "object": "AXI routing mediation and debug/test access policy",
+      "expected_guard": "Test enable should only be asserted in authorized test/lifecycle mode and must not bypass normal privilege/range checks or expose protected assets in functional mode.",
+      "candidate_path": "test_en_i/test_en -> axi_node_intf_wrap and test/debug structures -> routing or reset/authorization bypass",
+      "state_conditions_to_check": [
+        "test_en reset/default",
+        "test_en relationship to lifecycle/init_done",
+        "whether test_en can toggle during active transfers"
+      ],
+      "required_evidence_slots": [
+        "test_en source",
+        "test_en sinks",
+        "logic affected by test_en",
+        "protected object reachable under test_en",
+        "normal-mode vs test-mode guard",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/axi_node/src/axi_node_intf_wrap.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "Debug / JTAG / Test Access",
+        "Fabric / Address Map / DMA / PMP",
+        "Common false-positive risks"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need full testharness and axi node logic to see if test_en is connected or hardwired."
+    },
+    {
+      "obligation_id": "PERM_ROM2_KEY_LOCATION_READ_WRITE_GUARD",
+      "reason": "The fact layer shows rom2 has req/we/addr/wdata/rdata and ariane_peripherals includes pkey_loc_o and rom2 APB/regbus signals. Check whether protected ROM data or key location is readable by unprivileged software and whether we_i is ignored or guarded.",
+      "subject": "software-visible APB/register bus master",
+      "operation": "read/write/expose",
+      "object": "rom2 contents and pkey_loc_o/key-location output",
+      "expected_guard": "ROM-resident key locations or protected constants should be read-only and only exposed to authorized requesters or through intended non-secret outputs; write inputs to ROM should be ignored or rejected with error.",
+      "candidate_path": "APB/regbus -> rom2 instance -> rom2 rdata_o / pkey_loc_o outputs",
+      "state_conditions_to_check": [
+        "reset behavior of pkey_loc_o if registered",
+        "out-of-range address response",
+        "write request behavior when we_i asserted"
+      ],
+      "required_evidence_slots": [
+        "rom2 address decode and rdata assignments",
+        "pkey_loc_o assignment/use",
+        "we_i handling or rejection",
+        "upstream APB requester path",
+        "expected privilege/lock guard",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "src/rom2/rom2.sv",
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Crypto / Secret State Exposure",
+        "Lock / Sticky Bit / Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need inspect rom2 contents/assignments and ariane_peripherals mapping to know sensitivity and reachability."
+    },
+    {
+      "obligation_id": "PERM_BOOTROM_IMMUTABILITY_AND_RANGE",
+      "reason": "bootrom exposes req_i/we_i/addr_i/wdata_i and rdata_o, with raddr_q derived from addr_i and rdata_o range check. Check whether write enable is ignored or safely handled, whether req_i gates address capture/read, and whether address-range errors are mediated upstream.",
+      "subject": "SoC bus requester via bootrom interface",
+      "operation": "read/write",
+      "object": "bootrom mem contents and rdata_o",
+      "expected_guard": "Boot ROM should be immutable after synthesis and writes through we_i should be ignored/rejected; reads should be limited to intended boot address range and not expose unintended memory outside RomSize.",
+      "candidate_path": "SoC AXI/regbus -> bootrom instance -> bootrom read/write interface",
+      "state_conditions_to_check": [
+        "reset/initial contents",
+        "raddr_q update when req_i low",
+        "out-of-range rdata behavior",
+        "write transaction response"
+      ],
+      "required_evidence_slots": [
+        "we_i usage or non-use",
+        "req_i gating of raddr_q",
+        "rdata range behavior",
+        "upstream requester/address map",
+        "error/ready response for invalid/write access",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "bootrom/bootrom.sv",
+        "tb/ariane_testharness.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Lock / Sticky Bit / Write Protection",
+        "Reset / Lifecycle / State Residue"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need inspect complete bootrom always blocks and testharness connection/adapter behavior."
+    },
+    {
+      "obligation_id": "PERM_APB_PERIPHERAL_WINDOW_ACCESS_CONTROL",
+      "reason": "The peripherals module contains multiple apb_to_reg instances and APB signal sets. Check decode boundaries, psel generation, and whether security-sensitive windows such as interrupt control or AES are behind privilege/range checks.",
+      "subject": "SoC bus requester reaching APB peripherals",
+      "operation": "read/write/configure",
+      "object": "APB-mapped peripheral control/status registers including PLIC, packet, AES, UART",
+      "expected_guard": "Peripheral register windows with security-sensitive controls should have address decode, psel/penable/pwrite correctness, and privilege/range mediation consistent with the SoC policy; protected registers should not be writable/readable by unintended requesters.",
+      "candidate_path": "APB bridges in ariane_peripherals -> PLIC/packet/AES/UART peripheral register windows",
+      "state_conditions_to_check": [
+        "overlapping decode ranges",
+        "default slave/error on unmapped addresses",
+        "read vs write handling differences",
+        "reset defaults of exposed control registers"
+      ],
+      "required_evidence_slots": [
+        "address map constants",
+        "APB psel/penable/pwrite generation",
+        "per-peripheral requester path",
+        "protected register identification",
+        "privilege/range guard evidence",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_peripherals.sv",
+        "tb/ariane_soc_pkg.sv"
+      ],
+      "knowledge_used": [
+        "CSR / MMIO Access Control",
+        "Fabric / Address Map / DMA / PMP"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need inspect ariane_peripherals address decode and package constants."
+    },
+    {
+      "obligation_id": "PERM_EXTERNAL_IO_AXI_WINDOW_GUARD",
+      "reason": "The fact layer shows SPI and Ethernet AXI slave signals and external pins. Check whether these windows are correctly decoded and mediated, especially if they can cause external data exfiltration or network/SPI configuration changes.",
+      "subject": "SoC AXI requester",
+      "operation": "read/write/configure/route",
+      "object": "SPI and Ethernet AXI slave control/data registers and external IO pins",
+      "expected_guard": "DMA-capable or externally observable peripheral register windows should preserve AXI protection attributes and be accessible only through intended ranges/privilege; external IO configuration should not be alterable by unauthorized requesters.",
+      "candidate_path": "AXI clock converter / SPI / Ethernet AXI slave windows -> external IO-capable peripherals",
+      "state_conditions_to_check": [
+        "reset defaults of external IO enables",
+        "active transfer while configuration changes",
+        "address overlap with protected regions"
+      ],
+      "required_evidence_slots": [
+        "AXI address decode for SPI/Ethernet",
+        "aw/ar prot propagation or filtering",
+        "write/read valid gating",
+        "external IO impact path",
+        "error response on unauthorized access",
+        "source locations"
+      ],
+      "files_or_modules_to_inspect": [
+        "tb/ariane_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Fabric / Address Map / DMA / PMP",
+        "CSR / MMIO Access Control"
+      ],
+      "priority": "low",
+      "uncertainty": "Third-party IP internals may not be visible; focus on wrapper decode and signal mediation."
+    }
+  ]
+}

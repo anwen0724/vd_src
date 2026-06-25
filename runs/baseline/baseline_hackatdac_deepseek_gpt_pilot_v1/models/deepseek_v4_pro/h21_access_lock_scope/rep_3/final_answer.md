@@ -1,16 +1,80 @@
 {
-  "analysis_summary": "Analysis of the RTL under 'piton/design/chip/tile/ariane/' reveals a system with access control (acct_wrapper) and register locking (reglk_wrapper) mechanisms that gate AXI transactions to security-sensitive peripherals (HMAC, PKT, etc.). Multiple permission-related security vulnerabilities were identified: a register-lock bypass due to a coding error in reglk_wrapper.sv, override of lock protections via we_flag inputs in riscv_peripherals.sv and acct_wrapper.sv, unvalidated privilege-level input used as a direct index into access control arrays, and a potential width mismatch in the access control output assignment. These issues can allow an attacker to bypass hardware-enforced access restrictions and modify or read security-critical registers.",
+  "analysis_summary": "Analyzed 5 RTL files under the hackatdac21/h21_access_lock_scope. The design implements a multi-layer peripheral access-control system: (1) acct_wrapper stores per-peripheral, per-privilege-level access bits, (2) reglk_wrapper stores per-peripheral register-lock bits that prevent writes to security-critical registers, (3) hmac_wrapper and pkt_wrapper are security IPs (HMAC and public-key technology) whose internal registers are protected by reglk. Several permission-related vulnerabilities were identified, including debug-mode HMAC key zeroing, JTAG-driven continuous reset of register locks, an index bug in reglk_wrapper write protection, and fail-open reset defaults in acct_wrapper.",
   "findings": [
     {
-      "finding_id": "F-001",
+      "finding_id": "F-01",
       "status": "confirmed_finding",
-      "summary": "Register lock bypass due to incorrect signal used in locked write fallback in reglk_wrapper.sv",
-      "vulnerability_category": "Permission bypass / access control error",
+      "summary": "Debug mode forces HMAC key and outer-key hash to zero, completely bypassing HMAC authentication.",
+      "vulnerability_category": "Debug Backdoor / Authentication Bypass",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
+          "line_start": 41,
+          "line_end": 43,
+          "module": "hmac_wrapper",
+          "signal_or_register": "key, okey_hash"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv",
+          "line_start": 41,
+          "line_end": 43,
+          "module": "hmac_wrapper",
+          "object": "",
+          "evidence_type": "source_code",
+          "description": "assign key = debug_mode_i ? 256'b0 : {key0[0], key0[1], ...}; assign okey_hash = debug_mode_i ? 256'b0 : ...;  When debug_mode_i is asserted, the HMAC secret key and outer-key hash are forced to zero.",
+          "supports_claim": "Demonstrates that debug mode unconditionally zeros out the HMAC key material, defeating authentication."
+        }
+      ],
+      "reasoning_summary": "The hmac_wrapper uses debug_mode_i to override the HMAC key and okey_hash with all-zero vectors. If an attacker can enter debug mode (e.g., via JTAG or test-mode pin), any HMAC authentication check produces a predictable result, effectively bypassing the security perimeter.",
+      "security_impact": "Critical – complete loss of HMAC-based integrity/authentication. An attacker with debug access can forge valid HMACs.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Unclear whether debug_mode_i is accessible only via physical JTAG or also via software-controlled debug; but either way it constitutes a privilege-escalation/bypass path.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F-02",
+      "status": "confirmed_finding",
+      "summary": "jtag_unlock signal continuously resets reglk_mem to zero, disabling all register-lock protections.",
+      "vulnerability_category": "Permission Bypass via JTAG",
       "affected_locations": [
         {
           "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 83,
-          "line_end": 84,
+          "line_start": 68,
+          "line_end": 72,
+          "module": "reglk_wrapper",
+          "signal_or_register": "reglk_mem, jtag_unlock"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 68,
+          "line_end": 72,
+          "module": "reglk_wrapper",
+          "object": "",
+          "evidence_type": "source_code",
+          "description": "if(~(rst_ni && ~jtag_unlock && ~rst_9)) begin for (j=0; j < 6; j=j+1) reglk_mem[j] <= 'h0; end. When jtag_unlock=1, the condition ~(rst_ni && 0 && ~rst_9) = 1 forever, continuously resetting reglk_mem to 0.",
+          "supports_claim": "Shows jtag_unlock asynchronously and continuously clears all register lock bits, permanently disabling write-protection of security registers."
+        }
+      ],
+      "reasoning_summary": "The reset condition incorrectly combines jtag_unlock with rst_ni in a way that makes jtag_unlock=1 act as a permanent asynchronous reset for reglk_mem. Since reglk bits protect writes to security registers (HMAC keys, access control, etc.), asserting jtag_unlock removes all register-level write protections.",
+      "security_impact": "Critical – JTAG assertion removes all register-lock protections across all peripherals, allowing unrestricted modification of HMAC keys, access control bits, and other security settings.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "None. The RTL logic is deterministic and the vulnerability is clearly visible.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F-03",
+      "status": "confirmed_finding",
+      "summary": "Incorrect index in reglk_wrapper write-side case item: address 2 writes reglk_mem[2] but uses reglk_mem[3] for write-lock check, bypassing write protection for reglk_mem[2].",
+      "vulnerability_category": "Logic Bug / Write-Protection Bypass",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
+          "line_start": 78,
+          "line_end": 78,
           "module": "reglk_wrapper",
           "signal_or_register": "reglk_mem[2]"
         }
@@ -18,151 +82,86 @@
       "evidence": [
         {
           "file": "piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv",
-          "line_start": 81,
-          "line_end": 84,
+          "line_start": 78,
+          "line_end": 78,
           "module": "reglk_wrapper",
-          "object": "case(address[7:3]) ... 2: reglk_mem[2] <= reglk_ctrl[1] ? reglk_mem[3] : wdata;",
+          "object": "",
           "evidence_type": "source_code",
-          "description": "When address 2 is written and the lock bit reglk_ctrl[1] is active, the register reglk_mem[2] is assigned the value of reglk_mem[3] instead of preserving its own current value (reglk_mem[2]). This appears to be a typographical error where reglk_mem[3] was used instead of reglk_mem[2]. All other lock-protected write cases (addresses 0,1,3,4,5) correctly reference their own register in the locked fallback.",
-          "supports_claim": "Directly shows the RTL bug where the lock mechanism uses the wrong register value, effectively corrupting reglk_mem[2] when locked, instead of preserving it."
+          "description": "case(address[7:3]) ... 2: reglk_mem[2] <= reglk_ctrl[1] ? reglk_mem[3] : wdata;  Should read reglk_mem[2] (not reglk_mem[3]) for the lock check.",
+          "supports_claim": "The right-hand side of the ternary reads reglk_mem[3] instead of reglk_mem[2], so the write-protection check for address 2 is performed on the wrong register."
         }
       ],
-      "reasoning_summary": "The register lock mechanism is designed to prevent writes to configuration registers when the corresponding lock bit is set. For address 2 (targeting reglk_mem[2]), the code reads 'reglk_ctrl[1] ? reglk_mem[3] : wdata'. When locked (reglk_ctrl[1]==1), instead of keeping reglk_mem[2] unchanged, it overwrites it with the value of reglk_mem[3]. This corrupts the lock configuration, potentially allowing an attacker to alter or disable lock protections on other peripherals by writing to address 2 under lock conditions.",
-      "security_impact": "HIGH - The register lock mechanism is the root of trust for write-protecting security-critical registers (e.g., HMAC keys, access control bits). This bug allows an attacker to corrupt the lock register contents while the lock is active, which could cascade into unlocking other protected registers and compromising the entire security architecture.",
+      "reasoning_summary": "In the always block for writing reglk_mem, address 2 uses reglk_ctrl[1] to decide whether to hold the value. However, the held value is read from reglk_mem[3] instead of reglk_mem[2]. This means the effective protection depends on a different register, potentially allowing reglk_mem[2] to be overwritten even when it should be locked.",
+      "security_impact": "Medium – could allow bypass of write-protection for one register-lock slot, potentially affecting whichever peripheral maps to that slot.",
       "confidence": "high",
-      "uncertainty_or_missing_evidence": "No uncertainty - the RTL source code explicitly shows reglk_mem[3] being used in the ternary expression for reglk_mem[2], which is inconsistent with all other case items and clearly a mistake.",
-      "recommended_follow_up": [
-        "Fix the typo in reglk_wrapper.sv line ~83: change 'reglk_mem[3]' to 'reglk_mem[2]' in address case 2 write statement.",
-        "Review all other lock-protected write statements for similar copy-paste errors.",
-        "Add formal assertions or lint checks to verify that lock-protected registers retain their value when locked."
-      ]
+      "uncertainty_or_missing_evidence": "Impact depends on which peripheral is assigned to index 2 in the reglk mapping.",
+      "recommended_follow_up": []
     },
     {
-      "finding_id": "F-002",
-      "status": "confirmed_finding",
-      "summary": "Write-enable flags (we_flag) override register lock protections in peripheral instantiation",
-      "vulnerability_category": "Permission bypass / access control override",
+      "finding_id": "F-04",
+      "status": "potential_warning",
+      "summary": "acct_wrapper resets access-control registers to all-ones (full access), creating a fail-open window before software configures protections.",
+      "vulnerability_category": "Insecure Default / Fail-Open Access Control",
       "affected_locations": [
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1194,
-          "line_end": 1194,
-          "module": "riscv_peripherals",
-          "signal_or_register": "we_flag_1"
-        }
-      ],
-      "evidence": [
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 1194,
-          "line_end": 1194,
-          "module": "riscv_peripherals",
-          "object": ".reglk_ctrl_i  ( reglk_ctrl[1*8+7:1*8] | we_flag_1 )",
-          "evidence_type": "source_code",
-          "description": "The register lock control input to at least one peripheral (likely AES0) is the bitwise OR of the actual lock configuration and the we_flag_1 input. If we_flag_1 is driven high, the peripheral will see all lock bits as 1, but this actually enables write access (lock bit high means 'locked' in the register-value sense, but the gating logic checks the raw lock bit). This effectively forces lock bits high regardless of the configured values.",
-          "supports_claim": "Shows that an external we_flag signal can directly modify the register lock controls passed to a peripheral, bypassing the lock configuration stored in reglk memory."
-        },
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 39,
-          "line_end": 39,
+          "line_start": 68,
+          "line_end": 72,
           "module": "acct_wrapper",
-          "object": "assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};",
-          "evidence_type": "source_code",
-          "description": "In acct_wrapper.sv, the lowest 8 bits of the access control output are OR'd with {8{we_flag}}. If we_flag is asserted, those access control bits are forced to 1, granting access regardless of the programmed access control values.",
-          "supports_claim": "Demonstrates that the we_flag signal can force access control bits to the 'allow' state, bypassing the programmed access control configuration."
-        }
-      ],
-      "reasoning_summary": "The design includes write-enable flags (we_flag_0 through we_flag_4) that are external inputs to the riscv_peripherals module. These flags are OR'd with register lock control signals and access control outputs. When asserted, they can force lock bits and access-control bits to '1', which in the locking scheme means 'locked' for reglk but also can force access enable. This creates a bypass path where an agent controlling we_flag signals can override both register locks and access controls, completely defeating the hardware security mechanisms.",
-      "security_impact": "CRITICAL - The we_flag signals appear to be test/debug hooks or top-level override signals that can completely disable register lock and access control protections. If these signals are not properly constrained to be zero in production, an attacker could gain unrestricted access to all protected peripherals (HMAC keys, AES keys, crypto configs, fuse data via PKT).",
-      "confidence": "high",
-      "uncertainty_or_missing_evidence": "Uncertainty about the source and intended use of we_flag signals - they may be tied to 0 in the top-level integration, or may be accessible via debug/test interfaces. The source view does not include the higher-level hierarchy that drives these signals.",
-      "recommended_follow_up": [
-        "Verify how we_flag signals are driven in the full-chip integration - ensure they are hardwired to 0 in production.",
-        "Consider removing the we_flag OR logic entirely and instead using a proper secure unlock sequence.",
-        "Add formal verification that we_flag signals are always zero during normal operation."
-      ]
-    },
-    {
-      "finding_id": "F-003",
-      "status": "potential_warning",
-      "summary": "Privilege level input (priv_lvl_i) used without validation as array index for access control",
-      "vulnerability_category": "Insufficient input validation / privilege escalation",
-      "affected_locations": [
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 517,
-          "line_end": 517,
-          "module": "riscv_peripherals",
-          "signal_or_register": "priv_lvl_i"
-        },
-        {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 926,
-          "line_end": 926,
-          "module": "riscv_peripherals",
-          "signal_or_register": "priv_lvl_i"
+          "signal_or_register": "acct_mem"
         }
       ],
       "evidence": [
         {
-          "file": "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
-          "line_start": 216,
-          "line_end": 222,
-          "module": "riscv_peripherals",
-          "object": "logic [3:0][NB_PERIPHERALS-1:0] acc_ctrl_c; ... assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] ...; assign rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0];",
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 68,
+          "line_end": 72,
+          "module": "acct_wrapper",
+          "object": "",
           "evidence_type": "source_code",
-          "description": "The priv_lvl_i signal (a 2-bit wire) is used directly as the first index into the acc_ctrl_c array without any range checking or validation. This signal selects which privilege level's access control bits are applied. If priv_lvl_i ever carries a value outside the expected 0-3 range (e.g., due to a glitch, fault, or malicious core), the array access will use out-of-range bits or X values.",
-          "supports_claim": "Shows that the privilege level is consumed directly as an array index with no validation or synchronization, creating a risk that corrupted or maliciously-forged privilege levels bypass access controls."
+          "description": "if(~(rst_ni && ~rst_6)) begin for (j=0; j < AcCt_MEM_SIZE; j=j+1) acct_mem[j] <= 32'hffffffff; end. All access-control entries default to all-ones (full access for all privilege levels).",
+          "supports_claim": "Resets grant maximum access before any software has a chance to lock down peripherals."
         }
       ],
-      "reasoning_summary": "The access control system uses priv_lvl_i to index into a 4-entry access control matrix. The privilege level comes from the RISC-V core and should normally be 0 (user), 1 (supervisor), or 3 (machine). However, the RTL contains no assertion, range check, or synchronization on this signal. A 2-bit wire can carry values 0-3, but if it ever becomes X (unknown) or if a higher privilege level is spoofed, the access control will use the wrong set of permissions. Since RISC-V has privilege levels 0-3 with gaps (level 2 is reserved), the mapping may have weaknesses.",
-      "security_impact": "MEDIUM - If the CPU core is trusted, this is low risk. However, in a multi-core or untrusted-core scenario, or if there is a way to glitch the privilege level signal, an attacker could escalate privileges and access machine-mode-only peripherals from user mode.",
+      "reasoning_summary": "Access-control registers reset to 0xFFFFFFFF, meaning every peripheral is accessible from every privilege level after reset. A secure design should typically reset to all-zero (no access) and let trusted boot firmware enable only the necessary permissions.",
+      "security_impact": "Medium – an attacker who gains code execution early in boot (before access-control programming) can access all peripherals without restriction.",
       "confidence": "medium",
-      "uncertainty_or_missing_evidence": "The full integration context is not visible - priv_lvl_i may be generated internally by a trusted core and be immune to external manipulation. Without the top-level integration, we cannot determine if this signal is exposed to tampering.",
-      "recommended_follow_up": [
-        "Add an assertion that priv_lvl_i is always a valid encoded value (0,1,3) and never X.",
-        "Consider adding a synchronizer or deglitch filter if priv_lvl_i crosses clock/power domains.",
-        "Evaluate if privilege level 2 (reserved) should be treated as machine mode or no-access."
-      ]
+      "uncertainty_or_missing_evidence": "Whether early-boot code execution is feasible in this SoC depends on boot flow not visible in the provided scope.",
+      "recommended_follow_up": []
     },
     {
-      "finding_id": "F-004",
+      "finding_id": "F-05",
       "status": "potential_warning",
-      "summary": "Access control output width mismatch may leave peripheral access bits uninitialized or uncontrolled",
-      "vulnerability_category": "Access control configuration error",
+      "summary": "we_flag input forces bit 0 of acct_mem[0] high, potentially overriding access-control for peripheral 0 regardless of stored value.",
+      "vulnerability_category": "Access Control Override via Side-Channel Signal",
       "affected_locations": [
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 39,
-          "line_end": 39,
+          "line_start": 48,
+          "line_end": 48,
           "module": "acct_wrapper",
-          "signal_or_register": "acc_ctrl_o"
+          "signal_or_register": "acc_ctrl_o, we_flag"
         }
       ],
       "evidence": [
         {
           "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
-          "line_start": 39,
-          "line_end": 39,
+          "line_start": 48,
+          "line_end": 48,
           "module": "acct_wrapper",
-          "object": "assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};",
+          "object": "",
           "evidence_type": "source_code",
-          "description": "acc_ctrl_o is declared as [4*NB_PERIPHERALS-1:0] (e.g., 35 bits for NB_PERIPHERALS=9). However, the RHS concatenates three 32-bit acct_mem entries, producing 96 bits. This width mismatch means bits [35:0] of acc_ctrl_o are driven from the concatenation while the upper bits of acct_mem entries are truncated and used for other peripherals. The mapping between acct_mem bits and peripheral access controls is non-obvious and may leave gaps.",
-          "supports_claim": "Demonstrates a structural concern where the access control bit mapping may not be correctly aligned with the number of peripherals, potentially leaving some peripherals without proper access control coverage."
+          "description": "assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};  we_flag ORs into the lowest byte of the first peripheral's access control output.",
+          "supports_claim": "we_flag can force the lowest privilege-level access bit for peripheral 0 high, bypassing the programmed access control."
         }
       ],
-      "reasoning_summary": "The acct_wrapper's output width (4*NB_PERIPHERALS = 36 bits) doesn't match the natural concatenation of its internal memory (3*32 = 96 bits). The LSB gets truncated/remapped. While this appears intentional (packing 4 privilege levels * NB_PERIPHERALS bits into a flat vector), the concatenation and indexing scheme in riscv_peripherals.sv must exactly match. If there is any off-by-one or misalignment, access controls for certain peripherals could be left at reset values or uncontrolled.",
-      "security_impact": "MEDIUM - If the access control bit mapping is incorrect, some peripherals may be inadvertently accessible to lower privilege levels or completely locked out. This could either create a denial-of-service or an unauthorized access path.",
-      "confidence": "low",
-      "uncertainty_or_missing_evidence": "The exact NB_PERIPHERALS value and the full bit-mapping between acct_wrapper and riscv_peripherals is not fully traceable in the provided source view. The width mismatch may be intentional and handled correctly by the generate block. More analysis of the bit remapping logic (lines 219-224 of riscv_peripherals.sv) is needed.",
-      "recommended_follow_up": [
-        "Verify the access control bit mapping with formal equivalence checking between acct_wrapper output and peripheral acct_ctrl_i inputs.",
-        "Add assertions to ensure all peripherals are covered by exactly one access control bit per privilege level.",
-        "Document the bit-to-peripheral mapping clearly in comments."
-      ]
+      "reasoning_summary": "The signal we_flag is an external input that is OR'd directly into the access-control output. If asserted, it grants access to peripheral 0 for the lowest privilege level, independent of the access-control register contents.",
+      "security_impact": "Medium – depending on what peripheral 0 is (appears to be boot ROM from riscv_peripherals.sv context), this could allow unauthorized access to boot ROM or other critical IP.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The exact peripheral mapping and the origin/controllability of we_flag are not fully visible in this scope.",
+      "recommended_follow_up": []
     }
   ],
-  "no_finding_reason": "Multiple permission-related vulnerabilities were identified, so this field is not applicable.",
-  "global_uncertainty": "The source view is limited to a sanitized subsystem; the full design hierarchy, top-level integration, and external signal drivers (especially we_flag[0:4], priv_lvl_i, debug_mode_i, and jtag_unlock sources) are not visible. This limits the ability to assess exploitability of the identified issues. Some assumptions about the security criticality of protected peripherals (HMAC key storage, AES config, PKT fuse access) are based on peripheral naming conventions."
+  "no_finding_reason": "All files were analyzed and permission-related vulnerabilities were found; there is no 'no finding' case.",
+  "global_uncertainty": "The analysis scope is limited to 5 RTL files. The full instantiation context, boot flow, debug/jtag access control, and peripheral address mapping tables are not fully visible. The interaction between PMP (Physical Memory Protection), privilege level, and the access-control/reglk wrappers is partially visible but the full enforcement chain cannot be verified from this scope alone."
 }

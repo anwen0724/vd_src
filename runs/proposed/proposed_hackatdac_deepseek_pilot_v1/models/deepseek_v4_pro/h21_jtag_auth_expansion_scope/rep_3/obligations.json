@@ -1,0 +1,274 @@
+{
+  "scope_id": "riscv_peripherals_debug_permission_analysis",
+  "obligations": [
+    {
+      "obligation_id": "OBL-001",
+      "reason": "Debug/test paths may bypass normal access control, exposing protected state like fuse secrets. Check whether a debug subject can read the fuse hash via the CPU-facing read interface without proper authentication or privilege.",
+      "subject": "CPU bus master (dm_slave or general core) in debug mode or test mode",
+      "operation": "read",
+      "object": "fuse_mem internal storage holding the JTAG authentication hash (jtag_hash_o source)",
+      "expected_guard": "jtag_unlock must be active, or access must be restricted to machine-mode privilege and blocked during debug/test modes.",
+      "candidate_path": "CPU bus -> riscv_peripherals fuse_read logic (signals fuse_req, fuse_addr, fuse_rdata) -> fuse_mem.rdata_o returning hash fragments",
+      "state_conditions_to_check": [
+        "Value of debug_mode_i",
+        "Value of testmode_i",
+        "State of jtag_unlock signal",
+        "Access permission settings (reglk_ctrl, acc_ctrl) for fuse address range",
+        "Privilege level priv_lvl_i"
+      ],
+      "required_evidence_slots": [
+        "fuse_req and fuse_addr driving",
+        "fuse_rdata bus connection to CPU read data",
+        "any gating on debug_mode or testmode in the read path",
+        "accelerator/peripheral address decode that includes fuse region"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access bypass",
+        "Crypto/Secret State Exposure",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm that the fuse read interface is accessible from CPU and not only from JTAG logic."
+    },
+    {
+      "obligation_id": "OBL-002",
+      "reason": "A lock bit or register lock control (reglk_ctrl) may fail if it does not protect all write paths, can be overridden by test/debug mode, or has an unsafe reset default. Check if debug/test paths can bypass the lock and write to protected peripherals.",
+      "subject": "Debug master (dm_master) or CPU in debug/test mode",
+      "operation": "write",
+      "object": "Peripheral configuration registers protected by reglk_ctrl (e.g., AES, HMAC, PLIC, CLINT)",
+      "expected_guard": "reglk_ctrl lock bit must be checked before write, and debug/test mode must not override the lock.",
+      "candidate_path": "Debug bus (dm_master_req/we/addr/wdata) -> peripheral address decode -> register write enable logic that might ignore reglk_ctrl when debug_mode_i or testmode_i is active",
+      "state_conditions_to_check": [
+        "debug_mode_i active",
+        "testmode_i active",
+        "reglk_ctrl bits for each peripheral",
+        "actual write enable generation in peripheral interfaces"
+      ],
+      "required_evidence_slots": [
+        "write enable logic for protected peripherals",
+        "reglk_ctrl usage in address decode or write gating",
+        "any bypass condition involving debug_mode or testmode",
+        "connection of dm_master bus to peripheral bus matrix"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Lock/Sticky Bit/Write Protection",
+        "Debug/JTAG/Test Access bypass",
+        "CSR/MMIO Access Control"
+      ],
+      "priority": "high",
+      "uncertainty": "Exact implementation of reglk_ctrl and its gating is not visible; need to check if it is used at all."
+    },
+    {
+      "obligation_id": "OBL-003",
+      "reason": "Debug interfaces may allow DMI accesses without completing authentication (jtag_unlock). Verify that DMI transactions are only forwarded to the debug module (dm_slave) or bus when the JTAG authentication has passed.",
+      "subject": "JTAG debugger via dmi_jtag module",
+      "operation": "read/write DMI register space (address, data, op)",
+      "object": "Internal debug bus (dmi_req, dmi_resp) and ultimately dm_slave requests",
+      "expected_guard": "dmi_req_valid must be gated by pass_check/hashValid (i.e., jtag_unlock_o) indicating successful authentication; without it, DMI operations should not be accepted.",
+      "candidate_path": "dmi_jtag module receiving DMI from TAP (dmi_tdi, dmi_access) and generating dmi_req_valid, dmi_req_ready etc. to dmi_cdc",
+      "state_conditions_to_check": [
+        "pass_mode, pass_check, hashValid signals inside dmi_jtag",
+        "relationship between jtag_unlock_o and pass_check",
+        "whether dmi_req_valid is asserted before pass_check is set",
+        "dmi_reset or test_logic_reset effect on pass_check"
+      ],
+      "required_evidence_slots": [
+        "DMI request gating logic in dmi_jtag",
+        "jtag_unlock_o assignment",
+        "HMAC authentication state machine and its control over DMI forwarding"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+        "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag_tap.sv",
+        "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_cdc.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access bypass",
+        "Lock/Sticky Bit/Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to confirm if the authentication mechanism is mandatory for all DMI commands or only for unlocking debug features."
+    },
+    {
+      "obligation_id": "OBL-004",
+      "reason": "The HMAC module has a key_hash_bypass_i signal that, if asserted, could completely skip the keyed hash step, making authentication trivial. Check that this signal is only controllable by highest-privilege software and cannot be set via debug or test paths.",
+      "subject": "Any bus master (CPU, debug) that can write to the control register driving key_hash_bypass_i",
+      "operation": "set key_hash_bypass_i to 1",
+      "object": "HMAC authentication strength / expected hash calculation",
+      "expected_guard": "Only machine-mode with lock protection, or the signal must be tied low in silicon; debug/test paths must not be able to change it.",
+      "candidate_path": "Control register in riscv_peripherals generating key_hash_bypass_i routed to hmac module instance",
+      "state_conditions_to_check": [
+        "debug_mode_i or testmode_i influence on register writes",
+        "reglk_ctrl or acc_ctrl bits for the HMAC control register",
+        "access privilege check for the register address"
+      ],
+      "required_evidence_slots": [
+        "Register that drives key_hash_bypass_i",
+        "Write control logic for that register",
+        "Connection from debug/test to that register's write enable"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/hmac/hmac.sv"
+      ],
+      "knowledge_used": [
+        "Crypto/Secret State Exposure",
+        "Lock/Sticky Bit/Write Protection",
+        "Debug/JTAG/Test Access bypass"
+      ],
+      "priority": "high",
+      "uncertainty": "The presence of key_hash_bypass_i is confirmed; need to verify who drives it and under what conditions."
+    },
+    {
+      "obligation_id": "OBL-005",
+      "reason": "Write-enable flags (we_flag_0..4) may be used to protect certain peripherals or register banks. If they are set by unprivileged software or debug, they could allow unauthorized writes. Check the privilege and lock requirements for setting these flags.",
+      "subject": "CPU or debug master trying to set we_flag[*]",
+      "operation": "write",
+      "object": "we_flag_* registers or the peripheral access protection state",
+      "expected_guard": "Must require machine-mode privilege or be locked after boot; debug/test must not alter them without proper authentication.",
+      "candidate_path": "Inputs we_flag_0..4 to riscv_peripherals, likely driven by a memory-mapped control register; check if any path allows untrusted sources to assert them.",
+      "state_conditions_to_check": [
+        "Source of we_flag inputs (external to module or internal register)",
+        "Write access gating for that source",
+        "Effect of debug_mode_i or testmode_i on the ability to set these flags"
+      ],
+      "required_evidence_slots": [
+        "Declaration and connection of we_flag_* inside riscv_peripherals",
+        "Any register or flop that stores we_flag values",
+        "Write enable logic for those flops"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "CSR/MMIO Access Control",
+        "Lock/Sticky Bit/Write Protection",
+        "Debug/JTAG/Test Access bypass"
+      ],
+      "priority": "medium",
+      "uncertainty": "Not sure if these flags are writable or just inputs; signs of we_flag in design warrants investigation."
+    },
+    {
+      "obligation_id": "OBL-006",
+      "reason": "After reset, jtag_unlock or authentication state (pass_check) should be cleared to prevent an attacker from accessing debug features before authentication. Verify that reset conditions (including debug reset dmi_reset and system reset) correctly deassert jtag_unlock_o.",
+      "subject": "reset controller / debug logic",
+      "operation": "reset (power-on, system, or debug reset)",
+      "object": "JTAG authentication state (jtag_unlock_o, pass_check, hashValid)",
+      "expected_guard": "On any reset, jtag_unlock_o must go to 0, and the HMAC authentication engine must be reset to a safe state (no lingering valid state).",
+      "candidate_path": "Reset signals (rst_ni, trst_ni, dmi_reset, test_logic_reset) to dmi_jtag and hmac; initial flop values.",
+      "state_conditions_to_check": [
+        "Reset connectivity to jtag_unlock_o flop",
+        "Reset of pass_check register",
+        "Reset of hmac state machine (hashValid, state)"
+      ],
+      "required_evidence_slots": [
+        "jtag_unlock_o assignment in dmi_jtag",
+        "pass_check flip-flop reset value",
+        "hmac state machine reset behavior"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+        "piton/design/chip/tile/ariane/src/hmac/hmac.sv"
+      ],
+      "knowledge_used": [
+        "Reset/Lifecycle/State Residue",
+        "Lock/Sticky Bit/Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Need to inspect actual reset logic; some resets might not reach authentication registers."
+    },
+    {
+      "obligation_id": "OBL-007",
+      "reason": "The debug master (dm_master) can perform bus transactions. If it is not restricted by PMP or range checks, it could read/write protected memories like boot ROM or AES key material. Check that debug-originated bus requests are blocked when debug is not authenticated or when accessing secure regions.",
+      "subject": "Debug master (dm_master_req/we/addr/wdata)",
+      "operation": "read/write",
+      "object": "Secure memory regions (bootrom, AES, HMAC, fuse, etc.)",
+      "expected_guard": "A debug address-range permission check or access-control matrix must deny accesses unless debug is fully authenticated and allowed.",
+      "candidate_path": "dm_master bus connected to AXI or memory fabric; any address filtering logic before reaching peripheral slaves.",
+      "state_conditions_to_check": [
+        "jtag_unlock state",
+        "debug_mode_i",
+        "Presence of PMP/range check on debug-initiated transactions",
+        "Configuration of bus interconnect security signals"
+      ],
+      "required_evidence_slots": [
+        "dm_master bus connection to downstream backbone",
+        "any L2 protection logic or memory firewalls",
+        "AXI security attribute propagation from debug master"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "any bus infrastructure files"
+      ],
+      "knowledge_used": [
+        "Fabric/Address Map/DMA/PMP",
+        "Debug/JTAG/Test Access bypass"
+      ],
+      "priority": "high",
+      "uncertainty": "The bus infrastructure details are not fully in scope; need to see how dm_master is connected."
+    },
+    {
+      "obligation_id": "OBL-008",
+      "reason": "If the HMAC module leaks intermediate state (sha_digest, sha_idigest) during authentication, an attacker could infer the expected hash. Verify that these signals are not readable from software or debug paths before authentication completes.",
+      "subject": "CPU or debug interface read to HMAC status/result registers",
+      "operation": "read",
+      "object": "Intermediate HMAC cryptographic state (sha_digest, sha_idigest, sha_h_block)",
+      "expected_guard": "Such state should not be exposed via MMIO reads; only final hash_o should be readable, and only after a valid authentication sequence. Any read before completion should return zero or error.",
+      "candidate_path": "Register read mux in riscv_peripherals for HMAC module; connection of hmac.hash_o, but also internal signals sha_digest, etc.",
+      "state_conditions_to_check": [
+        "Read address decode for HMAC register space",
+        "read data selection logic including intermediate states",
+        "Whether hmac.ready_o gates reads"
+      ],
+      "required_evidence_slots": [
+        "register readback logic for HMAC",
+        "hmac module output ports (hash_o, ready_o)",
+        "any debug path to read internal HMAC registers"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+        "piton/design/chip/tile/ariane/src/hmac/hmac.sv"
+      ],
+      "knowledge_used": [
+        "Crypto/Secret State Exposure"
+      ],
+      "priority": "medium",
+      "uncertainty": "Need to confirm the exact register map; internal state may be inaccessible."
+    },
+    {
+      "obligation_id": "OBL-009",
+      "reason": "The testmode_i signal often overrides normal operation. It could disable authentication checks, allow direct access to internal registers, or expose protected buses. Verify that testmode_i does not create a path to bypass the JTAG authentication (pass_check) or lock protections.",
+      "subject": "test controller asserting testmode_i",
+      "operation": "enable test features",
+      "object": "debug/peripheral access control logic (pass_check, reglk_ctrl, jtag_unlock)",
+      "expected_guard": "testmode_i must not disable security checks; it should either be tied low in production or be functionally equivalent to debug authentication.",
+      "candidate_path": "testmode_i input distributed to dmi_jtag, dmi_jtag_tap, riscv_peripherals logic; could gate authentication checks.",
+      "state_conditions_to_check": [
+        "Usage of testmode_i in dmi_jtag (e.g., overriding pass_check)",
+        "Usage in riscv_peripherals (e.g., bypassing lock bits)",
+        "Is testmode_i externally controllable in production?"
+      ],
+      "required_evidence_slots": [
+        "Verilog conditional blocks using testmode_i in dmi_jtag and riscv_peripherals",
+        "synthesis constraints for testmode_i"
+      ],
+      "files_or_modules_to_inspect": [
+        "piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv",
+        "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv"
+      ],
+      "knowledge_used": [
+        "Debug/JTAG/Test Access bypass",
+        "Lock/Sticky Bit/Write Protection"
+      ],
+      "priority": "high",
+      "uncertainty": "Exact usage of testmode_i is unknown; need to check if it overrides security."
+    }
+  ]
+}

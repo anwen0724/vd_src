@@ -1,0 +1,420 @@
+{
+  "analysis_summary": "The proposed method produced 6 finding(s) from 6 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "Missing debug enable guard: AXI debug module generates bus transactions without any authentication or permission check. This allows unrestricted debug access to all memory and peripherals.",
+      "vulnerability_category": "read/write memory via AXI / system memory and peripherals on AXI bus / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_defines.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "module_selects[0] connected directly to adbg_axi_module module_select_i without gating.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Command decoding uses operation_in without any security check; no enable signal observed.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "State machine transitions from STATE_Rstatus to STATE_Rburst to start read, and from STATE_Wwait to STATE_Wburst for writes, both without a permission condition.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_defines.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "No debug enable define present in the global defines file.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG debug interface (adbg_tap_top) Operation: read/write memory via AXI Object: system memory and peripherals on AXI bus Expected guard: debug enable state or authentication signal that gates AXI transaction generation Observed behavior: adbg_axi_module accepts JTAG commands and initiates AXI transactions unconditionally when selected; no debug_enable or authentication input is present. The module's FSM transitions directly from idle to burst operations upon command decode, without checking any permission signal. Path: adbg_tap_top -> adbg_top -> adbg_axi_module -> adbg_axi_biu -> AXI master Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An external debugger can read/write any memory or peripheral on the AXI bus, completely bypassing CPU privilege protections and secure boot.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Missing debug enable guard for LINT debug module: JTAG-initiated LINT transactions can proceed without any authentication, exposing internal bus resources.",
+      "vulnerability_category": "read/write internal memory via LINT / TCDM/LINT-connected memory and peripherals / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_defines.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Command decoding and operation latch without any guard.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Next-state logic for burst reads/writes transitions solely on command and TAP state, no permission check.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_lint_module.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Module port list shows no debug_enable or authenticated input.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_defines.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "No debug enable macro defined.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG debug interface Operation: read/write internal memory via LINT Object: TCDM/LINT-connected memory and peripherals Expected guard: debug enable or authentication signal that gates LINT transaction generation Observed behavior: adbg_lint_module decodes JTAG commands and initiates LINT bus transactions without any permission signal. The module's state machine starts burst reads/writes immediately upon command, and no debug_enable input exists in the port list. Path: adbg_tap_top -> adbg_top -> adbg_lint_module -> adbg_lint_biu -> LINT bus Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker can access internal TCDM memory and peripherals via JTAG, reading secrets or modifying configuration.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "Missing module selection lock: No authentication or sticky lock prevents an attacker from switching the active debug module via JTAG, allowing access to any debug interface.",
+      "vulnerability_category": "select debug module (AXI/LINT) / debug module activation (module_select_i and top_inhibit_o signals) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_defines.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "module_id_reg update logic: condition debug_select_i && select_cmd && update_dr_i && !select_inhibit. No lock or permission bit is checked.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "module_selects are derived directly from module_id_reg; no additional gating.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_defines.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Defines for module IDs (WISHBONE, CPU0, CPU1, JSP) but no lock configuration.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG TAP controller (adbg_tap_top) Operation: select debug module (AXI/LINT) Object: debug module activation (module_select_i and top_inhibit_o signals) Expected guard: a lock or permission register that restricts which modules can be selected; or authenticated state required before able to select Observed behavior: Module selection is performed by writing to the input shift register with a select command, and the module_id_reg is updated directly on update_dr_i if !select_inhibit. There is no lock bit or authentication required to change the selected module. The select_inhibit signal only prevents switching during ongoing burst transactions, not for security. Path: adbg_tap_top -> data_register_i -> module_select_i -> adbg_top Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker can switch the active debug module to any supported module, including ones with access to sensitive resources, without any authorization.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "Missing lock on debug status register: writes to critical debug control bits are unprotected, allowing unauthorized modification.",
+      "vulnerability_category": "write to debug status/control register / debug control bits in adbg_or1k_status_reg / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_defines.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_status_reg.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Module port list and inferred logic: we_i directly enables register update; no lock bit present.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_or1k_defines.v",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Defines file includes no lock bit define.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG debug interface Operation: write to debug status/control register Object: debug control bits in adbg_or1k_status_reg Expected guard: sticky lock bit that, once set, prevents further writes to critical debug enable bits; or authenticated-only access Observed behavior: The adbg_or1k_status_reg module has a write enable (we_i) input; data_i is written directly to internal control registers (ctrl_reg_o). No lock bit or write-once mechanism was found. The register can be rewritten at any time via debug commands. Path: on-chip debug logic -> adbg_or1k_status_reg register file Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debug control bits (e.g., stop, reset, debug enable) can be modified by an attacker at will, potentially disabling security locks or re-enabling debug after lock-down.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "File content truncated; full register write logic and lock implementation could not be confirmed from available snippet, but no lock signal was observed in the port list or logic.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "confirmed_finding",
+      "summary": "Debug enable not default-disabled at reset: debug modules are active immediately after reset, allowing JTAG access before secure boot.",
+      "vulnerability_category": "reset (power-on or warm) / debug enable state (e.g., dbg_en, debug_module_clk_enable) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Reset of module_id_reg to 0, enabling AXI module.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Port list of adbg_top: no debug_enable or lock input.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adv_dbg_if.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Top-level debug interface wrapper shows no debug enable input from SoC.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: JTAG debug interface (adbg_tap_top) Operation: reset (power-on or warm) Object: debug enable state (e.g., dbg_en, debug_module_clk_enable) Expected guard: reset default of debug enable = 0 (disabled); or requires authenticated sequence to enable Observed behavior: No debug enable register or global enable signal was found in the debug path. After reset, the adbg_top module initializes module_id_reg to 0, selecting the AXI module, and all debug sub-modules are ready to process JTAG commands immediately. There is no hardware default that keeps debug disabled at reset. Path: reset signal (trstn_i) -> debug enable register -> gate debug paths Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker can access the debug interface immediately after reset, before any secure boot software has a chance to lock down debug, enabling early-stage compromise.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "confirmed_finding",
+      "summary": "No bus firewall for debug LINT transactions to safe_domain; debug-initiated accesses can reach safe resources, violating domain isolation.",
+      "vulnerability_category": "initiate LINT bus read/write / safe_domain memory/peripherals / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "rtl/pulpissimo/safe_domain.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "Direct connection from adbg_lintonly_top to XBAR_TCDM_Bus, no firewall instantiation.",
+          "supports_claim": ""
+        },
+        {
+          "file": "ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "s_lint_jtag_bus connected to interconnect; no domain isolation logic visible.",
+          "supports_claim": ""
+        },
+        {
+          "file": "rtl/pulpissimo/safe_domain.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "safe_domain module no observed debug access control input; bus connection appears unfiltered.",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Debug LINT master (adbg_lint_module) Operation: initiate LINT bus read/write Object: safe_domain memory/peripherals Expected guard: address range checker or security attribute that blocks debug transactions targeting safe_domain Observed behavior: The LINT debug bus (lint_jtag_wrap) connects the debug module directly to the system LINT interconnect without any address filtering or firewall. No bus-level security attribute or domain crossing gate was found in the path to safe_domain. Path: adbg_lint_module -> LINT interconnect -> safe_domain Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "A debugger can access safe_domain memory and peripherals, breaking domain isolation and potentially compromising security-critical functions.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Full safe_domain bus firewall logic not inspected; but based on the lint_jtag_wrap and pulp_soc connectivity, no address-range check is apparent.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

@@ -1,0 +1,369 @@
+{
+  "analysis_summary": "The proposed method produced 6 finding(s) from 6 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "ROM2 secure_reg is writable with no internal protection; depends entirely on interconnect gating which is unverified",
+      "vulnerability_category": "write / rom2 secure_reg (boot ROM memory array) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: AXI master (any bus master with a connection to ROM2) Operation: write Object: rom2 secure_reg (boot ROM memory array) Expected guard: Write-once lock bit or write-protection signal inside rom2, OR verified interconnect gating Observed behavior: rom2 unconditionally accepts writes when req_i && we_i; no internal write-protection mechanism exists Path: Master → AXI write channel → axi_node_intf_wrap → axi_node (unseen) → ariane_peripherals (unseen, .rom2_fuse) → rom2 we_i/wdata_i → secure_reg update Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Keys, JTAG secrets, and access-control configuration can be overwritten by any master that bypasses or is granted interconnect access",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Interconnect enforcement by connectivity_map_o not verified; no internal write-protection in rom2",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "Debug master shares processor's privilege level, allowing potentially unintended accesses",
+      "vulnerability_category": "read / write / rom2 (and all other protected slaves) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: debug master (i_axi_master_dm) Operation: read / write Object: rom2 (and all other protected slaves) Expected guard: Debug master subject to its own privilege-level check or forced to a restricted privilege; separate per-initiator priv_lvl Observed behavior: Single priv_lvl_i shared across all initiators (both ariane and debug); debug master inherits processor's privilege for access-control decisions Path: JTAG/DMI → dmi_jtag → debug_req → dm_top → i_axi_master_dm → slave[1] → axi_node_intf_wrap → connectivity_mapping (using processor's priv_lvl) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Debug master can access ROM2 and other restricted peripherals if the processor is in a high privilege mode, bypassing any intended debug-specific restrictions",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No per-initiator priv_lvl; authentication (jtag_key) not used to modify privilege level",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "potential_warning",
+      "summary": "Connectivity map is computed but its gating effect cannot be verified from available RTL",
+      "vulnerability_category": "gate AXI requests (both read and write) / all slaves, especially ROM2 (j=9) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: connectivity_map_o signal in axi_node_intf_wrap Operation: gate AXI requests (both read and write) Object: all slaves, especially ROM2 (j=9) Expected guard: connectivity_map_o[i][j]=0 must block AW/AR/W channel transactions to target j from initiator i Observed behavior: connectivity_map_o computed and passed to axi_node module; no gating logic visible in the inspected RTL Path: connectivity_map_o → s_connectivity_map → cfg_connectivity_map_i → axi_node (unseen) → ??? Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If axi_node does not enforce the connectivity map, the entire access-control matrix is ineffective",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The axi_node module implementation (where gating would occur) is not in the visible file set; cannot confirm enforcement",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "potential_warning",
+      "summary": "Security of access_ctrl_reg cannot be assessed without its driving module",
+      "vulnerability_category": "write (configuration change) / access_ctrl_reg content / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: access_ctrl_reg (CSR/MMIO register storing access control matrix) Operation: write (configuration change) Object: access_ctrl_reg content Expected guard: access_ctrl_reg should be writable only by highest privilege level and locked after secure boot, or be hard-wired Observed behavior: access_ctrl_reg is declared as logic [1:0][47:0], sourced from ariane_peripherals module (unseen); no write-protection logic visible Path: ariane_peripherals (unseen) → access_ctrl_reg → slicing to access_ctrl → connectivity_map_o Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "Attacker could modify access permissions to grant unauthorized ROM2 writes",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The ariane_peripherals module (which drives access_ctrl_reg) is not in the file set; cannot determine write protection",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F5",
+      "status": "potential_warning",
+      "summary": "Read access restriction depends entirely on unverified interconnect gating",
+      "vulnerability_category": "read / rom2 secure_reg contents / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: any AXI master Operation: read Object: rom2 secure_reg contents Expected guard: Read access to ROM2 restricted via connectivity_map_o gating on the AR channel Observed behavior: rom2 provides combinational read data via rdata_o (raddr_q-based); no internal access control; connectivity_map_o gating not verified for reads Path: Master → AR channel → axi_node_intf_wrap → (connectivity_map_o check?) → ariane_peripherals → rom2 rdata_o output Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If connectivity_map_o does not gate reads, sensitive keys and access-control defaults can be read by any master",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "Connectivity_map enforcement for AR channel not visible; same uncertainty as OB03",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F6",
+      "status": "potential_warning",
+      "summary": "Test enable is disabled at top level, but its effect inside the unseen axi_node is unknown",
+      "vulnerability_category": "override access controls / AXI slave access gating logic / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: test_en_i signal Operation: override access controls Object: AXI slave access gating logic Expected guard: test_en_i must not disable access-control gating; tied low in production Observed behavior: test_en_i is tied low in testharness and only forwarded to axi_node module; no internal usage in visible wrap Path: test_en = 1'b0 → i_axi_xbar.test_en_i → axi_node.test_en_i (unseen) Closure verdict: Related RTL evidence exists, but some core evidence slots remain incomplete.",
+      "security_impact": "If axi_node uses test_en_i to bypass connectivity_map, debug/test mode could circumvent protections",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The axi_node module (where test_en_i is consumed) is not available; cannot verify that test_en does not bypass access controls",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}

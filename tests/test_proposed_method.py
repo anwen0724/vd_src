@@ -225,6 +225,7 @@ endmodule
     assert (output_dir / "permission_fact_layer.json").exists()
     assert (output_dir / "obligations.json").exists()
     assert (output_dir / "inspection_records.json").exists()
+    assert result.tool_observations_path.exists()
     assert (output_dir / "closure_records.json").exists()
     assert result.final_answer_path.read_text(encoding="utf-8") == result.structured_output_path.read_text(encoding="utf-8")
     AgentOutput.model_validate_json(result.structured_output_path.read_text(encoding="utf-8"))

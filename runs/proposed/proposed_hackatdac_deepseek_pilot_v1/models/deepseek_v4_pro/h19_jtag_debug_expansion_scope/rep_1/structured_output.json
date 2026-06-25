@@ -1,0 +1,237 @@
+{
+  "analysis_summary": "The proposed method produced 4 finding(s) from 6 analysis obligation(s).",
+  "findings": [
+    {
+      "finding_id": "F1",
+      "status": "confirmed_finding",
+      "summary": "No authentication gating exists in the DMI path; JTAG key is a dead placeholder. This directly violates the expected guard.",
+      "vulnerability_category": "initiate DMI read/write requests to DM CSRs and system bus / DM CSRs (dm_csrs), system bus via dm_top/dm_sba / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dmi_jtag.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: dmi_jtag module Operation: initiate DMI read/write requests to DM CSRs and system bus Object: DM CSRs (dm_csrs), system bus via dm_top/dm_sba Expected guard: Authentication check (e.g., JTAG key validation before enabling DMI transactions) Observed behavior: dmi_jtag stores the input jtag_key into an internal register on reset but never compares it against any incoming or stored value. The JTAG TAP state machine generates DMI requests (dmi_req_valid_o) based solely on JTAG commands (dmi_access, update_dr) without any key-based gating. Consequently, any entity with physical access to the JTAG pins can send arbitrary DMI operations regardless of the jtag_key value. Path: JTAG pins -> dmi_jtag_tap (TAP FSM, IR/DR registers) -> dmi_jtag (state machine, no auth) -> dmi_req_o -> dmi_cdc -> dm_csrs/dm_top -> system bus/CSRs Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Full unauthenticated debug access: an attacker can read/write all DM CSRs (including dmcontrol, sbaddress, sbdata) and subsequently perform system bus accesses, halt/resume harts, and read/modify any memory or peripheral, completely bypassing all software security measures.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The full dmi_jtag.sv content (lines 1-200) was truncated; could contain a later-disabled key check, but no such logic is visible in the later portions (lines 200-284).",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F2",
+      "status": "confirmed_finding",
+      "summary": "ndmreset can be triggered without any authentication, violating the expected guard.",
+      "vulnerability_category": "write to the ndmreset bit of DMControl register / ndmreset_o output, which drives system reset (ndmreset_n in ariane_xilinx) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: dm_csrs module Operation: write to the ndmreset bit of DMControl register Object: ndmreset_o output, which drives system reset (ndmreset_n in ariane_xilinx) Expected guard: Requirement that ndmreset can only be asserted after a successful authentication (e.g., JTAG key validated) and with dmactive=1 set through an authenticated channel. Observed behavior: dm_csrs accepts DMI writes to the DMControl register without any authentication check. While ndmreset can only be set when dmactive=1, the dmactive bit itself can be set by an unauthenticated DMI write (DMControl.dmactive = 1). There is no requirement for a prior key exchange or unlock sequence. Therefore, an attacker can set dmactive=1 and immediately afterward set ndmreset, triggering a non-maskable system reset. Path: DMI request (unauthenticated) -> dm_csrs DMControl write -> dmcontrol_q.ndmreset = 1 -> ndmreset_o -> ariane_xilinx (ndmreset -> ndmreset_n -> system reset) Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "Unauthenticated attacker can reset the entire system at will, causing denial of service or potentially forcing the system into a known state to aid further attacks.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "Full DMControl write logic was partially observed; however, the absence of authentication gating is clear from the available RTL.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F3",
+      "status": "confirmed_finding",
+      "summary": "System Bus Access grants unrestricted read/write capability to the debugger, violating the principle of least privilege.",
+      "vulnerability_category": "initiate AXI read/write transactions / any addressable target on the system bus (memory, peripherals, bootrom, key storage rom2) / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/debug/dm_top.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "src/debug/dm_csrs.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: dm_sba (System Bus Access module within dm_top) Operation: initiate AXI read/write transactions Object: any addressable target on the system bus (memory, peripherals, bootrom, key storage rom2) Expected guard: Address range filtering, PMP-like checks, or debug privilege level enforcement before allowing SBA transactions. Observed behavior: dm_top instantiates dm_sba and connects the full 64-bit sbaddress from dm_csrs directly to the AXI master port without any address-in-range checks. The dm_csrs module provides sbaddress_o and sbaccess_o without enforcing which addresses are accessible. The resulting AXI master (axi_m_req_o) is routed into the system crossbar, allowing any address accessible to the debug module. There is no address whitelisting or blacklisting logic present in the RTL. Path: DMI write to SBCS/SBADDRESS -> dm_csrs (sbaddress_o) -> dm_sba -> AXI master (axi_m_req_o) -> system interconnect (ariane_xilinx) -> any peripheral/memory Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker who gains unauthenticated DMI access can use SBA to read sensitive memory (e.g., keys in rom2), write malicious data to peripherals, or corrupt DRAM, achieving full system compromise.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "dm_sba internal module RTL not available, but its interface shows no filtering inputs/outputs; address filtering would need to be in dm_top or elsewhere, and none is present.",
+      "recommended_follow_up": []
+    },
+    {
+      "finding_id": "F4",
+      "status": "confirmed_finding",
+      "summary": "The key storage rom2 is writable by any bus master, violating the expected read-only protection and enabling key compromise.",
+      "vulnerability_category": "write to rom2 memory / rom2 secure registers containing JTAG key, AES key, and access control keys / permission-related RTL security issue",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "signal_or_register": ""
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": null,
+          "line_end": null,
+          "module": "",
+          "object": "",
+          "evidence_type": "unknown",
+          "description": "",
+          "supports_claim": ""
+        }
+      ],
+      "reasoning_summary": "Subject: Any bus master accessing rom2 via the AXI-to-memory adapter Operation: write to rom2 memory Object: rom2 secure registers containing JTAG key, AES key, and access control keys Expected guard: we_i must be hardwired to 0; rom2 address range must be protected against writes. Observed behavior: The rom2 module (src/rom2/rom2.sv) fully accepts writes: when req_i and we_i are both asserted, it writes wdata_i to the addressed secure_reg entry. In ariane_peripherals.sv, the rom2_fuse AXI slave is connected via axi2mem, which drives we_o to rom2_we based on AXI write transactions. There is no write protection; any master that can reach the rom2_fuse address region (e.g., the CPU or the unauthenticated debug SBA) can modify the stored keys. Path: AXI master (CPU, dm_sba) -> AXI crossbar (rom2_fuse region) -> axi2mem (we_o = 1 on write) -> i_rom2 (we_i = 1) -> secure_reg[addr] <= wdata_i Closure verdict: All required core evidence slots are present for a candidate violation.",
+      "security_impact": "An attacker can overwrite the JTAG key (allowing authenticated access or denial-of-service), AES key, and access control settings, completely breaking the security of the system.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "None; write path is fully confirmed.",
+      "recommended_follow_up": []
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "No closure-level missing evidence was recorded beyond the visible source scope limitations."
+}
