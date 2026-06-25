@@ -154,7 +154,7 @@ Unscorable
 
 ## 5. run_failure_analysis.csv
 
-该表由人工在 `run_failure_candidates.csv` 基础上填写，用于记录失败原因判断。
+该表由 `init_failure_analysis.py` 从 `run_failure_candidates.csv` 初始化，然后由人工填写失败原因判断。
 
 一行对应一个经过人工确认和分析的失败事件。
 
@@ -189,6 +189,18 @@ review_notes
 - `method_implication`：对后续方法设计的启示；
 - `review_notes`：补充说明。
 
+初始化命令示例：
+
+```text
+python -m evaluation.init_failure_analysis --run-failure-candidates evaluation_results/<method_name>/<model_family>/failure_analysis/run_failure_candidates.csv
+```
+
+如果 `run_failure_analysis.csv` 已存在，脚本默认不覆盖。需要重新生成时显式指定：
+
+```text
+python -m evaluation.init_failure_analysis --run-failure-candidates evaluation_results/<method_name>/<model_family>/failure_analysis/run_failure_candidates.csv --overwrite
+```
+
 ## 6. failure_mechanism 取值
 
 失败机制应与当前论文方法设计中的问题机制保持一致。
@@ -219,10 +231,12 @@ Unclear
 2. 查看 detection_match 和 evidence_quality，找出 FP、Duplicate、Unscorable 和证据失败 findings。
 3. 根据 gt_cases.csv 查看该 input scope 对应的 GT cases。
 4. 找出该 run 中未被任何 TP finding 命中的 GT cases，作为 FN cases。
-5. 打开 final_answer.json，查看模型原始结论、证据、推理和不确定性表达。
-6. 打开 tool_trace.jsonl，查看模型是否读取了关键文件、搜索了关键术语、遗漏了关键模块或路径。
-7. 将典型失败事件记录到 run_failure_analysis.csv。
-8. 根据失败事件归纳 failure_mechanism 和 method_implication。
+5. 运行 build_failure_candidates.py 生成 run_failure_candidates.csv。
+6. 运行 init_failure_analysis.py 初始化 run_failure_analysis.csv。
+7. 打开 final_answer.json，查看模型原始结论、证据、推理和不确定性表达。
+8. 打开 tool_trace.jsonl，查看模型是否读取了关键文件、搜索了关键术语、遗漏了关键模块或路径。
+9. 在 run_failure_analysis.csv 中填写 failure_manifestation、failure_mechanism、likely_cause 和 method_implication。
+10. 运行 summarize_failure_mechanisms.py 汇总 failure_mechanism_summary.csv。
 ```
 
 ## 8. 典型分析示例
