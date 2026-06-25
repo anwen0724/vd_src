@@ -39,6 +39,19 @@ class EvaluationWorkflowScriptsTest(unittest.TestCase):
                 ],
             )
             _write_csv(
+                bench / "official_gt.csv",
+                [
+                    "case_id",
+                    "official_description",
+                ],
+                [
+                    {
+                        "case_id": "HX-001",
+                        "official_description": "Official lock register bug.",
+                    }
+                ],
+            )
+            _write_csv(
                 bench / "input_scope_gt_map.csv",
                 [
                     "run_id",
@@ -64,7 +77,7 @@ class EvaluationWorkflowScriptsTest(unittest.TestCase):
                 [
                     {
                         "case_id": "HX-001",
-                        "files": ["rtl/a.sv"],
+                        "files": ["third_party/hackatdacx/rtl/a.sv"],
                         "modules": ["mod_a"],
                         "evidence_trace": [
                             {
@@ -84,10 +97,105 @@ class EvaluationWorkflowScriptsTest(unittest.TestCase):
             self.assertTrue(out.exists())
             self.assertEqual("HX-001", rows[0]["case_id"])
             self.assertEqual("scope_a", rows[0]["input_scope"])
+            self.assertEqual("Official lock register bug.", rows[0]["official_description"])
+            self.assertEqual("Official lock register bug.", _read_csv(out)[0]["official_description"])
             self.assertEqual("rtl/a.sv", rows[0]["gt_files"])
             self.assertEqual("mod_a", rows[0]["gt_modules"])
             self.assertIn("lock_reg", rows[0]["gt_signals_or_registers"])
             self.assertIn("hit lock case", rows[0]["gt_evidence_notes"])
+            self.assertEqual("datasets/benchmarks/hackatdacx/cases/HX-001.md", rows[0]["case_doc_path"])
+
+    def test_build_gt_cases_falls_back_to_evidence_trace_files_and_modules(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bench = root / "datasets" / "benchmarks" / "hackatdacx"
+            bench.mkdir(parents=True)
+            _write_csv(
+                bench / "task_gt.csv",
+                ["case_id", "vulnerable_behavior_summary", "notes"],
+                [
+                    {
+                        "case_id": "HX-002",
+                        "vulnerable_behavior_summary": "Debug auth signal is exposed.",
+                        "notes": "",
+                    }
+                ],
+            )
+            _write_csv(
+                bench / "input_scope_gt_map.csv",
+                ["input_scope", "benchmark_id", "expected_case_id", "case_visibility"],
+                [
+                    {
+                        "input_scope": "scope_b",
+                        "benchmark_id": "hackatdacx",
+                        "expected_case_id": "HX-002",
+                        "case_visibility": "visible",
+                    }
+                ],
+            )
+            _write_jsonl(
+                bench / "evidence_gt.jsonl",
+                [
+                    {
+                        "case_id": "HX-002",
+                        "evidence_trace": [
+                            {
+                                "file": "third_party/hackatdacx/rtl/debug.sv",
+                                "module": "debug_top",
+                                "signal_or_register": "debug_unlock",
+                            },
+                            {
+                                "file": "third_party/hackatdacx/rtl/debug.sv",
+                                "module": "debug_top",
+                                "signal_or_register": "debug_state",
+                            },
+                        ],
+                    }
+                ],
+            )
+
+            rows = build_gt_cases(root / "datasets" / "benchmarks", root / "gt_cases.csv")
+
+            self.assertEqual("rtl/debug.sv", rows[0]["gt_files"])
+            self.assertEqual("debug_top", rows[0]["gt_modules"])
+
+    def test_build_gt_cases_uses_run_scope_id_for_hackatdac18(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bench = root / "datasets" / "benchmarks" / "hackatdac18"
+            bench.mkdir(parents=True)
+            _write_csv(
+                bench / "task_gt.csv",
+                ["case_id", "vulnerable_behavior_summary", "notes"],
+                [{"case_id": "H18-X", "vulnerable_behavior_summary": "case", "notes": ""}],
+            )
+            _write_csv(
+                bench / "input_scope_gt_map.csv",
+                ["input_scope", "benchmark_id", "expected_case_id", "case_visibility"],
+                [
+                    {
+                        "input_scope": "debug_jtag_scope",
+                        "benchmark_id": "hackatdac18",
+                        "expected_case_id": "H18-X",
+                        "case_visibility": "visible",
+                    }
+                ],
+            )
+            _write_jsonl(
+                bench / "evidence_gt.jsonl",
+                [
+                    {
+                        "case_id": "H18-X",
+                        "files": ["third_party/hackatdac18/rtl/top.sv"],
+                        "modules": ["top"],
+                        "evidence_trace": [{"signal_or_register": "debug"}],
+                    }
+                ],
+            )
+
+            rows = build_gt_cases(root / "datasets" / "benchmarks", root / "gt_cases.csv")
+
+            self.assertEqual("h18_debug_jtag_scope", rows[0]["input_scope"])
 
     def test_build_finding_review_flattens_final_answer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

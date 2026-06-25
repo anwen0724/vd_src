@@ -85,11 +85,13 @@ evaluation_results/gt_cases.csv
 case_id
 benchmark_id
 input_scope
+official_description
 case_description
 gt_files
 gt_modules
 gt_signals_or_registers
 gt_evidence_notes
+case_doc_path
 ```
 
 注意：
@@ -97,6 +99,7 @@ gt_evidence_notes
 ```text
 gt_cases.csv 是全方法、全模型共用的固定答案库。
 该表不按 model、method、run 或 repetition 展开。
+gt_files 使用 agent input 中可见的相对路径，不保留原始源码镜像中的 third_party/<benchmark_id>/ 前缀。
 ```
 
 ### 2.2 build_finding_review.py

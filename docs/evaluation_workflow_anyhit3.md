@@ -34,12 +34,16 @@
 case_id
 benchmark_id
 input_scope
+official_description
 case_description
 gt_files
 gt_modules
 gt_signals_or_registers
 gt_evidence_notes
+case_doc_path
 ```
+
+其中 `gt_files` 使用 agent input 中可见的相对路径，不保留原始源码镜像中的 `third_party/<benchmark_id>/` 前缀。
 
 ### 2.2 Finding review 表
 

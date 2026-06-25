@@ -1,0 +1,1103 @@
+### h18_debug_jtag_scope
+baseline:gpt_5_5:h18_debug_jtag_scope:rep_1:PERM-JTAG-LINT-UNAUTH-001
+  status=confirmed_finding conf=high
+  summary=Externally accessible JTAG path can select and drive an internal debug bus master without visible authorization gating.
+  files=rtl/pulpissimo/pulpissimo.sv; rtl/pulpissimo/safe_domain.sv; rtl/pulpissimo/jtag_tap_top.sv; ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv; ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv; .
+  modules=pulpissimo; safe_domain; jtag_tap_top; pulp_soc; lint_jtag_wrap; multiple
+  signals=pad_jtag_tck/pad_jtag_tdi/pad_jtag_tdo/pad_jtag_tms/pad_jtag_trst; pad_jtag_* connections; soc_tck_o/soc_trstn_o/soc_tms_o/soc_tdi_o/axireg_sel_o/axireg_tdi_o/axireg_tdo_i; jtag_tap_top_i / axireg_sel_o; JTAG inputs, axireg_sel_o, dbg_axi_scan_in_o/dbg_axi_scan_out_i; tap_top_i .axireg_sel_o / scan 
+  reason=The design exposes JTAG pads, routes them to a TAP, uses TAP instruction selection to assert axireg_sel_o, and connects that selection to lint_jtag_wrap. lint_jtag_wrap then instantiates adbg_lintonly_top, whose outputs directly drive a master bus interface. The visible control condition is selection by JTAG/TAP state, not a privilege, fuse, lifecycle, authenticated unlock, or secure-mode policy. Therefore any actor with JTAG access and knowledge of the protocol could potentially issue local deb
+
+baseline:gpt_5_5:h18_debug_jtag_scope:rep_1:PERM-ADBG-AXI-UNAUTH-002
+  status=potential_warning conf=medium
+  summary=Advanced debug IP can generate AXI master transactions from JTAG-selected debug commands without visible permission checks.
+  files=ips/adv_dbg_if/rtl/adv_dbg_if.sv; ips/adv_dbg_if/rtl/adbg_top.sv; ips/adv_dbg_if/rtl/adbg_axi_module.sv; ips/adv_dbg_if/rtl/adbg_axi_biu.sv
+  modules=adv_dbg_if; adbg_top; adbg_axi_module; adbg_axi_biu
+  signals=tms_pad_i/tck_pad_i/trstn_pad_i/tdi_pad_i/tdo_pad_o; cluster_tap_i / s_debug_select / s_debug_tdo; dbg_module_i .debug_select_i(s_debug_select); module_selects; debug_select_i command/shift handling; adbg_axi_module module_select_i(module_selects[0]); module_select_i; adbg_axi_biu .strobe_i(biu_stro
+  reason=The advanced debug interface IP routes JTAG TAP selection to adbg_top. adbg_top selects submodules including an AXI debug module. The AXI debug module generates biu_strobe operations into adbg_axi_biu, and the BIU exposes/defines AXI master transactions. The visible source uses debug_select_i/module_select_i and JTAG state as the enabling conditions; no authentication, privilege, lock, fuse, or lifecycle enable was found in the relevant path. This creates an unauthorized debug master risk if the
+
+baseline:gpt_5_5:h18_debug_jtag_scope:rep_2:PERM-JTAG-DEBUG-UNAUTH-001
+  status=confirmed_finding conf=high
+  summary=JTAG debug access can drive bus and CPU debug functionality without visible authentication or permission gating.
+  files=ips/adv_dbg_if/rtl/adv_dbg_if.sv; ips/adv_dbg_if/rtl/adbg_tap_defines.v; ips/adv_dbg_if/rtl/adbg_tap_top.v; ips/adv_dbg_if/rtl/adbg_top.sv; ips/adv_dbg_if/rtl/adbg_axi_biu.sv; ips/adv_dbg_if/rtl/adbg_lintonly_top.sv; ips/pulp_soc/rtl/pulp_soc/lint_jtag_wrap.sv; ips/pulp_soc/rtl/pulp_soc/pulp_soc.sv
+  modules=adv_dbg_if; adbg_tap_defines; adbg_tap_top; adbg_top; adbg_axi_biu; adbg_lintonly_top; lint_jtag_wrap; pulp_soc
+  signals=PASSWORD comments / module interface; s_debug_select, s_shift_dr, s_update_dr, s_capture_dr, dbg_module_i; `DEBUG; debug_select; module_id_reg, input_shift_reg; adbg_axi_module, adbg_or1k_module, axi_master_*, cpu_stall_o; axi_master_aw_addr, axi_master_ar_addr, axi_master_*_prot/user/id; axi_master
+  reason=The visible design exposes a JTAG DEBUG instruction that asserts debug_select. That signal and TAP state signals directly control the debug top modules' shift registers and module selection. Selected debug modules can drive AXI or LINT bus-master transactions and CPU debug control outputs. Searches for authentication, secure, permission, lock, and related terms did not reveal implemented access-control logic; the only password/security references found are comments in adv_dbg_if.sv. Therefore, b
+
+baseline:gpt_5_5:h18_debug_jtag_scope:rep_3:PERM-JTAG-DEBUG-UNAUTH-001
+  status=confirmed_finding conf=high
+  summary=Unauthenticated JTAG/advanced debug interface can select debug modules and initiate AXI/CPU debug operations without visible permission enforcement.
+  files=rtl/pulpissimo/pulpissimo.sv; rtl/pulpissimo/safe_domain.sv; rtl/pulpissimo/jtag_tap_top.sv; ips/adv_dbg_if/rtl/adv_dbg_if.sv; ips/adv_dbg_if/rtl/adbg_top.sv; ips/adv_dbg_if/rtl/adbg_axi_biu.sv
+  modules=pulpissimo; safe_domain; jtag_tap_top; adv_dbg_if; adbg_top; adbg_axi_biu
+  signals=pad_jtag_tck / pad_jtag_tdi / pad_jtag_tdo / pad_jtag_tms / pad_jtag_trst; s_jtag_tck to safe_domain .jtag_tck_i; jtag_tap_top_i / axireg_sel_o; tap_top_i, axireg_sel_o, dbg_axi_scan_in_o, dbg_axi_scan_out_i; test_mode_i, s_debug_select, dbg_module_i.debug_select_i; debug_select_i, module_id_reg, mo
+  reason=The visible design contains an externally accessible JTAG/debug path. The TAP selects debug logic and feeds debug_select_i/module_select_i without any visible authentication or permission predicate. Once selected, adbg_top exposes CPU control signals and instantiates an AXI debug module; adbg_axi_biu latches debug-provided address/data and drives AXI read/write valid signals. The only password-related evidence is a comment, not RTL. Therefore the RTL shown permits debug-originated bus and CPU co
+
+### h18_fc_core_security_scope
+baseline:gpt_5_5:h18_fc_core_security_scope:rep_1:PERM-DBG-001
+  status=confirmed_finding conf=medium
+  summary=APB-exposed debug interface lacks visible permission or authentication gating before allowing halt and register/CSR debug access.
+  files=ips/pulp_soc/rtl/fc/fc_subsystem.sv; ips/zero-riscy/zeroriscy_debug_unit.sv; ips/zero-riscy/zeroriscy_core.sv
+  modules=fc_subsystem; zeroriscy_debug_unit; zeroriscy_core
+  signals=apb_slave_debug; debug_req/debug_addr/debug_we/debug_wdata/debug_rdata; debug_req_i/debug_we_i/debug_addr_i/debug_wdata_i; regfile_wreq_o; apb2per_debug_i; DBG_CTRL / DBG_IE; DNPC and General-Purpose Registers; debug_req_i
+  reason=Within the visible scope, debug transactions originate from an APB slave and are passed to the core debug unit. The debug unit has no visible authentication, lock, lifecycle, secure-mode, privilege-level, or access-control input. It explicitly makes DBG_CTRL/DBG_IE-class debug registers 'always accessible'; writes to DBG_CTRL can halt the core, and once halted, writes to GPRs, CSRs, and debug-only registers are permitted by debug_halted_o. Because the halt condition itself is reachable through t
+
+baseline:gpt_5_5:h18_fc_core_security_scope:rep_1:PERM-IRQ-001
+  status=potential_warning conf=medium
+  summary=Secure interrupt permission signals are present but unused/disabled while APB writes can modify interrupt state.
+  files=ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv; ips/pulp_soc/rtl/fc/fc_subsystem.sv
+  modules=apb_interrupt_cntrl; fc_subsystem
+  signals=core_irq_sec_o/core_secure_mode_i; core_secure_mode_i/core_irq_sec_o; r_mask/r_int/r_ack; core_secure_mode_i; core_irq_sec_o; fc_eu_i secure IRQ connections; s_is_apb_write / r_mask / r_int / r_ack
+  reason=The interrupt controller exposes security-related ports, but visible evidence shows core_secure_mode_i is not used in the controller logic and core_irq_sec_o is not assigned. In fc_subsystem, secure mode is tied low and secure IRQ output is not connected. Meanwhile, APB writes can update interrupt mask, interrupt-pending, and acknowledgment state based only on APB write strobes. If the design intends secure interrupt permission separation, this implementation does not enforce it in the visible R
+
+baseline:gpt_5_5:h18_fc_core_security_scope:rep_2:PERM-DEBUG-APB-UNAUTH
+  status=potential_warning conf=medium
+  summary=APB debug interface appears unauthenticated and can halt/resume the core through always-accessible debug registers.
+  files=ips/pulp_soc/rtl/fc/fc_subsystem.sv; ips/zero-riscy/zeroriscy_debug_unit.sv
+  modules=fc_subsystem; zeroriscy_debug_unit
+  signals=apb_slave_debug; apb_slave_debug -> apb2per/debug path; DBG_CTRL / debug_halt / debug_resume; debug-only registers / regfile write path; APB_BUS.Slave apb_slave_debug; apb_slave_debug signal connections; DBG_CTRL access logic; debug-only register and GPR write access
+  reason=The subsystem includes a dedicated APB debug slave and connects it directly to the internal debug path. In the debug unit, some debug registers are explicitly 'always accessible', and DBG_CTRL writes can trigger halt/resume behavior. Other sensitive debug functions are guarded only by debug_halted_o; however, debug_halted_o can itself be reached by the always-accessible halt request. No visible source evidence shows an authorization bit, secure lifecycle state, debug-lock, privilege level check,
+
+baseline:gpt_5_5:h18_fc_core_security_scope:rep_2:PERM-IRQ-REGS-NO-PRIVCHECK
+  status=potential_warning conf=medium
+  summary=Interrupt-control APB registers are writable/readable without visible privilege or secure-mode enforcement despite security-related signals.
+  files=ips/apb_interrupt_cntrl/apb_interrupt_cntrl.sv; ips/pulp_soc/rtl/fc/fc_subsystem.sv
+  modules=apb_interrupt_cntrl; fc_subsystem
+  signals=core_secure_mode_i / ENA_SEC_IRQ / core_irq_sec_o; r_mask, r_int, r_ack APB registers; core_secure_mode_i; security-related interrupt ports/parameter; proc_mask/proc_int/proc_ack APB write logic; .core_secure_mode_i ( 1'b0 ); APB read path and response signals
+  reason=The interrupt controller exposes APB-programmable mask, pending interrupt, acknowledgement, and FIFO state. The code updates these registers on APB writes without checking requester privilege or secure mode. Security-related signals/parameters exist, but the visible implementation does not use them to enforce access policy; at subsystem integration, core_secure_mode_i is tied low. If the APB slave is accessible to less-trusted software or bus masters, they can mask interrupts, forge pending inte
+
+baseline:gpt_5_5:h18_fc_core_security_scope:rep_2:PERM-SUPERVISOR-MODE-HARDWIRED
+  status=needs_more_evidence conf=low
+  summary=supervisor_mode_o is hardwired asserted, which may incorrectly grant privileged status to all subsystem activity.
+  files=ips/pulp_soc/rtl/fc/fc_subsystem.sv; ips/zero-riscy/zeroriscy_cs_registers.sv
+  modules=fc_subsystem; zeroriscy_cs_registers
+  signals=supervisor_mode_o; mstatus.mpp / privilege state; output logic supervisor_mode_o; assign supervisor_mode_o = 1'b1; mstatus.mpp initialization/update
+  reason=A signal named supervisor_mode_o is exported by fc_subsystem and hardwired to asserted. If downstream memory/firewall/peripheral logic uses this signal as a permission indicator, all accesses from this subsystem would appear privileged regardless of actual software state. The visible zero-riscy CSR logic also appears to hardwire machine privilege behavior rather than implement dynamic user/supervisor permissions.
+
+baseline:gpt_5_5:h18_fc_core_security_scope:rep_3:PERM-DEBUG-APB-001
+  status=potential_warning conf=medium
+  summary=APB-accessible debug interface lacks visible permission gating and can control CPU state.
+  files=ips/pulp_soc/rtl/fc/fc_subsystem.sv; ips/zero-riscy/zeroriscy_debug_unit.sv
+  modules=fc_subsystem; zeroriscy_debug_unit
+  signals=apb_slave_debug; apb2per_debug_i / debug_req / debug_addr / debug_we / debug_wdata / debug_rdata; debug_req/debug_gnt/debug_rvalid/debug_addr/debug_we/debug_wdata/debug_rdata core connection; debug_req/debug_gnt/debug_rvalid/debug_addr/debug_we/debug_wdata/debug_rdata Zero-Riscy core connection; deb
+  reason=The code exposes a debug APB slave and converts APB accesses directly into the core debug interface. The debug unit treats debug control registers as always accessible and provides halt/resume capability. Once halted, it permits writes to DNPC/next PC, general-purpose registers, and CSRs. No local RTL evidence shows authentication, lifecycle/debug-lock gating, test-mode gating, privilege checks, or bus-master authorization on this path. Therefore, if apb_slave_debug is reachable by untrusted sof
+
+baseline:gpt_5_5:h18_fc_core_security_scope:rep_3:PERM-PRIV-MODE-002
+  status=potential_warning conf=medium
+  summary=Zero-Riscy appears machine-mode-only, with no visible CPU privilege isolation.
+  files=ips/zero-riscy/zeroriscy_cs_registers.sv; ips/zero-riscy/zeroriscy_decoder.sv
+  modules=zeroriscy_cs_registers; zeroriscy_decoder
+  signals=mstatus; mstatus_q.mpp; csr_illegal / csr_access_o / illegal_insn_o; mstatus_n.mpp; csr_illegal
+  reason=The CSR implementation comments and assignments indicate the core is always machine mode, with mstatus.MPP forced to machine mode. The visible decoder evidence indicates CSR legality is based on CSR address recognition rather than a current privilege level. This likely reflects an intentional embedded-core simplification, but it means software privilege separation is not enforced by this core.
+
+### h18_gpio_apb_scope
+baseline:gpt_5_5:h18_gpio_apb_scope:rep_1:GPIO_APB_PERM_001
+  status=confirmed_finding conf=high
+  summary=GPIO lock is bypassable because GPIOLOCK is directly APB-writable without visible permission checks.
+  files=ips/apb/apb_gpio/apb_gpio.sv; ips/apb/apb_node/apb_node.sv
+  modules=apb_gpio; apb_node
+  signals=r_gpio_lock / APB write path; PREADY / PSLVERR; START_ADDR_i / END_ADDR_i address decode; APB write case / r_gpio_lock; `REG_GPIOLOCK / r_gpio_lock; psel_o address decode
+  reason=A lock register is present, but it is implemented as a normal APB-writable register. Since no visible privilege, owner, secure/non-secure, authentication, or write-once mechanism gates writes to REG_GPIOLOCK, the same actor that is supposed to be restricted can clear or modify r_gpio_lock. The APB slave also never asserts PSLVERR, and the visible APB node uses address-only selection. Therefore the design does not provide a robust permission boundary for GPIO configuration through the visible RTL
+
+baseline:gpt_5_5:h18_gpio_apb_scope:rep_1:GPIO_APB_PERM_002
+  status=confirmed_finding conf=high
+  summary=GPIO lock coverage is incomplete; several sensitive GPIO registers and output aliases remain writable without lock enforcement.
+  files=ips/apb/apb_gpio/apb_gpio.sv
+  modules=apb_gpio
+  signals=r_gpio_out / r_gpio_inten / r_gpio_inttype0 / r_gpio_inttype1 / r_gpio_en; gpio_padcfg[31:0]; PRDATA / r_gpio_lock; `REG_PADOUTSET / `REG_PADOUTCLR; r_gpio_inten / r_gpio_inttype0 / r_gpio_inttype1 / r_gpio_en; gpio_padcfg; PRDATA read case
+  reason=The r_gpio_lock checks are only visible around PADDIR/PADOUT writes and PADDIR/PADIN/PADOUT reads. Other sensitive state changes, including output set/clear aliases, GPIO enable, interrupt registers, and pad configuration registers, are not visibly gated by r_gpio_lock or any other permission signal. This creates a policy gap where protected GPIO state can be influenced through alternate registers or adjacent configuration paths.
+
+baseline:gpt_5_5:h18_gpio_apb_scope:rep_2:GPIO_APB_PERM_001
+  status=confirmed_finding conf=high
+  summary=GPIO lock register is freely writable over the same APB interface it is meant to protect, allowing lock bypass by clearing/changing `r_gpio_lock`.
+  files=ips/apb/apb_gpio/apb_gpio.sv; ips/pulp_soc/rtl/pulp_soc/soc_peripherals.sv
+  modules=apb_gpio; soc_peripherals
+  signals=REG_GPIOLOCK / r_gpio_lock; r_gpio_lock; apb_gpio_i / s_gpio_bus; `REG_GPIOLOCK; PRDATA / r_gpio_lock
+  reason=The design includes a lock register that gates access to selected GPIO registers, but the lock register is itself writable using the same APB register write mechanism as ordinary configuration registers. Since no APB privilege/security qualifier or write-once/sticky behavior is visible, software or any APB master with access to the GPIO address range can write `REG_GPIOLOCK` to clear lock bits and then read or modify protected GPIO state. This undermines the intended permission boundary represen
+
+baseline:gpt_5_5:h18_gpio_apb_scope:rep_2:GPIO_APB_PERM_002
+  status=confirmed_finding conf=high
+  summary=GPIO output lock is bypassable through PADOUTSET/PADOUTCLR because these registers update `r_gpio_out` without checking `r_gpio_lock[2]`.
+  files=ips/apb/apb_gpio/apb_gpio.sv
+  modules=apb_gpio
+  signals=REG_PADOUTSET / REG_PADOUTCLR; r_gpio_out; r_gpio_out / r_gpio_lock[2]; PRDATA / r_gpio_out / r_gpio_lock[2]; `REG_PADOUTSET / `REG_PADOUTCLR
+  reason=The GPIO output register has three write mechanisms: direct PADOUT write, PADOUTSET, and PADOUTCLR. The visible RTL applies the output lock bit (`r_gpio_lock[2]`) to direct PADOUT writes and output reads, but the set/clear aliases modify the same `r_gpio_out` state without testing the lock. Therefore, a requester can change locked GPIO outputs by writing to PADOUTSET/PADOUTCLR even when direct output writes are blocked.
+
+baseline:gpt_5_5:h18_gpio_apb_scope:rep_3:GPIO_APB_NO_PERMISSION_CHECKS
+  status=confirmed_finding conf=high
+  summary=GPIO APB control registers are writable without visible permission checks.
+  files=ips/apb/apb_gpio/apb_gpio.sv
+  modules=apb_gpio
+  signals=REG_PADDIR, REG_PADIN, REG_PADOUT, REG_INTEN, REG_INTTYPE0, REG_INTTYPE1, REG_INTSTATUS, REG_GPIOEN, REG_PADCFG0..7, REG_PADOUTSET, REG_PADOUTCLR, REG_GPIOLOCK; APB write path / GPIO control registers; gpio_out, gpio_dir, PREADY, PSLVERR; register definitions; write enable condition; r_gpio_dir, r_g
+  reason=The GPIO module has no visible inputs for privilege level, master identity, security domain, or access policy. Any APB transaction satisfying PSEL, PENABLE, and PWRITE can update GPIO control registers. Because these registers drive external GPIO outputs/directions and configure interrupts/pads, this is a permission-related weakness if the APB bus can be reached by less-trusted software or masters.
+
+baseline:gpt_5_5:h18_gpio_apb_scope:rep_3:GPIO_LOCK_REVERSIBLE_UNPROTECTED
+  status=confirmed_finding conf=high
+  summary=GPIO lock register is freely writable and reversible, so it is not a secure permission boundary.
+  files=ips/apb/apb_gpio/apb_gpio.sv
+  modules=apb_gpio
+  signals=r_gpio_lock; r_gpio_lock, PRDATA; r_gpio_lock reset; lock-controlled writes; REG_GPIOLOCK write; REG_GPIOLOCK read
+  reason=A security lock is only effective if unauthorized software cannot clear or reprogram it. In this implementation, r_gpio_lock is updated directly from PWDATA on a normal APB write to REG_GPIOLOCK. There is no visible privilege check, write-once behavior, set-only monotonic behavior, owner check, or reset-only unlock requirement. Therefore, any APB writer that can access GPIO can clear lock bits, modify protected registers, and optionally restore the lock.
+
+baseline:gpt_5_5:h18_gpio_apb_scope:rep_3:GPIO_LOCK_INCOMPLETE_BYPASS_PADOUTSET_CLR
+  status=confirmed_finding conf=high
+  summary=GPIO lock coverage is incomplete; PADOUTSET/PADOUTCLR bypass the PADOUT lock and other security-relevant registers remain ungated.
+  files=ips/apb/apb_gpio/apb_gpio.sv
+  modules=apb_gpio
+  signals=r_gpio_lock, r_gpio_dir, r_gpio_out; REG_PADOUTSET, REG_PADOUTCLR, r_gpio_out; r_gpio_inten, r_gpio_inttype0, r_gpio_inttype1, r_gpio_en; gpio_padcfg; lock checks for direct writes; REG_PADOUTSET, REG_PADOUTCLR; REG_INTEN, REG_INTTYPE0, REG_INTTYPE1, REG_GPIOEN; REG_PADCFG0 through REG_PADCFG7
+  reason=Even if the lock register were treated as a valid protection mechanism, it is inconsistently applied. Direct writes to PADOUT are gated by r_gpio_lock[2], but PADOUTSET and PADOUTCLR modify the same r_gpio_out state without checking the lock. Other security-relevant configuration, including interrupt setup, GPIO enable, and pad configuration, is also outside the lock checks.
+
+baseline:gpt_5_5:h18_gpio_apb_scope:rep_3:PERIPH_APB_GPIO_ADDRESS_RANGE_OVERLAP
+  status=potential_warning conf=medium
+  summary=GPIO APB range overlaps other peripheral ranges, allowing unintended GPIO selection on accesses to other peripherals.
+  files=rtl/includes/periph_bus_defines.sv; ips/pulp_soc/rtl/pulp_soc/periph_bus_wrap.sv; ips/apb/apb_node/apb_node.sv
+  modules=peripheral bus address definitions; periph_bus_wrap; apb_node
+  signals=GPIO_START_ADDR, GPIO_END_ADDR, UDMA/SOC_CTRL/ADV_TIMER/SOC_EVENT_GEN/EU address ranges; gpio_master address mapping; psel_o address decode; prdata_o, pready_o, pslverr_o muxing; GPIO_START_ADDR, GPIO_END_ADDR; UDMA/SOC_CTRL/ADV_TIMER/SOC_EVENT_GEN/EU ranges; gpio_master mapping; psel_o decode; APB 
+  reason=The GPIO address range 0x1A10_1000..0x1A10_AFFF overlaps several other peripheral ranges. The APB node asserts psel_o[i] for every address range match, with no visible priority or overlap prevention. Therefore, accesses intended for overlapping peripherals can also select the GPIO slave. Since apb_gpio decodes only local PADDR[6:2], such accesses can alias into GPIO registers and cause GPIO side effects.
+
+### h19_access_control_fabric_scope
+baseline:gpt_5_5:h19_access_control_fabric_scope:rep_1:FINDING-001
+  status=confirmed_finding conf=high
+  summary=PLIC access is implicitly granted by CLINT permission due to hardcoded connectivity-map logic.
+  files=src/axi_node/src/axi_node_intf_wrap.sv; tb/ariane_soc_pkg.sv; tb/ariane_testharness.sv
+  modules=axi_node_intf_wrap; access_ctrl_to_conn_map; ariane_soc package; ariane_testharness
+  signals=access_ctrl_i; connectivity_map_o; axi_slaves_t; access_ctrl; s_connectivity_map
+  reason=The design appears to encode independent access-control permissions per peripheral and privilege level. However, the connectivity-map generation has a special case for `j == 6`, which corresponds to PLIC, that also accepts the permission bit for `j == 7`, which corresponds to CLINT. Therefore, any subject allowed to access CLINT at a given privilege level is also allowed to access PLIC, even if the PLIC-specific permission bit denies access. This is a direct permission bypass in the fabric-level
+
+baseline:gpt_5_5:h19_access_control_fabric_scope:rep_1:FINDING-002
+  status=potential_warning conf=medium
+  summary=ROM2 stores keys and access-control policy in registers that are writable through its request/write-enable interface.
+  files=src/rom2/rom2.sv; tb/ariane_soc_pkg.sv; tb/ariane_testharness.sv
+  modules=rom2; ariane_soc package; ariane_testharness / ariane_peripherals instance; ariane_testharness
+  signals=ROM2 key storage comment; mem; secure_reg; ROM2 / ROM2Base / ROM2Length; rom2_fuse, jtag_key, access_ctrl_reg; module comment; secure_reg write path; ROM2 address map constants; jtag_key/access_ctrl_reg consumers
+  reason=ROM2 is documented as holding keys, and its reset constants include access-control policy values, JTAG key material, and AES material. These constants are copied into `secure_reg` on reset. The same `secure_reg` array is writable through a request/write-enable path. ROM2 is also included in the SoC peripheral address map and connected as `master[ariane_soc::ROM2]` in the peripheral subsystem. If any unauthorized or insufficiently restricted master can write ROM2, it may modify access-control pol
+
+baseline:gpt_5_5:h19_access_control_fabric_scope:rep_1:FINDING-003
+  status=potential_warning conf=low
+  summary=Alternate SimDTM debug path appears not to use the JTAG key and may bypass JTAG authentication if included in a security-relevant build.
+  files=tb/ariane_testharness.sv
+  modules=ariane_testharness; ariane_testharness / dmi_jtag instance; ariane_testharness / SimDTM instance
+  signals=debug_req mux; jtag_key; dmi_req
+  reason=The test harness chooses between a JTAG path, which receives `jtag_key`, and a SimDTM path, which directly drives DMI request fields. In the visible code, the SimDTM path does not consume or check `jtag_key`. If this path exists in a security-relevant build or can be enabled outside simulation, it may bypass JTAG-key-based debug authorization. However, this appears to be a simulation/test-harness construct, so production relevance is uncertain.
+
+baseline:gpt_5_5:h19_access_control_fabric_scope:rep_2:FINDING-001
+  status=confirmed_finding conf=high
+  summary=AXI fabric access-control logic grants index 6 access based on index 7 permissions.
+  files=src/axi_node/src/axi_node_intf_wrap.sv; tb/ariane_testharness.sv; tb/ariane_soc_pkg.sv
+  modules=axi_node_wrap; axi_node_intf_wrap; ariane_testharness; ariane_soc
+  signals=connectivity_map_o[i][j]; priv_lvl_i, access_ctrl_i; access_ctrl_i; axi_slaves_t
+  reason=The connectivity map is a permission-enforcement structure for the AXI node. For each source `i`, manager/peripheral `j`, and current privilege level, the expected authorization condition should be the corresponding access-control bit `access_ctrl_i[i][j][priv_lvl_i]`. Instead, the code grants access to `j==6` when either the permission for `j==6` is set or the permission for `j==7` is set. Because the SoC package maps index 6 to PLIC and index 7 to CLINT, any privilege/source configuration that
+
+baseline:gpt_5_5:h19_access_control_fabric_scope:rep_2:FINDING-002
+  status=potential_warning conf=medium
+  summary=ROM2 key/access-control storage is bus-readable and bus-writable with no local authorization checks visible.
+  files=src/rom2/rom2.sv; tb/ariane_testharness.sv; tb/ariane_soc_pkg.sv
+  modules=rom2; ariane_testharness; ariane_soc
+  signals=secure_reg, rdata_o; rom2 instance connections to req/we/addr/wdata/rdata; master[ariane_soc::ROM2], jtag_key, access_ctrl_reg; module comment; mem; secure_reg; rdata_o; ROM2Base, ROM2Length; start_addr_i/end_addr_i; i_ariane_peripherals; jtag_key; access_ctrl
+  reason=ROM2 stores sensitive material, including AES/JTAG key-like constants and access-control configuration words. The visible `rom2` module has a simple request/write/read interface: reads return `secure_reg`, and writes overwrite `secure_reg`, with no local check on privilege level, source identity, debug authentication, write-once lock, or address-specific restrictions. The SoC evidence shows ROM2 has a memory-mapped region and is connected to the peripheral fabric, and its outputs feed `jtag_key`
+
+baseline:gpt_5_5:h19_access_control_fabric_scope:rep_3:FINDING-001
+  status=confirmed_finding conf=high
+  summary=ROM2 stores keys and access-control values in `secure_reg` and exposes bus-driven read/write behavior without local authorization or write protection.
+  files=src/rom2/rom2.sv; tb/ariane_testharness.sv; tb/ariane_soc_pkg.sv
+  modules=rom2; ariane_testharness; ariane_soc package
+  signals=secure_reg; mem; secure_reg, raddr_q, rdata_o; rom2_fuse, jtag_key, access_ctrl_reg; ROM2, ROM2Base, ROM2Length; always_ff read/write path and rdata_o; ROM2 enum/base/length
+  reason=The same storage (`secure_reg`) holds sensitive security material and access-control configuration. The visible `rom2` implementation permits writes to `secure_reg` whenever `req_i && we_i` and permits reads whenever `req_i && !we_i`, with no local permission gate. Since ROM2 is mapped into the SoC address space and connected as a peripheral, any requester that can reach ROM2 through the fabric can read keys/access-control values and can overwrite them. Even if the external fabric is intended to
+
+baseline:gpt_5_5:h19_access_control_fabric_scope:rep_3:FINDING-002
+  status=confirmed_finding conf=high
+  summary=The AXI fabric grants access to peripheral/manager index 6 whenever access to index 7 is allowed, creating a permission bypass between CLINT and PLIC.
+  files=src/axi_node/src/axi_node_intf_wrap.sv; tb/ariane_testharness.sv; tb/ariane_soc_pkg.sv
+  modules=connectivity_mapping; axi_node_intf_wrap; ariane_testharness; ariane_soc package
+  signals=connectivity_map_o; s_connectivity_map; access_ctrl; PLIC, CLINT; cfg_connectivity_map_i; access_ctrl, access_ctrl_reg; axi_slaves_t
+  reason=The access-control map should normally authorize each destination based on its own access-control bit for the current privilege level. Instead, the logic explicitly ORs the permission for destination 7 into destination 6. In the visible SoC enumeration, destination 6 is PLIC and destination 7 is CLINT. Therefore, any requester/privilege level granted CLINT access is also granted PLIC access, even if PLIC was intentionally denied in `access_ctrl_i[i][6][priv_lvl_i]`. This is a clear permission by
+
+baseline:gpt_5_5:h19_access_control_fabric_scope:rep_3:FINDING-003
+  status=potential_warning conf=medium
+  summary=The fabric appears to use a single processor privilege signal for access-control decisions across multiple AXI requesters, including debug.
+  files=tb/ariane_testharness.sv; src/axi_node/src/axi_node_intf_wrap.sv
+  modules=ariane_testharness; axi_node_intf_wrap
+  signals=priv_lvl, priv_lvl_processor, access_ctrl; priv_lvl_processor, slave[0]; slave[1]; priv_lvl_i, access_ctrl_i; priv_lvl
+  reason=The access-control matrix includes a requester dimension, but the privilege level used to select each requester's permission bit is a single signal derived from the Ariane processor. Visible connections also show a debug AXI master on `slave[1]`. If the debug master or any other requester can issue transactions while the processor is in a higher privilege mode, its accesses may be authorized using the processor's current privilege rather than the requester's own security context. Conversely, if 
+
+### h19_aes_rom2_security_scope
+baseline:gpt_5_5:h19_aes_rom2_security_scope:rep_1:PERM-001
+  status=confirmed_finding conf=high
+  summary=ROM2 stores access-control policy but exposes a bus-driven write path that can modify the registers used to configure AXI permissions.
+  files=src/rom2/rom2.sv; tb/ariane_peripherals.sv; tb/ariane_testharness.sv; src/axi_node/src/axi_node_intf_wrap.sv; tb/ariane_soc_pkg.sv
+  modules=rom2; ariane_peripherals; ariane_testharness; axi_node_intf_wrap; ariane_soc package
+  signals=mem; secure_reg; rom2_fuse / rom2_req / rom2_we / key_reg_out; access_ctrl_reg; access_ctrl; connectivity_map_o; ROM2Base; secure_reg write path; i_axi2rom2 and i_rom2
+  reason=ROM2 is intended to hold security-sensitive fuse/key data and explicitly includes access-control entries. Those entries are copied to secure_reg and then used to drive access_ctrl_reg, which is expanded into the AXI node access-control matrix. However, secure_reg is writable whenever req_i and we_i are asserted, and these signals are connected to a bus-facing axi2mem path. No lock, privilege check, authentication check, write-once mechanism, or separation between fuse contents and mutable bus re
+
+baseline:gpt_5_5:h19_aes_rom2_security_scope:rep_1:PERM-002
+  status=confirmed_finding conf=medium
+  summary=Secret key material is readable via ROM2 and AES peripheral register interfaces.
+  files=src/rom2/rom2.sv; tb/ariane_peripherals.sv; src/aes/aes_wrapper.sv
+  modules=rom2; ariane_peripherals; aes_wrapper
+  signals=rdata_o / secure_reg; jtag_key; key_in; key_big; external_bus_io.rdata; rdata_o
+  reason=Key material from ROM2 is exposed on bus-readable paths. ROM2 directly returns secure_reg contents on reads, and the AES wrapper maps all 192 bits of key_big to readable registers. Because key_big is assigned from key_in and key_in is wired from ROM2-derived key_reg_out[0], the AES key can be read through the AES peripheral. ROM2 also feeds jtag_key, indicating that ROM2 stores debug/JTAG-related secrets. If these keys are used to authenticate privileged access, exposing them can enable permissi
+
+baseline:gpt_5_5:h19_aes_rom2_security_scope:rep_2:PERM-001
+  status=confirmed_finding conf=high
+  summary=ROM2 secure key/access-control storage is memory-mapped, readable, and writable without local authorization checks.
+  files=src/rom2/rom2.sv; tb/ariane_peripherals.sv; tb/ariane_soc_pkg.sv; tb/ariane_testharness.sv
+  modules=rom2; ariane_peripherals; ariane_soc package; ariane_testharness
+  signals=secure_reg, mem, req_i, we_i, addr_i, wdata_i, rdata_o; rom2_fuse, rom2_req, rom2_we, rom2_addr, rom2_wdata, rom2_rdata, key_reg_out; ROM2, ROM2Length, ROM2Base; master[ariane_soc::ROM2], ROM2Base/ROM2Length address mapping; ROM2 comment; mem; secure_reg <= mem; secure_reg write path; rdata_o; i_axi
+  reason=ROM2 is intended to contain keys and security policy, but its RTL implements a generic memory-like interface. When req_i is asserted and we_i is high, secure_reg is updated directly from wdata_i at the address-selected index. When read, rdata_o returns secure_reg content. The module does not check privilege level, requester identity, transaction source, read/write permissions, lock state, or whether the target entry is secret/policy. Integration evidence shows ROM2 is memory-mapped through an AX
+
+baseline:gpt_5_5:h19_aes_rom2_security_scope:rep_2:PERM-002
+  status=confirmed_finding conf=high
+  summary=System access-control permissions are derived from ROM2 entries that are writable through ROM2's bus interface.
+  files=src/rom2/rom2.sv; tb/ariane_peripherals.sv; tb/ariane_testharness.sv; src/axi_node/src/axi_node_intf_wrap.sv
+  modules=rom2; ariane_peripherals; ariane_testharness; axi_node_intf_wrap / addr_decoder
+  signals=secure_reg[2], secure_reg[3], mem access-control entries; access_ctrl_reg, key_reg_out; access_ctrl, access_ctrl_reg, priv_lvl; access_ctrl_i, priv_lvl_i, connectivity_map_o; mem[access-control entries]; secure_reg write path; access_ctrl_reg; access_ctrl; axi_node_intf_wrap instantiation; connectiv
+  reason=The visible design stores system access-control policy values in ROM2 secure_reg entries and exports those values to access_ctrl_reg. The test harness converts access_ctrl_reg into the access_ctrl matrix, and the AXI node uses access_ctrl_i[...][priv_lvl_i] to generate connectivity permissions. Because ROM2 permits writes to secure_reg without local authorization, a requester with ROM2 write access can potentially modify the same policy that controls peripheral access, creating a privilege-escal
+
+baseline:gpt_5_5:h19_aes_rom2_security_scope:rep_2:PERM-003
+  status=confirmed_finding conf=high
+  summary=AES wrapper exposes the full AES key through readable MMIO registers without local permission checks.
+  files=src/aes/aes_wrapper.sv; tb/ariane_peripherals.sv; tb/ariane_soc_pkg.sv
+  modules=aes_wrapper; ariane_peripherals; ariane_soc package
+  signals=key_in, key_big, external_bus_io.rdata; key_reg_out[0], key_in; AES, AESLength, AESBase; key_in; key_big; aes_192_sed.key; external_bus_io.rdata key reads; external_bus_io.ready/error; i_aes_wrapper.key_in; AESBase/AESLength
+  reason=The AES wrapper assigns key_big from key_in, uses key_big for encryption, and also maps key_big onto read data for offsets 16 through 21. There is no local privilege check, lock bit, read-disable, or error response for these key reads. Therefore any requester that can read the AES MMIO region can retrieve the full AES key instead of being limited to invoking AES operations.
+
+baseline:gpt_5_5:h19_aes_rom2_security_scope:rep_2:PERM-004
+  status=potential_warning conf=medium
+  summary=JTAG key is sourced from writable ROM2 state, creating a potential debug authorization weakness.
+  files=tb/ariane_peripherals.sv; src/rom2/rom2.sv; tb/ariane_testharness.sv
+  modules=ariane_peripherals; rom2; ariane_testharness
+  signals=jtag_key, key_reg_out[1]; secure_reg[1], mem JTAG entry; mem JTAG entry; secure_reg write path; jtag_key; dmi_jtag.jtag_key
+  reason=The design sources jtag_key from ROM2 state, and ROM2 state is writable through the ROM2 bus interface. If dmi_jtag uses this key for debug authentication, then a ROM2 write could alter the debug authentication secret. The actual dmi_jtag implementation is not present in the inspected files, so the exact impact cannot be fully confirmed, but the visible wiring indicates a plausible debug-permission weakness tied to writable security state.
+
+baseline:gpt_5_5:h19_aes_rom2_security_scope:rep_3:FINDING-001
+  status=confirmed_finding conf=high
+  summary=ROM2/fuse secure registers are memory-mapped and writable/readable without visible authorization checks.
+  files=src/rom2/rom2.sv; tb/ariane_peripherals.sv; tb/ariane_testharness.sv
+  modules=rom2; ariane_peripherals; ariane_testharness
+  signals=req_i, we_i, addr_i, wdata_i, rdata_o, secure_reg; mem; secure_reg; rdata_o; i_axi2rom2, i_rom2, key_reg_out; jtag_key, access_ctrl_reg; key_in/key_reg_out[0]; ROM2Base/ROM2Length mapping; ROM2 comment; secure_reg <= mem; if(req_i) ... secure_reg[...] <= wdata_i; assign rdata_o = (raddr_q < RomSize)
+  reason=ROM2 is intended to act like a secure fuse/key store, but the implementation copies constants into secure_reg and then allows secure_reg to be read and written through req_i/we_i without local authorization. Because an AXI-to-memory adapter connects the SoC bus to ROM2, and because secure_reg outputs feed JTAG, AES, and access-control state, memory-mapped access to ROM2 can disclose or alter security-critical state.
+
+baseline:gpt_5_5:h19_aes_rom2_security_scope:rep_3:FINDING-002
+  status=confirmed_finding conf=high
+  summary=AES peripheral exposes the full AES key through readable memory-mapped registers.
+  files=src/aes/aes_wrapper.sv; tb/ariane_peripherals.sv
+  modules=aes_wrapper; ariane_peripherals
+  signals=key_big; external_bus_io.rdata, key_big; external_bus_io.error; key_in/key_reg_out[0]; assign key_big = key_in; external_bus_io.rdata = key_big[...]; assign external_bus_io.error = 1'b0; .key_in(key_reg_out[0])
+  reason=The AES key is assigned from key_in and passed to the AES core, but the register read mux also returns all six 32-bit slices of that same key. No local privilege or authorization check is present in the AES wrapper. Therefore, any master allowed to read the AES peripheral register window can recover the AES key.
+
+baseline:gpt_5_5:h19_aes_rom2_security_scope:rep_3:FINDING-003
+  status=potential_warning conf=medium
+  summary=Interconnect permission policy is derived from ROM2 data that is mutable through the ROM2 bus interface.
+  files=src/rom2/rom2.sv; tb/ariane_peripherals.sv; tb/ariane_testharness.sv; src/axi_node/src/axi_node_intf_wrap.sv
+  modules=rom2; ariane_peripherals; ariane_testharness; axi_node_intf_wrap
+  signals=mem access-control entries; secure_reg; access_ctrl_reg; access_ctrl; access_ctrl_i; connectivity_map_o; access-control entries in mem; access_ctrl_reg[0/1]; assign access_ctrl[i][j] = access_ctrl_reg[i][4*j +: 4]; .access_ctrl_i(access_ctrl); connectivity_map_o assignment
+  reason=The AXI node permission map is derived from access_ctrl_reg, which is sourced from ROM2 secure_reg. Since ROM2 secure_reg is writable through the memory-mapped ROM2 interface, the permission policy can potentially be changed by a bus master. This is a permission-design weakness: the enforcement policy is stored in a mutable register bank that lacks visible local authorization.
+
+### h19_csr_privilege_scope
+baseline:gpt_5_5:h19_csr_privilege_scope:rep_1:CSR_PRIV_BYPASS_MEPC_001
+  status=confirmed_finding conf=high
+  summary=Machine-mode CSR `mepc` is explicitly exempted from the CSR privilege check, allowing unauthorized read/write access paths to avoid normal illegal-instruction enforcement.
+  files=src/csr_regfile.sv; include/riscv_pkg.sv
+  modules=csr_regfile; riscv package
+  signals=csr_exception_o / csr_addr / priv_lvl_o / CSR_MEPC privilege check; mepc_q / CSR_MEPC read path; mepc_d / CSR_MEPC write path; CSR_MEPC; CSR privilege check; CSR_MEPC read case; CSR_MEPC write case; CSR_MEPC definition; PRIV_LVL_M definition; CSR access exception handling
+  reason=RISC-V CSR privilege permissions are encoded in CSR addresses; `CSR_MEPC` at `0x341` is a Machine-mode CSR. The design implements a generic privilege check comparing `priv_lvl_o` with the CSR-required privilege level, but the active condition explicitly excludes `CSR_MEPC`. Because `CSR_MEPC` is present in both the read and write cases, accesses to this Machine-mode CSR can avoid the normal illegal-instruction exception that would otherwise be raised for insufficient privilege.
+
+baseline:gpt_5_5:h19_csr_privilege_scope:rep_1:PRIV_OVERRIDE_UMODEI_002
+  status=potential_warning conf=medium
+  summary=External/top-level `umode_i` forces `priv_lvl_o` to Machine mode, potentially overriding architectural privilege enforcement.
+  files=src/csr_regfile.sv; src/ariane.sv
+  modules=csr_regfile; ariane
+  signals=umode_i input; priv_lvl_o; en_translation_o / priv_lvl_o; umode_i connection to csr_regfile; priv_lvl_o connection; priv_lvl_o assignment; en_translation_o assignment; top-level umode_i input; csr_regfile_i .umode_i connection; csr_regfile_i .priv_lvl_o connection
+  reason=The visible RTL assigns `priv_lvl_o` to Machine mode whenever `umode_i` is asserted. Since `priv_lvl_o` is used by CSR privilege checks and by translation-enable logic, an asserted `umode_i` can cause the core to be treated as Machine mode for security-sensitive decisions. The signal is a top-level input and is passed directly into the CSR regfile in the inspected source, but the provided scope does not show its trusted source or intended use.
+
+baseline:gpt_5_5:h19_csr_privilege_scope:rep_2:CSR_PRIV_BYPASS_MEPC_001
+  status=confirmed_finding conf=high
+  summary=`CSR_MEPC` is explicitly exempted from CSR privilege checks, allowing unauthorized access to a Machine-mode CSR.
+  files=src/csr_regfile.sv; include/riscv_pkg.sv
+  modules=csr_regfile; riscv package
+  signals=csr_exception_o / csr_addr / priv_lvl_o; mepc_q / CSR_MEPC read path; mepc_d / CSR_MEPC write path; CSR_MEPC; CSR_MEPC read case; CSR_MEPC write case; CSR privilege check; csr_exception_o
+  reason=The CSR file implements a generic privilege check for CSR reads/writes using the current privilege level and the decoded CSR-required privilege. However, the check explicitly exempts `CSR_MEPC`. Since `mepc` is a Machine-mode CSR and is present in both the CSR read and write cases, lower-privileged CSR accesses to `mepc` can avoid the intended illegal-instruction exception path. This violates privilege separation for Machine-mode exception state.
+
+baseline:gpt_5_5:h19_csr_privilege_scope:rep_2:PRIV_FORCE_UMODE_INPUT_002
+  status=potential_warning conf=medium
+  summary=A top-level `umode_i` input can force `priv_lvl_o` to Machine mode, affecting CSR access control and address-translation protection.
+  files=src/csr_regfile.sv; src/ariane.sv
+  modules=csr_regfile; ariane
+  signals=umode_i; priv_lvl_o; en_translation_o; CSR privilege check using priv_lvl_o; csr_regfile_i.umode_i; priv_lvl_o assignment; CSR privilege check; en_translation_o assignment
+  reason=The signal name `umode_i` suggests User-mode-related functionality, but the implementation treats assertion of this input as equivalent to debug mode for the privilege output, forcing `priv_lvl_o` to `PRIV_LVL_M`. Since `priv_lvl_o` is then used by CSR permission checks and by address-translation enable logic, an asserted `umode_i` can cause the core to behave as though it is in Machine mode even if the internal privilege register `priv_lvl_q` is lower. Within the visible source scope, `umode_i`
+
+baseline:gpt_5_5:h19_csr_privilege_scope:rep_3:CSR_PRIV_001
+  status=confirmed_finding conf=high
+  summary=External/top-level umode_i can force the effective CSR privilege level to machine mode.
+  files=src/csr_regfile.sv; src/ariane.sv
+  modules=csr_regfile; ariane
+  signals=priv_lvl_o; csr_exception_o / csr_addr.csr_decode.priv_lvl; umode_i; CSR privilege check; assign priv_lvl_o = (debug_mode_q || umode_i) ? riscv::PRIV_LVL_M : priv_lvl_q;; input logic umode_i; .umode_i ( umode_i )
+  reason=The CSR permission check relies on priv_lvl_o. However, priv_lvl_o is not simply the architectural privilege register priv_lvl_q; it is overridden to riscv::PRIV_LVL_M when umode_i is asserted. Since umode_i is visible as a top-level input and is wired into csr_regfile, an asserted umode_i can cause CSR accesses and other privilege consumers of priv_lvl_o to observe machine privilege even when priv_lvl_q is lower. This defeats CSR privilege scoping and may authorize accesses that should raise il
+
+baseline:gpt_5_5:h19_csr_privilege_scope:rep_3:CSR_PRIV_002
+  status=confirmed_finding conf=high
+  summary=Machine exception PC CSR_MEPC is explicitly exempted from the CSR privilege-level check.
+  files=src/csr_regfile.sv; include/riscv_pkg.sv
+  modules=csr_regfile; riscv package
+  signals=CSR_MEPC privilege-check exemption; CSR_MEPC; if ((riscv::priv_lvl_t'(priv_lvl_o & csr_addr.csr_decode.priv_lvl) != csr_addr.csr_decode.priv_lvl) && !(csr_addr.address==riscv::CSR_MEPC)) begin; CSR_MEPC = 12'h341; csr_exception_o comment
+  reason=The active CSR privilege check suppresses illegal-instruction generation on privilege mismatch when csr_addr.address equals riscv::CSR_MEPC. Since MEPC is a machine-level CSR, lower-privilege code should not be able to access it. The explicit exemption allows MEPC accesses to bypass the generic CSR privilege check, violating the stated intended behavior that inappropriate CSR privilege accesses raise exceptions.
+
+### h19_debug_jtag_scope
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_1:PERM-DEBUG-001
+  status=confirmed_finding conf=high
+  summary=Debug module is hardwired as authenticated with no implemented authentication.
+  files=src/debug/dm_csrs.sv
+  modules=dm_csrs
+  signals=dmstatus.authenticated; haltreq_o; sbaddress_write_valid_o / sbdata_write_valid_o; haltreq_o[selected_hart] = dmcontrol_q.haltreq
+  reason=RISC-V debug modules commonly require an authentication state before allowing privileged debug operations. Here, the design explicitly sets dmstatus.authenticated to 1'b1 and comments that no authentication is implemented. The same CSR block exposes hart halt controls and system bus access controls. Therefore any entity able to reach DMI/debug CSRs is treated as authorized to perform powerful debug operations.
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_1:PERM-JTAG-001
+  status=confirmed_finding conf=high
+  summary=JTAG DMI password gate protects reads but not writes.
+  files=src/debug/dmi_jtag.sv
+  modules=dmi_jtag
+  signals=pass_chk / state_d; dmi_req.op; umode_o; pass; if READ && pass_chk ... else if WRITE ...; assign dmi_req.op = (state_q == Write) ? dm::DTM_WRITE : dm::DTM_READ; pass <= jtag_key
+  reason=The dmi_jtag state machine appears to implement password checking with pass_chk. However, only DTM_READ is conditioned on pass_chk == 1'b1. DTM_WRITE requests transition to Write unconditionally. Since the module then emits DMI write operations in Write state, an unauthenticated JTAG user may be able to write debug-module registers despite failing or skipping password authentication.
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_1:PERM-JTAG-002
+  status=confirmed_finding conf=high
+  summary=JTAG authentication result can force processor privilege to machine mode.
+  files=src/debug/dmi_jtag.sv; tb/ariane_testharness.sv; src/csr_regfile.sv
+  modules=dmi_jtag; ariane_testharness; csr_regfile
+  signals=umode_o; ariane_umode; umode_i; priv_lvl_o; .umode_o ( ariane_umode ); .umode_i ( ariane_umode ); assign priv_lvl_o = (debug_mode_q || umode_i) ? riscv::PRIV_LVL_M : priv_lvl_q
+  reason=The JTAG module asserts umode_o after pass_chk and this signal is wired through the testharness into csr_regfile.umode_i. csr_regfile then reports machine privilege whenever umode_i is asserted. This creates a direct external debug/JTAG-controlled path to force machine-mode privilege, rather than using a controlled debug-mode entry/exit or privilege transition mechanism.
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_1:PERM-ROM2-001
+  status=confirmed_finding conf=high
+  summary=Key/fuse ROM2 is memory-mapped, readable, and writable without local permission checks.
+  files=src/rom2/rom2.sv; tb/ariane_peripherals.sv; tb/ariane_soc_pkg.sv
+  modules=rom2; ariane_peripherals; ariane_soc
+  signals=secure_reg / rdata_o; mem; key_reg_out / jtag_key / access_ctrl_reg; ROM2Base; req_i / we_i / secure_reg / rdata_o; i_rom2 / jtag_key / access_ctrl_reg; ROM2Base = 64'h0021_0000
+  reason=ROM2 is described as holding keys and fuse-derived secure registers. The module exposes a bus-like req/we/addr/wdata/rdata interface and permits both reads and writes to secure_reg whenever req_i is asserted. No local privilege, master-ID, lock, write-once, lifecycle, or debug-disable check is visible. The SoC maps ROM2 as a peripheral and routes its contents to JTAG key, access-control registers, and AES key input, so unauthorized access can disclose or modify security policy and keys.
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_1:PERM-CSR-001
+  status=potential_warning conf=medium
+  summary=CSR privilege enforcement explicitly exempts MEPC from access exceptions.
+  files=src/csr_regfile.sv
+  modules=csr_regfile
+  signals=csr_exception_o / read_access_exception; if ((privilege mismatch) && !(csr_addr.address==riscv::CSR_MEPC))
+  reason=The CSR privilege check compares the current privilege level against the CSR's decoded required privilege. A special-case exception disables this protection for CSR_MEPC. Since MEPC is a machine-mode CSR used for trap return state, allowing access outside machine/debug privilege would violate normal privilege isolation and could permit lower-privilege software to observe or influence machine exception return state.
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_2:F-001
+  status=confirmed_finding conf=high
+  summary=JTAG/DMI write operations bypass the password check.
+  files=src/debug/dmi_jtag.sv; src/debug/dm_csrs.sv
+  modules=dmi_jtag; dm_csrs
+  signals=pass_chk / state_d / dmi.op; dmi_req_i / dtm_op / cmd_valid_o / sbaddress_write_valid_o / sbdata_write_valid_o / haltreq_o; DMI operation dispatch; DMI write handling
+  reason=The intended JTAG password mechanism only restricts reads. DMI writes proceed regardless of pass_chk, yet DMI writes are used by the debug module to control privileged debug functionality such as halt/resume, abstract commands, and system bus access. Therefore an unauthenticated JTAG/DMI actor can potentially perform privileged debug writes.
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_2:F-002
+  status=confirmed_finding conf=high
+  summary=Debug module reports authenticated unconditionally.
+  files=src/debug/dm_csrs.sv
+  modules=dm_csrs
+  signals=dmstatus.authenticated
+  reason=The debug module permanently advertises an authenticated debugger even though the RTL comment states no authentication is implemented. Any software/tooling or policy logic relying on dmstatus.authenticated will treat the debug session as authorized.
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_2:F-003
+  status=potential_warning conf=medium
+  summary=JTAG password state pass_chk is not safely registered or reset.
+  files=src/debug/dmi_jtag.sv
+  modules=dmi_jtag
+  signals=pass_chk / umode_o; pass_chk
+  reason=pass_chk is treated as an authentication state but is not visibly registered or reset. It is assigned conditionally inside combinational logic without a clear default assignment. This can infer latch-like behavior, retain stale authorization, become X/unknown, or behave inconsistently across tools, which is unsafe for a security-critical permission check.
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_2:F-004
+  status=confirmed_finding conf=high
+  summary=JTAG authentication state can force processor privilege to Machine mode.
+  files=src/debug/dmi_jtag.sv; tb/ariane_testharness.sv; src/csr_regfile.sv
+  modules=dmi_jtag; ariane_testharness; csr_regfile
+  signals=umode_o / pass_chk; ariane_umode; umode_i / priv_lvl_o; umode_o; priv_lvl_o
+  reason=The JTAG wrapper's password-check state drives umode_o, which is connected into csr_regfile as umode_i. csr_regfile then forces priv_lvl_o to Machine mode whenever umode_i is asserted. This creates a direct privilege escalation path controlled by debug/JTAG authentication state, which is especially dangerous given the weak pass_chk implementation and ungated DMI writes.
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_2:F-005
+  status=confirmed_finding conf=high
+  summary=ROM2/fuse key and access-control storage is writable through a memory-mapped AXI path.
+  files=src/rom2/rom2.sv; tb/ariane_peripherals.sv; tb/ariane_soc_pkg.sv
+  modules=rom2; ariane_peripherals; ariane_soc
+  signals=secure_reg / mem / we_i; rom2_fuse / rom2_we / jtag_key / access_ctrl_reg; ROM2Base; secure_reg; rom2_fuse / jtag_key / access_ctrl_reg
+  reason=ROM2/fuse storage is expected to protect root keys and access-control data, but the module allows writes to secure_reg through a generic req_i/we_i interface. The peripheral wrapper maps this interface to AXI and derives the JTAG key and access-control registers from this storage. Without internal write authorization, any master that can write the ROM2 region can change keys or permission tables.
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_3:FINDING-001
+  status=confirmed_finding conf=high
+  summary=Debug module reports authenticated without implementing authentication, allowing privileged debug control through DMI.
+  files=src/debug/dm_csrs.sv
+  modules=dm_csrs
+  signals=dmstatus.authenticated; dmi_req_i / dtm_op; haltreq_o, resumereq_o, dmactive_o; ndmreset_o; sbdata_write_valid_o; if (dmi_req_ready_o && dmi_req_valid_i && dtm_op == dm::DTM_WRITE); haltreq_o/resumereq_o; ndmreset_o = dmcontrol_q.ndmreset
+  reason=A permission boundary is expected around invasive debug functionality. However, dm_csrs explicitly documents that no authentication is implemented and hard-wires dmstatus.authenticated to 1. DMI writes are processed using only valid/ready/op conditions, and debug CSR state directly drives powerful controls such as halt, resume, ndmreset, and system-bus write access. This is a confirmed permission-related weakness because an entity able to issue DMI transactions is treated as authenticated and ca
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_3:FINDING-002
+  status=confirmed_finding conf=high
+  summary=JTAG password check gates reads but not writes, allowing unauthenticated DMI write access.
+  files=src/debug/dmi_jtag.sv; tb/ariane_testharness.sv
+  modules=dmi_jtag; ariane_testharness
+  signals=pass_chk / state_d; dmi_req.op; pass / jtag_key; dmi_jtag instance / umode_o; Idle state DMI op handling; assign dmi_req.op; pass <= jtag_key; i_dmi_jtag ports
+  reason=The JTAG DMI module appears intended to require a password: it stores a jtag_key in pass and sets pass_chk after a DTM_PASS operation with matching data. However, the state transition logic only checks pass_chk for DTM_READ. For DTM_WRITE, it enters Write state regardless of pass_chk, and the downstream DMI op becomes DTM_WRITE. Therefore an unauthenticated JTAG user can issue DMI writes, including writes to debug control CSRs in dm_csrs.
+
+baseline:gpt_5_5:h19_debug_jtag_scope:rep_3:FINDING-003
+  status=confirmed_finding conf=high
+  summary=Memory-mapped ROM2 key/access-control storage is readable and writable without visible permission enforcement.
+  files=src/rom2/rom2.sv; tb/ariane_peripherals.sv; tb/ariane_soc_pkg.sv
+  modules=rom2; ariane_peripherals; ariane_soc
+  signals=mem / secure_reg; secure_reg; rdata_o; i_rom2 / key_reg_out / jtag_key / access_ctrl_reg; ROM2Base / ROM2Length; mem constants; secure_reg write logic; i_rom2 and assignments
+  reason=ROM2 is explicitly documented as holding keys and includes JTAG, AES, and access-control data. Despite being a fuse/key storage block, it accepts writes to secure_reg whenever req_i and we_i are asserted, and returns secure_reg values on reads. The peripheral integration maps ROM2 into the SoC and uses its outputs to drive jtag_key and access_ctrl_reg. No visible permission, privilege, lock, or lifecycle check protects reads or writes. This creates a permission vulnerability in security-critical
+
+### h19_jtag_debug_expansion_scope
+baseline:gpt_5_5:h19_jtag_debug_expansion_scope:rep_1:FINDING-001
+  status=confirmed_finding conf=high
+  summary=JTAG password check gates DMI reads but not DMI writes, allowing unauthenticated debug control writes.
+  files=src/debug/dmi_jtag.sv; src/debug/dm_csrs.sv
+  modules=dmi_jtag; dm_csrs
+  signals=pass_chk, state_d, dmi_req_valid; dmi_req_o, dmi_req_valid_o; dmi_req_i, dmcontrol_d; haltreq_o, resumereq_o, ndmreset_o; sbdata_write_valid_o; pass_chk; DTM_READ path; DTM_PASS path; DTM_WRITE path; dmi_cdc instance; DMI write acceptance; DMControl write; debug control outputs
+  reason=The design appears to implement password authentication for JTAG debug by setting `pass_chk` after a `DTM_PASS` command. However, only DMI reads are gated by `pass_chk`; DMI writes are allowed to enter the `Write` state regardless of authentication and assert `dmi_req_valid`. These requests are forwarded to `dm_csrs`, which accepts DMI writes and updates sensitive debug control registers. Therefore, a JTAG actor can issue unauthenticated writes to control debug functionality.
+
+baseline:gpt_5_5:h19_jtag_debug_expansion_scope:rep_1:FINDING-002
+  status=confirmed_finding conf=high
+  summary=Debug module reports authenticated unconditionally.
+  files=src/debug/dm_csrs.sv; src/debug/dmi_jtag.sv
+  modules=dm_csrs; dmi_jtag
+  signals=dmstatus.authenticated; pass_chk
+  reason=The debug module's `DMStatus.authenticated` bit is hardwired high. This is inconsistent with the password mechanism in the JTAG transport layer and means the debug module internally does not reflect or enforce authentication state.
+
+baseline:gpt_5_5:h19_jtag_debug_expansion_scope:rep_1:FINDING-003
+  status=potential_warning conf=medium
+  summary=JTAG authentication flag `pass_chk` is not visibly reset or safely cleared.
+  files=src/debug/dmi_jtag.sv
+  modules=dmi_jtag
+  signals=pass_chk, umode_o; state_q, address_q, data_q, error_q; pass_chk assignment; reset block; pass_chk search results
+  reason=The `pass_chk` signal controls security-sensitive behavior, but visible code does not reset it or assign it a safe default in the combinational block. It is only set on successful password comparison. This can infer latch-like behavior or leave authentication state unknown/unpredictable after reset, depending on synthesis and simulation semantics.
+
+baseline:gpt_5_5:h19_jtag_debug_expansion_scope:rep_1:FINDING-004
+  status=potential_warning conf=medium
+  summary=ROM/fuse-like key storage is readable and writable over a bus-facing interface without visible permission checks.
+  files=src/rom2/rom2.sv; tb/ariane_peripherals.sv
+  modules=rom2; ariane_peripherals
+  signals=mem, secure_reg, rdata_o; rom2_req, rom2_we, rom2_addr, rom2_wdata, rom2_rdata, jtag_key; mem; secure_reg reset load; secure_reg bus access; rdata_o; i_axi2rom2; jtag_key
+  reason=The ROM/fuse-like block stores keys and access-control values in `secure_reg`. Despite its security role, the visible implementation allows writes to `secure_reg` on any asserted bus write request and allows reads through `rdata_o`. No privilege, lock, lifecycle, or read-protection check is visible in the module. In the test/peripheral integration, it is connected to a bus-facing AXI memory bridge and supplies the JTAG key.
+
+baseline:gpt_5_5:h19_jtag_debug_expansion_scope:rep_2:FINDING-001
+  status=confirmed_finding conf=high
+  summary=JTAG password check gates DMI reads but not DMI writes, allowing unauthenticated debug writes.
+  files=src/debug/dmi_jtag.sv; src/debug/dm_pkg.sv
+  modules=dmi_jtag; dm package
+  signals=pass_chk, state_d, dmi.op; dmi_req_o, dmi_req_valid_o; dtm_op_t; pass_chk; DMI state machine; i_dmi_cdc
+  reason=The JTAG password mechanism is incomplete. In dmi_jtag.sv, DTM_READ requires pass_chk == 1'b1, but DTM_WRITE does not require pass_chk and enters the Write state directly. Since DMI writes are forwarded to the Debug Module, an attacker with JTAG access can perform debug CSR writes without knowing the password.
+
+baseline:gpt_5_5:h19_jtag_debug_expansion_scope:rep_2:FINDING-002
+  status=confirmed_finding conf=high
+  summary=Debug Module reports authenticated unconditionally despite no authentication implementation.
+  files=src/debug/dm_csrs.sv; src/debug/dm_pkg.sv
+  modules=dm_csrs; dm package
+  signals=dmstatus.authenticated; dmstatus_t.authenticated; AuthData; dmstatus_t
+  reason=The Debug Module CSR logic unconditionally reports authenticated. There is no visible RTL-level authentication state or AuthData handler in dm_csrs.sv. Therefore, any transport that can send DMI requests to the Debug Module is treated as authenticated.
+
+baseline:gpt_5_5:h19_jtag_debug_expansion_scope:rep_2:FINDING-003
+  status=confirmed_finding conf=high
+  summary=Sensitive debug control CSRs are writable without visible authorization enforcement.
+  files=src/debug/dm_csrs.sv; src/debug/dm_pkg.sv
+  modules=dm_csrs; dm package
+  signals=dmcontrol_d, dmi_req_i.data; haltreq_o, resumereq_o, dmactive_o; ndmreset_o; dmcontrol_t; DMControl write path; debug control outputs
+  reason=DMControl contains privileged controls such as halt, resume, reset, and debug activation. The CSR logic accepts DMI write data into DMControl and drives sensitive outputs from that state. No visible authorization check surrounds these writes. In combination with the unauthenticated DMI write path, this allows unauthorized control of CPU execution and reset behavior.
+
+baseline:gpt_5_5:h19_jtag_debug_expansion_scope:rep_2:FINDING-004
+  status=potential_warning conf=medium
+  summary=JTAG key material is hard-coded in RTL and appears to be only 32 bits at the debug interface.
+  files=src/rom2/rom2.sv; src/debug/dmi_jtag.sv; tb/ariane_peripherals.sv
+  modules=rom2; dmi_jtag; ariane_peripherals
+  signals=mem; jtag_key; pass
+  reason=The intended JTAG key is visible as a constant in RTL ROM-like storage and appears to be reduced to a 32-bit password for dmi_jtag. Hard-coded shared secrets and short passwords are weak for debug authorization, especially when they may be recoverable from source, netlist, or bitstream.
+
+baseline:gpt_5_5:h19_jtag_debug_expansion_scope:rep_2:FINDING-005
+  status=potential_warning conf=medium
+  summary=Some visible top-level integration omits the jtag_key connection required by dmi_jtag.
+  files=openpiton/serpent_peripherals.sv; src/debug/dmi_jtag.sv; .
+  modules=serpent_peripherals; dmi_jtag; global
+  signals=i_dmi_jtag port connections; jtag_key; i_dmi_jtag; jtag_key search
+  reason=The dmi_jtag password mechanism depends on jtag_key, but the OpenPiton peripheral top-level instance visibly omits that port. Depending on tool behavior and build configuration, this may produce an elaboration error, leave the input unconnected, or result in unknown/implementation-dependent authentication behavior. This indicates fragile or incomplete integration of the permission mechanism.
+
+baseline:gpt_5_5:h19_jtag_debug_expansion_scope:rep_3:FINDING-001
+  status=confirmed_finding conf=high
+  summary=Unauthenticated JTAG/DMI writes bypass the attempted password check and can control privileged debug functionality.
+  files=src/debug/dm_csrs.sv; src/debug/dmi_jtag.sv; src/debug/dm_pkg.sv
+  modules=dm_csrs; dmi_jtag; dm package
+  signals=dmstatus.authenticated; pass_chk / state_d / dmi.op; DMI write handling for debug CSRs; haltreq_o; dtm_op_t / DTM_PASS; pass_chk / DTM_READ / DTM_WRITE / DTM_PASS; dtm_op == dm::DTM_WRITE; data_d, dmcontrol_d, command_d, progbuf_d, sbaddr_d, sbdata_d; haltreq_o[selected_hart] = dmcontrol_q.haltreq; 
+  reason=The design attempts to add password-based JTAG access control in dmi_jtag.sv, but the check is incomplete: DTM_READ is gated by pass_chk while DTM_WRITE is not. This allows an unauthenticated JTAG/DMI requester to issue write operations. The backend dm_csrs module also has no authentication enforcement and explicitly sets dmstatus.authenticated to 1. Since DMI writes update powerful debug CSRs and system-bus-access state, authentication can be bypassed for privileged debug operations.
+
+baseline:gpt_5_5:h19_jtag_debug_expansion_scope:rep_3:FINDING-002
+  status=potential_warning conf=medium
+  summary=ROM/fuse key storage is readable and writable through a visible bus-facing path without local permission checks.
+  files=src/rom2/rom2.sv; tb/ariane_peripherals.sv
+  modules=rom2; ariane_peripherals
+  signals=mem; secure_reg; rdata_o / secure_reg; rom2_fuse / axi2mem / rom2_req / rom2_we / rom2_addr / rom2_wdata / rom2_rdata; key_reg_out / jtag_key; secure_reg <= mem; secure_reg[...] <= wdata_i; rdata_o; rom2_fuse / i_axi2rom2; jtag_key
+  reason=The rom2 module is described and used as a key/fuse store, but it permits reads and writes to secure_reg through req_i/we_i/addr_i/wdata_i with no visible authorization checks. In the visible ariane_peripherals integration, that interface is connected to an AXI-facing rom2_fuse path through axi2mem. Therefore, any bus master that can access this region may be able to read or modify key material, including the JTAG key source.
+
+### h21_access_lock_scope
+baseline:gpt_5_5:h21_access_lock_scope:rep_1:FINDING-001
+  status=confirmed_finding conf=high
+  summary=Access-control registers reset to all ones, causing protected peripheral permissions to default to allowed for all privilege levels.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv; piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv; piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv; piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv
+  modules=acct_wrapper; riscv_peripherals; hmac_wrapper; pkt_wrapper; reglk_wrapper
+  signals=acct_mem, acc_ctrl_o; acc_ctrl, acc_ctrl_c; rom_req; en, acct_ctrl_i; acct_mem; acc_ctrl_o; acc_ctrl_c; assign en = en_acct && acct_ctrl_i
+  reason=The design treats access-control bits as enables: requests and wrapper register accesses proceed when the selected acc_ctrl_c[priv_lvl_i][peripheral] bit is one. The access-control source registers reset to 32'hffffffff, so every permission bit is one immediately after reset. This is a fail-open policy. Unless trusted firmware always configures restrictive permissions before any untrusted or lower-privileged code can execute, all controlled peripherals are accessible by default.
+
+baseline:gpt_5_5:h21_access_lock_scope:rep_1:FINDING-002
+  status=confirmed_finding conf=medium
+  summary=Peripheral index 5 inherits access from peripheral index 4 due to a hard-coded OR in the permission matrix.
+  files=piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=riscv_peripherals
+  signals=acc_ctrl_c; acct_ctrl_i for peripheral index 5; assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]); .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][5])
+  reason=The access-control matrix generally maps each peripheral j to its own permission bits acc_ctrl[j*4+i]. However, for j == 5, the expression additionally ORs in acc_ctrl[4*4+i]. Therefore, granting a privilege level access to peripheral index 4 automatically grants that same privilege level access to peripheral index 5, even if index 5's own permission bit is cleared. This weakens independent permission control and can over-grant access.
+
+baseline:gpt_5_5:h21_access_lock_scope:rep_1:FINDING-003
+  status=potential_warning conf=medium
+  summary=Register-lock state can be cleared by asserting jtag_unlock, potentially undermining lock persistence.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=reglk_wrapper; riscv_peripherals
+  signals=jtag_unlock, reglk_mem; reglk_ctrl_o; jtag_unlock; jtag_unlock, reglk_ctrl; if(~(rst_ni && ~jtag_unlock && ~rst_9)) ... reglk_mem[j] <= 'h0; assign reglk_ctrl_o = {reglk_mem[5], reglk_mem[4], reglk_mem[3], reglk_mem[2], reglk_mem[1], reglk_mem[0]}; i_reglk_wrapper connections
+  reason=The register-lock block is intended to enforce read/write lock bits for protected registers. Its reset condition includes jtag_unlock such that asserting jtag_unlock clears reglk_mem to zero. Since reglk_ctrl_o is directly derived from reglk_mem, this can remove existing locks. If JTAG unlock is accessible or insufficiently authenticated in production, an attacker can clear locks and then modify protected configuration registers.
+
+baseline:gpt_5_5:h21_access_lock_scope:rep_2:PERM-001
+  status=confirmed_finding conf=high
+  summary=Access-control registers reset to allow-all, and ACCT/REGLK control peripherals are themselves accessible through those default-allowed mutable permission bits.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=acct_wrapper; riscv_peripherals
+  signals=acct_mem; acc_ctrl_o; en/acct_ctrl_i; acc_ctrl_c; ACCT acct_ctrl_i; REGLK acct_ctrl_i; acct_mem[j] <= 32'hffffffff; assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};; assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]);; .acct_ctrl_i   ( acc_ctrl
+  reason=The permission bits come from acct_mem. On reset, acct_mem entries are initialized to 32'hffffffff, so generated acc_ctrl/acc_ctrl_c bits default to allowed. The ACCT peripheral, which controls the permission policy, is itself gated by acc_ctrl_c[priv_lvl_i][6], and the REGLK peripheral is gated by acc_ctrl_c[priv_lvl_i][9]. Because those bits are also default-allowed, lower-privilege software that can reach these MMIO windows before secure initialization can potentially modify permissions and l
+
+baseline:gpt_5_5:h21_access_lock_scope:rep_2:PERM-002
+  status=confirmed_finding conf=high
+  summary=Register-lock controls reset unlocked and are software accessible through mutable access-control gates.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=reglk_wrapper; riscv_peripherals
+  signals=reglk_mem; en/acct_ctrl_i; REGLK acct_ctrl_i; reglk_mem[j] <= 'h0;; assign en = en_acct && acct_ctrl_i;; .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][9]),
+  reason=The register-lock subsystem is intended to prevent later modification/readout of sensitive registers, but its memory resets to zero. The surrounding code uses lock bits as guards where set bits prevent writes/reads, so reset zero means protections start disabled. Because REGLK is accessible through the same access-control table that resets permissive, software may be able to program or leave locks in an insecure state before trusted configuration.
+
+baseline:gpt_5_5:h21_access_lock_scope:rep_2:PERM-003
+  status=potential_warning conf=medium
+  summary=Access-control storage and register map appear inconsistent with the configured number of peripherals, risking incorrect permission coverage.
+  files=piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv; piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv
+  modules=riscv_peripherals; acct_wrapper
+  signals=NB_SLAVE/NB_PERIPHERALS; acc_ctrl/acc_ctrl_c; acc_ctrl_o; acct_mem index map; parameter NB_SLAVE = 1; parameter NB_PERIPHERALS = 14;; logic [4*NB_PERIPHERALS-1 :0] acc_ctrl; logic [3:0][NB_PERIPHERALS-1:0] acc_ctrl_c;; assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag
+  reason=The top level configures 14 peripherals and declares acc_ctrl as 4*NB_PERIPHERALS bits. However, acct_wrapper sizes its internal memory by NB_SLAVE*3, and NB_SLAVE is 1 in the integration, yielding only three 32-bit entries. The case map references entries up to acct_mem[9], and acc_ctrl_o is formed from only the first three entries. This mismatch can cause incomplete, truncated, aliased, or tool-dependent permission behavior, undermining reliable enforcement of access policy.
+
+baseline:gpt_5_5:h21_access_lock_scope:rep_2:PERM-004
+  status=potential_warning conf=medium
+  summary=PKT exposes key/fuse-related reads using default-unlocked lock bits and default-permissive access control.
+  files=piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv; piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv
+  modules=pkt_wrapper; reglk_wrapper; acct_wrapper
+  signals=en/acct_ctrl_i; pkey_loc/fuse_rdata_i read mux; reglk_mem; acct_mem; assign en = en_acct && acct_ctrl_i;; rdata = reglk_ctrl_i[4] ? 'b0 : pkey_loc[63:32]; rdata = reglk_ctrl_i[5] ? 'b0 : pkey_loc[31:0]; rdata = reglk_ctrl_i[6] ? 'b0 : fuse_rdata_i;; reglk_mem[j] <= 'h0;; acct_mem[j] <= 32'hffffffff;
+  reason=PKT key/fuse-related data reads are guarded by reglk_ctrl_i bits, but those lock bits originate from register-lock state that resets to zero/unlocked. PKT MMIO access is also governed by the access-control system that resets permissive. Therefore, before secure configuration, software may read pkey_loc or fuse_rdata_i through PKT registers.
+
+baseline:gpt_5_5:h21_access_lock_scope:rep_3:PERM-001
+  status=confirmed_finding conf=high
+  summary=Access-control registers reset to all ones, causing protected peripheral access to be enabled by default for all privilege levels.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=acct_wrapper; riscv_peripherals
+  signals=acc_ctrl_o / acct_mem; acct_mem; acc_ctrl_c / acc_ctrl; acct_ctrl_i peripheral gates; assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};; acct_mem[j] <= 32'hffffffff;; logic [3:0][NB_PERIPHERALS-1:0] acc_ctrl_c;; assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 &&
+  reason=The wrappers use acct_ctrl_i as an access enable. Because acct_mem resets to 32'hffffffff and acc_ctrl_o is derived directly from acct_mem, all privilege/peripheral access bits are initially enabled. The top-level wires these bits into many peripheral wrappers using acc_ctrl_c[priv_lvl_i][...]. Therefore the design appears to grant broad peripheral access immediately after reset unless trusted software reprograms ACCT before any untrusted access occurs. This is a fail-open permission policy.
+
+baseline:gpt_5_5:h21_access_lock_scope:rep_3:PERM-002
+  status=confirmed_finding conf=high
+  summary=The permission-control blocks ACCT and REGLK are themselves gated by mutable access-control bits that reset enabled.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv; piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv
+  modules=acct_wrapper; riscv_peripherals; reglk_wrapper
+  signals=en; i_acct_wrapper.acct_ctrl_i / acc_ctrl_o; i_reglk_wrapper.acct_ctrl_i / reglk_ctrl_o; reglk_mem; assign en = en_acct && acct_ctrl_i;; .acct_ctrl_i ( acc_ctrl_c[priv_lvl_i][6] ), .acc_ctrl_o ( acc_ctrl ); .reglk_ctrl_o ( reglk_ctrl ), .acct_ctrl_i ( acc_ctrl_c[priv_lvl_i][9] ); else if(en && we) c
+  reason=ACCT and REGLK are control-plane blocks for permissions and locks, but the top-level protects them using the same acc_ctrl_c matrix that resets permissive. This means the mechanism for configuring permissions and locks may be available to all privilege levels after reset. Since ACCT writes can alter access permissions and REGLK writes can alter lock policy, an untrusted requester may be able to grant itself access or prevent later lockdown.
+
+baseline:gpt_5_5:h21_access_lock_scope:rep_3:PERM-003
+  status=potential_warning conf=medium
+  summary=Register-lock state resets unlocked and can be cleared through jtag_unlock, disabling lock protections.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/src/hmac/hmac_wrapper.sv
+  modules=reglk_wrapper; hmac_wrapper
+  signals=jtag_unlock; reglk_mem; reglk_ctrl_o; key0; input logic jtag_unlock;; if(~(rst_ni && ~jtag_unlock && ~rst_9)) begin for (j=0; j < 6; j=j+1) begin reglk_mem[j] <= 'h0; end end; assign reglk_ctrl_o = {reglk_mem[5], reglk_mem[4], reglk_mem[3], reglk_mem[2], reglk_mem[1], reglk_mem[0]};; key0[7] <= regl
+  reason=The REGLK lock memory resets to zero, so lock protections start disabled. Additionally, because jtag_unlock is part of the reset condition as ~(rst_ni && ~jtag_unlock && ~rst_9), asserting jtag_unlock clears reglk_mem to zero. Since reglk_ctrl_o is a direct concatenation of reglk_mem and other blocks use these bits to block writes/reads, clearing them disables protections such as HMAC key write lock. If jtag_unlock is not strictly authenticated and lifecycle-gated, this is a direct lock bypass.
+
+baseline:gpt_5_5:h21_access_lock_scope:rep_3:PERM-004
+  status=potential_warning conf=medium
+  summary=PKT/fuse-derived values are readable by default when access-control and register-lock protections are unset after reset.
+  files=piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv; piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv
+  modules=pkt_wrapper; riscv_peripherals; reglk_wrapper
+  signals=rdata / pkey_loc / fuse_rdata_i; i_pkt_wrapper.acct_ctrl_i; reglk_mem; 2: rdata = reglk_ctrl_i[4] ? 'b0 : pkey_loc[63:32]; 3: rdata = reglk_ctrl_i[5] ? 'b0 : pkey_loc[31:0]; 4: rdata = reglk_ctrl_i[6] ? 'b0 : fuse_rdata_i;; .acct_ctrl_i ( acc_ctrl_c[priv_lvl_i][5] ); reglk_mem[j] <= 'h0;
+  reason=PKT exposes pkey_loc and fuse_rdata_i through reads when reglk_ctrl_i bits 4, 5, and 6 are zero. REGLK resets all lock bits to zero, and PKT access is enabled by acc_ctrl_c[priv_lvl_i][5], which is default-enabled due to ACCT reset behavior. Thus, after reset and before secure configuration, PKT/fuse-derived values may be readable by unauthorized privilege levels.
+
+baseline:gpt_5_5:h21_access_lock_scope:rep_3:PERM-005
+  status=potential_warning conf=medium
+  summary=Suspicious REGLK locked-write assignment may corrupt reglk_mem[2] by copying reglk_mem[3].
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv
+  modules=reglk_wrapper
+  signals=reglk_mem[2]; reglk_mem[2] <= reglk_ctrl[1] ? reglk_mem[3] : wdata;; assign reglk_ctrl_o = {reglk_mem[5], reglk_mem[4], reglk_mem[3], reglk_mem[2], reglk_mem[1], reglk_mem[0]};
+  reason=The write logic for reglk_mem[2] uses reglk_mem[3] as the retained value when locked. Surrounding cases retain their own register when locked. If this is not intentional, a write attempt while locked can overwrite reglk_mem[2] with reglk_mem[3], corrupting the lock policy and potentially enabling or disabling locks incorrectly.
+
+### h21_access_reglock_reset_expansion_scope
+baseline:gpt_5_5:h21_access_reglock_reset_expansion_scope:rep_1:FINDING-001
+  status=confirmed_finding conf=high
+  summary=Software-accessible reset controller can reset the access-control and register-lock mechanisms, potentially reverting permissions to permissive/unlocked defaults.
+  files=piton/design/chip/tile/ariane/src/rst_ctrl/rst_wrapper.sv; piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=rst_wrapper; acct_wrapper; reglk_wrapper; riscv_peripherals
+  signals=rst_mem / rst_6 / rst_9 / rst_12; en, start, rst_id; acct_mem / acc_ctrl_o; reglk_mem / rst_9; acc_ctrl_c[priv_lvl_i][12], acc_ctrl_c[priv_lvl_i][6], acc_ctrl_c[priv_lvl_i][9]; assign en = en_acct && acct_ctrl_i;; start / rst_id; rst_mem[9] <= 1;; rst_6 / rst_9 / rst_12; acct_mem[j] <= 32'hffffffff;
+  reason=The design uses ACCT to determine whether the current privilege level can access peripherals, and REGLK to lock protected registers. However, RST_CTRL can reset both ACCT and REGLK. ACCT reset writes 32'hffffffff to its memory, which propagates to access-control outputs and appears to grant broad access. REGLK reset clears lock memory to zero, unlocking protected registers. Since RST_CTRL accepts writable rst_id and start fields and the visible logic does not forbid reset IDs for ACCT, REGLK, or
+
+baseline:gpt_5_5:h21_access_reglock_reset_expansion_scope:rep_2:F1
+  status=confirmed_finding conf=high
+  summary=Software-accessible reset controller can reset ACCT and REGLK, clearing or weakening permission controls.
+  files=piton/design/chip/tile/ariane/src/rst_ctrl/rst_wrapper.sv; piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=rst_wrapper; reglk_wrapper; acct_wrapper; riscv_peripherals
+  signals=rst_mem, rst_6, rst_9, rst_12; en, start, rst_id; reglk_mem, rst_9; acct_mem, rst_6; reglk_ctrl, acc_ctrl_c; rst_6, rst_9, rst_12; rst_mem, rst_id, start; reglk_ctrl_o; acc_ctrl_o; acc_ctrl_c, reglk_ctrl
+  reason=The reset controller is accessible through an AXI-lite software interface when acct_ctrl_i permits access and the RST_CTRL lock bit does not block writes. Its writable rst_id/start registers can assert resets for ACCT and REGLK. The REGLK reset clears all lock state to zero, and the ACCT reset restores access-control memory to 32'hffffffff. Since these memories directly feed reglk_ctrl_o and acc_ctrl_o, the reset controller can weaken or clear the very permission mechanisms intended to protect t
+
+baseline:gpt_5_5:h21_access_reglock_reset_expansion_scope:rep_2:F2
+  status=confirmed_finding conf=high
+  summary=Locked write to reglk_mem[2] does not preserve the locked value and can corrupt lock state.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv
+  modules=reglk_wrapper
+  signals=reglk_mem[2]; reglk_mem[1], reglk_mem[3], reglk_mem[4], reglk_mem[5]
+  reason=The code implements a register-lock memory where writes are supposed to be ignored when a corresponding lock bit is set. For reglk_mem[2], however, the locked branch assigns reglk_mem[3] into reglk_mem[2]. Therefore, a write attempt while locked can still change reglk_mem[2], corrupting lock configuration and potentially clearing or altering lock bits depending on reglk_mem[3].
+
+baseline:gpt_5_5:h21_access_reglock_reset_expansion_scope:rep_2:F3
+  status=potential_warning conf=medium
+  summary=debug_mode_i is connected to the reset controller but is unused in reset authorization logic.
+  files=piton/design/chip/tile/ariane/src/rst_ctrl/rst_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=rst_wrapper; riscv_peripherals
+  signals=debug_mode_i; en, start, rst_id
+  reason=The reset controller receives debug_mode_i, but the visible reset-register access checks do not use it. Since the reset controller can reset sensitive permission-control blocks, omission of debug-mode or equivalent authorization may indicate missing access control for dangerous reset operations. This finding is classified as potential because the source does not include a design specification proving reset operations were intended to be debug-only.
+
+baseline:gpt_5_5:h21_access_reglock_reset_expansion_scope:rep_3:F-001
+  status=confirmed_finding conf=high
+  summary=Software-accessible reset-control can reset ACCT/REGLK, clearing locks and restoring permissive access-control defaults.
+  files=piton/design/chip/tile/ariane/src/rst_ctrl/rst_wrapper.sv; piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=rst_wrapper; reglk_wrapper; acct_wrapper; riscv_peripherals
+  signals=rst_mem, rst_6, rst_9, rst_12; start, rst_id, en, acct_ctrl_i, reglk_ctrl_i; reglk_mem, rst_9, jtag_unlock; acct_mem, rst_6; rst_6, rst_9; rst_mem, rst_id, start; start, rst_id; acct_ctrl_i connections
+  reason=The reset-control block provides a memory-mapped way to select a reset target via rst_id and trigger it via start. The same block can assert rst_6 for ACCT and rst_9 for REGLK. In the ACCT block, rst_6 resets access-control registers to all ones, which is permissive because acc_ctrl_o is built from acct_mem and top-level access checks use acc_ctrl_c[priv_lvl_i][peripheral]. In the REGLK block, rst_9 clears reglk_mem to zero, and write logic treats lock bits set to 1 as preventing writes; clearin
+
+baseline:gpt_5_5:h21_access_reglock_reset_expansion_scope:rep_3:F-002
+  status=potential_warning conf=medium
+  summary=Register-lock implementation has width/mapping inconsistencies and a wrong-state-preservation assignment that can undermine lock enforcement.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv
+  modules=reglk_wrapper; acct_wrapper
+  signals=reglk_mem[2], reglk_ctrl; reglk_ctrl_i, reglk_ctrl; reglk_ctrl[13:0]; reglk_ctrl[6:0]; reglk_mem[2]; reglk_ctrl_i, reglk_ctrl[13]; reglk_ctrl
+  reason=Lock enforcement depends on reglk_ctrl_i bits, but both reglk_wrapper and acct_wrapper declare reglk_ctrl_i as only 8 bits while internal logic and write protection reference up to bit 13. In SystemVerilog, assigning an 8-bit vector to a wider vector generally zero-extends the missing high bits, which means conditions such as reglk_ctrl[13] may never lock if the port truly supplies only 8 bits. Separately, reglk_wrapper has an apparent typo in the address-2 write case: when locked, it assigns re
+
+### h21_crypto_security_scope
+baseline:gpt_5_5:h21_crypto_security_scope:rep_1:PERM-ACCT-MIS-SIZED-001
+  status=confirmed_finding conf=high
+  summary=Access-control memory is incorrectly sized and indexed relative to the top-level 14-peripheral permission scheme, undermining privilege-based permission enforcement.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=acct_wrapper; riscv_peripherals
+  signals=acc_ctrl_o, AcCt_MEM_SIZE, acct_mem; acct_mem[00]..acct_mem[09]; NB_SLAVE, NB_PERIPHERALS, acc_ctrl, acc_ctrl_c; acc_ctrl_c[priv_lvl_i][...]; NB_SLAVE, NB_PERIPHERALS, acc_ctrl_c; AcCt_MEM_SIZE, acct_mem, acc_ctrl_o; i_acct_wrapper parameters
+  reason=The design intends to enforce access permissions per privilege level and per peripheral using `acc_ctrl_c[priv_lvl_i][peripheral]`. However, the access-control storage in `acct_wrapper` is sized from `NB_SLAVE*3`; with the top-level `NB_SLAVE=1`, this provides only three 32-bit entries while the top-level expects permissions for 14 peripherals. The wrapper also hard-codes export of only `acct_mem[0..2]`, and its case map references `acct_mem[3..9]`, which are outside the configured memory range.
+
+baseline:gpt_5_5:h21_crypto_security_scope:rep_1:PERM-REGLK-JTAG-UNLOCK-002
+  status=potential_warning conf=medium
+  summary=`jtag_unlock` clears all register-lock state, creating a potential debug-controlled permission bypass if not externally authenticated and lifecycle-gated.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=reglk_wrapper; riscv_peripherals
+  signals=jtag_unlock, reglk_mem; jtag_unlock; jtag_unlock, reglk_ctrl; jtag_unlock reset of reglk_mem; reglk_ctrl_i
+  reason=The register-lock wrapper treats `jtag_unlock` like a reset source for all lock registers. If `jtag_unlock` can be asserted through debug/JTAG, all lock controls are cleared to zero, and wrapper code elsewhere interprets zero lock bits as allowing writes/reads. This creates a debug-controlled path to remove permission/lock protections from security-sensitive peripherals. This may be intentional for a secure debug unlock flow, but the visible code does not show authentication or lifecycle gating 
+
+baseline:gpt_5_5:h21_crypto_security_scope:rep_1:PERM-REGLK-CORRUPT-LOCK-003
+  status=confirmed_finding conf=high
+  summary=A locked write to `reglk_mem[2]` incorrectly changes it to `reglk_mem[3]`, corrupting permission lock state.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv; piton/design/chip/tile/ariane/src/aes0/aes0_wrapper.sv
+  modules=reglk_wrapper; riscv_peripherals; aes0_wrapper
+  signals=reglk_mem[2], reglk_mem[3], reglk_ctrl[1]; reglk_ctrl_i; reglk_mem[2] assignment; reglk_ctrl_i write gating
+  reason=Most locked-write cases in `reglk_wrapper` preserve the addressed lock register when the corresponding lock bit is set. Case 2 is inconsistent: when locked, it copies `reglk_mem[3]` into `reglk_mem[2]`. A write attempt to a locked register should not alter its value. This typo can corrupt lock configuration for the peripheral slice represented by `reglk_mem[2]`, potentially changing read/write lock permissions without authorization.
+
+baseline:gpt_5_5:h21_crypto_security_scope:rep_2:PERM-001
+  status=confirmed_finding conf=high
+  summary=Access-control permissions reset to all-allow, causing a fail-open permission policy for protected peripherals and control registers.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=acct_wrapper; riscv_peripherals
+  signals=acc_ctrl_o / acct_mem; acct_mem; acc_ctrl_c / acc_ctrl; acc_ctrl_c[priv_lvl_i][*]; assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};; acct_mem[j] <= 32'hffffffff;; logic [3:0][NB_PERIPHERALS-1:0] acc_ctrl_c;; assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && ac
+  reason=The design gates peripherals with `acc_ctrl_c[priv_lvl_i][peripheral_id]`, but the backing access-control memory resets to `32'hffffffff`. Therefore, after reset all privilege/peripheral permission bits are enabled, including permissions for the ACCT and REGLK control blocks themselves. Unless trusted firmware configures and locks these registers before any untrusted requester can access the bus, the permission scheme is fail-open and can allow unauthorized peripheral and policy-register access.
+
+baseline:gpt_5_5:h21_crypto_security_scope:rep_2:PERM-002
+  status=confirmed_finding conf=medium
+  summary=Register-lock state resets unlocked and is initially accessible through the fail-open access-control policy; one lock-preservation assignment appears incorrect.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=reglk_wrapper; riscv_peripherals
+  signals=reglk_mem / en; reglk_mem[2]; i_reglk_wrapper.acct_ctrl_i; assign en = en_acct && acct_ctrl_i;; if(~(rst_ni && ~jtag_unlock && ~rst_9)); reglk_mem[j] <= 'h0;; reglk_mem[2]  <= reglk_ctrl[1] ? reglk_mem[3] : wdata;; .acct_ctrl_i   ( acc_ctrl_c[priv_lvl_i][9]),
+  reason=The register-lock block is itself protected by the access-control scheme, but access-control resets all-allow. Its lock memory also resets to zero, which by usage appears to mean unlocked. Therefore, at reset, REGLK can be writable and unlocked. Additionally, one write-protect path for `reglk_mem[2]` preserves the wrong register (`reglk_mem[3]`), indicating possible corruption of lock policy when a lock bit is asserted.
+
+baseline:gpt_5_5:h21_crypto_security_scope:rep_2:PERM-003
+  status=potential_warning conf=medium
+  summary=External override/unlock signals can force permission bits or clear lock state without visible authorization in the inspected RTL.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv; piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv
+  modules=acct_wrapper; riscv_peripherals; reglk_wrapper
+  signals=we_flag / acc_ctrl_o; we_flag_0; we_flag_1 / AES0 reglk_ctrl_i; jtag_unlock / reglk_mem; assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1], acct_mem[3*0+0]|{8{we_flag}}};; .we_flag       ( we_flag_0 ),; .reglk_ctrl_i  ( reglk_ctrl[1*8+7:1*8] | we_flag_1 ),; if(~(rst_ni && ~jtag_unlock && ~rst_9)
+  reason=The design includes override paths where external top-level flags are ORed into permission or lock-control signals, and where `jtag_unlock` clears register-lock state. The inspected files do not show authentication, lifecycle gating, or privilege checks for these signals. If any of these signals are attacker-controllable or can be asserted in production, they can bypass or weaken programmed access-control and register-lock policy.
+
+baseline:gpt_5_5:h21_crypto_security_scope:rep_2:PERM-004
+  status=potential_warning conf=medium
+  summary=Access-control memory/output sizing appears inconsistent with the top-level number of peripherals, risking incomplete or undefined permission enforcement.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=acct_wrapper; riscv_peripherals
+  signals=acct_mem / acc_ctrl_o; NB_PERIPHERALS / acc_ctrl; parameter NB_PERIPHERALS = 14;; logic [4*NB_PERIPHERALS-1 :0]   acc_ctrl; // Access control values; parameter NB_SLAVE = 1, parameter NB_PERIPHERALS = 9 ... localparam AcCt_MEM_SIZE = NB_SLAVE*3;; assign acc_ctrl_o = {acct_mem[3*0+2], acct_mem[3*0+1]
+  reason=The integration expects `4*NB_PERIPHERALS` permission bits, with `NB_PERIPHERALS = 14`, while the ACCT wrapper internally defines memory size using `NB_SLAVE*3` and concatenates three 32-bit words. Some read/write cases in `acct_wrapper` reference indices beyond the apparent default memory size. This may be intentional if parameters are overridden and synthesis truncates the output as expected, but it is suspicious for a security-critical permission register file and may result in undefined, tru
+
+baseline:gpt_5_5:h21_crypto_security_scope:rep_3:PERM-001
+  status=confirmed_finding conf=high
+  summary=Access-control registers reset to allow-all and are self-protected by the mutable permission matrix, creating a permissive-by-default authorization bypass window.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=acct_wrapper; riscv_peripherals
+  signals=acct_mem; en / acct_ctrl_i; acc_ctrl / acc_ctrl_c; acct_wrapper.acct_ctrl_i / acc_ctrl_o; acct_mem reset; assign en = en_acct && acct_ctrl_i; acc_ctrl_c generation; acct_wrapper connection
+  reason=The design derives peripheral access authorization from `acc_ctrl`, and `acc_ctrl` is produced by the access-control wrapper. The wrapper initializes its backing memory to `32'hffffffff`, which means all permission bits are enabled after reset. Since the access-control wrapper's own access is gated by `acc_ctrl_c[priv_lvl_i][6]`, that gate is also initially enabled for all privilege levels. Therefore, before trusted firmware reconfigures and locks permissions, less-privileged software could pote
+
+baseline:gpt_5_5:h21_crypto_security_scope:rep_3:PERM-002
+  status=potential_warning conf=medium
+  summary=`we_flag` can force access-control permission bits high, potentially overriding programmed deny policy.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=acct_wrapper; riscv_peripherals
+  signals=acc_ctrl_o / we_flag; acct_wrapper.we_flag; acc_ctrl_c; assign acc_ctrl_o = {acct_mem[2], acct_mem[1], acct_mem[0]|{8{we_flag}}}; .we_flag ( we_flag_0 ); assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | ...
+  reason=`we_flag` is ORed into the access-control output, forcing the low eight access-control bits high when asserted. Because top-level permission gates are computed from this output, `we_flag` can override programmed deny permissions for the affected privilege/peripheral bit positions. The visible source does not show a privilege check or trusted-only qualification around this override signal.
+
+baseline:gpt_5_5:h21_crypto_security_scope:rep_3:PERM-003
+  status=potential_warning conf=medium
+  summary=Register-lock enforcement contains an apparent index bug and debug unlock clears lock state.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv
+  modules=reglk_wrapper
+  signals=reglk_mem write-lock enforcement; jtag_unlock / reglk_mem reset; reglk_mem[2] <= reglk_ctrl[1] ? reglk_mem[3] : wdata; if(~(rst_ni && ~jtag_unlock && ~rst_9))
+  reason=The register-lock block is part of the permission/lock infrastructure. A locked write to address index 2 should preserve `reglk_mem[2]`, but the RTL instead assigns `reglk_mem[3]`. This can corrupt lock configuration and may unintentionally change the protection state. Additionally, `jtag_unlock` clears the lock memory, which may be intended for debug but is security-sensitive because it removes register locks.
+
+### h21_dma_pkt_scope
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_1:F1
+  status=confirmed_finding conf=high
+  summary=Access-control registers reset to all permissions enabled.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=acct_wrapper; riscv_peripherals
+  signals=acct_mem; acc_ctrl_o; acc_ctrl / acc_ctrl_c; acc_ctrl_c[priv_lvl_i][8]; acct_mem reset assignment; assign acc_ctrl_o; acc_ctrl_c generation; .acct_ctrl_i(acc_ctrl_c[priv_lvl_i][8])
+  reason=The access-control memory appears to store permission bits that feed acc_ctrl_o and then acc_ctrl_c[priv_lvl_i][peripheral_index]. Since acct_mem resets to 32'hffffffff, the RTL defaults permissions to enabled rather than denied. This can allow lower-privilege or early-boot software to access protected peripherals before firmware restricts permissions.
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_1:F2
+  status=potential_warning conf=medium
+  summary=Access-control output packing and memory sizing appear inconsistent with NB_PERIPHERALS=14.
+  files=piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv; piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv
+  modules=riscv_peripherals; acct_wrapper
+  signals=NB_PERIPHERALS / acc_ctrl / acc_ctrl_c; acc_ctrl_o; AcCt_MEM_SIZE / acct_mem; acct_mem[03] through acct_mem[09]; acc_ctrl_c[priv_lvl_i][various peripheral indices]; NB_PERIPHERALS and acc_ctrl declarations; assign acc_ctrl_o = {acct_mem[2], acct_mem[1], acct_mem[0]|...}; AcCt_MEM_SIZE and acct_mem d
+  reason=The integration expects 14 peripherals and a 56-bit access-control vector, but acct_wrapper assigns acc_ctrl_o using a 96-bit concatenation of three 32-bit words. Also, the wrapper references acct_mem entries beyond the three entries implied by NB_SLAVE=1. This can lead to truncated, misaligned, or non-configurable permission bits, undermining the intended permission model.
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_1:F3
+  status=potential_warning conf=medium
+  summary=jtag_unlock clears global register-lock state.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=reglk_wrapper; riscv_peripherals
+  signals=reglk_mem; reglk_ctrl_o; reglk_ctrl; reglk_ctrl_i peripheral connections; if(~(rst_ni && ~jtag_unlock && ~rst_9)); assign reglk_ctrl_o; .reglk_ctrl_o(reglk_ctrl); reglk_ctrl_i connections
+  reason=reglk_wrapper treats jtag_unlock like a reset input for the lock memory, clearing all register locks to zero. Since lock bits are used elsewhere to prevent writes or hide reads, asserting jtag_unlock can disable configured locks and allow reconfiguration of protected state if the debug unlock path is not strongly authenticated and lifecycle-controlled.
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_1:F4
+  status=potential_warning conf=medium
+  summary=PKT/fuse read path may expose fuse_rdata_i through the default case without applying the intended lock mask.
+  files=piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv
+  modules=pkt_wrapper
+  signals=en; fuse_req_o / fuse_addr_o; rdata / fuse_rdata_i / pkey_loc; req_i / fuse_indx_i / pkey_loc_o; assign en = en_acct && acct_ctrl_i; PKT write-side case; PKT read-side case; pkt instance
+  reason=PKT/fuse read data is intended to be protected by selected reglk_ctrl_i bits for explicit addresses, but rdata is first set to fuse_rdata_i and the default case does not always overwrite it. If fuse_addr_o > 110 and an unmapped address is read while en is true, rdata may remain fuse_rdata_i without applying reglk_ctrl_i[6]. This is a possible read-permission bypass for fuse data.
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_1:F5
+  status=needs_more_evidence conf=medium
+  summary=DMA wrapper lacks visible local register-lock enforcement on DMA configuration registers.
+  files=piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=dma_wrapper; riscv_peripherals
+  signals=en; start_reg / length_reg / source_addr_* / dest_addr_* / done_reg / end_reg; pmpcfg_i / pmpaddr_i / we_flag; DMA reglk_ctrl_i / acct_ctrl_i / pmpcfg_i / pmpaddr_i / we_flag; assign en = en_acct && acct_ctrl_i; DMA write-side case; dma instance security-related ports; DMA wrapper connections
+  reason=DMA source, destination, length, and start registers are security-sensitive because they can direct memory transfers. Although dma_wrapper receives reglk_ctrl_i, the visible write logic for these configuration registers does not use it. Therefore, if acct_ctrl_i allows access—especially given permissive reset or mapping issues—an accessor can program DMA registers. Actual transfer restriction may depend entirely on the internal dma module's PMP enforcement, which is outside the visible scope.
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_2:PERM-ACCT-001
+  status=confirmed_finding conf=high
+  summary=Access-control table sizing and output mapping are inconsistent with the top-level 14-peripheral permission matrix, creating a permission-enforcement vulnerability.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=acct_wrapper; riscv_peripherals
+  signals=AcCt_MEM_SIZE / acct_mem; acc_ctrl_o; acct_mem[09]; acc_ctrl_c / acc_ctrl; acc_ctrl_c[priv_lvl_i][*]; NB_PERIPHERALS / acc_ctrl / acc_ctrl_c; assign acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]);; acc_ctrl_c[priv_lvl_i][...]; localparam AcCt_MEM_SIZE = NB_SLAVE*3; assign acc_ctrl_o 
+  reason=The top-level treats acc_ctrl_o as a 4*NB_PERIPHERALS permission vector and indexes it for privilege-level permission checks. NB_PERIPHERALS is 14, so 56 bits are required and consumed. But acct_wrapper allocates acct_mem using AcCt_MEM_SIZE = NB_SLAVE*3; top-level evidence shows NB_SLAVE=1, so only three 32-bit words are intended. More importantly, acc_ctrl_o is assigned from only acct_mem[2:0], while the write/read map references entries as high as acct_mem[09]. This is a structural mismatch i
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_2:PERM-ACCT-002
+  status=potential_warning conf=medium
+  summary=ACCT permission registers reset to all ones while permission bits are used as positive access enables, producing a permissive default state.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv; piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv; piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv; piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv
+  modules=acct_wrapper; riscv_peripherals; dma_wrapper; pkt_wrapper; reglk_wrapper
+  signals=acct_mem[j]; acc_ctrl_c[priv_lvl_i][*]; acct_mem[j] <= 32'hffffffff;; assign rom_req = rom_req_acct && acc_ctrl_c[priv_lvl_i][0];; .acct_ctrl_i ( acc_ctrl_c[priv_lvl_i][...] ); assign en = en_acct && acct_ctrl_i;
+  reason=The access-control bits appear to be positive enables: requests or wrapper-local accesses proceed when acc_ctrl_c/ acct_ctrl_i is one. The ACCT state resets to all ones, which makes the reset/default state permissive. If software or secure boot code does not immediately reprogram and lock the ACCT table before any untrusted requester can access the bus, lower privilege modes may access all protected peripherals by default. A permission system generally should fail closed until policy is configur
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_2:PERM-PKT-001
+  status=potential_warning conf=medium
+  summary=PKT read path can expose fuse/key-related data under weak permission and lock conditions and is not fail-closed for all address paths.
+  files=piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=pkt_wrapper; riscv_peripherals
+  signals=rdata / fuse_rdata_i / pkey_loc; acct_ctrl_i for PKT; .acct_ctrl_i ( acc_ctrl_c[priv_lvl_i][5] ); assign en = en_acct && acct_ctrl_i;; rdata = fuse_rdata_i; case(address[7:3]) ... rdata = reglk_ctrl_i[4] ? 'b0 : pkey_loc[63:32]; ... rdata = reglk_ctrl_i[6] ? 'b0 : fuse_rdata_i; default: if (fuse_add
+  reason=The PKT wrapper contains sensitive outputs: fuse_rdata_i and pkey_loc. Access is gated only by acct_ctrl_i, and key/fuse reads are masked only by specific reglk_ctrl_i bits. The read-side logic preloads rdata with fuse_rdata_i for any enabled access before address decode, and only some default cases overwrite it with zero depending on fuse_addr_o <= 110. This creates a risky permission boundary: if ACCT is permissive or misconfigured, a requester can read key/fuse-related data; additionally, cer
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_3:PERM-ACCT-MISMAP-001
+  status=confirmed_finding conf=high
+  summary=Access-control table is mis-sized and likely mis-mapped, risking incorrect peripheral permissions.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=acct_wrapper; riscv_peripherals
+  signals=AcCt_MEM_SIZE, acct_mem; acc_ctrl_o; acct_mem; acc_ctrl, acc_ctrl_c; i_acct_wrapper; NB_PERIPHERALS, acc_ctrl, acc_ctrl_c; acct_mem write case; acct_mem read case
+  reason=The top-level permission logic expects a 56-bit access-control vector for 14 peripherals, converted into acc_ctrl_c[privilege][peripheral]. However, acct_wrapper allocates access-control storage using NB_SLAVE*3, not NB_PERIPHERALS, and then references entries up to index 9. It also drives acc_ctrl_o with a 96-bit concatenation into a 56-bit output when NB_PERIPHERALS=14. This can produce incorrect, truncated, or synthesis-dependent permission bits that gate access to sensitive peripherals.
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_3:PERM-DEFAULT-ALLOW-002
+  status=potential_warning conf=medium
+  summary=Access-control memory resets to all ones, apparently granting access by default.
+  files=piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=acct_wrapper; riscv_peripherals
+  signals=acct_mem; acc_ctrl, acc_ctrl_c; acct_ctrl_i connections; acct_mem reset; acc_ctrl_c; acct_ctrl_i
+  reason=The design uses acct_ctrl_i as an allow signal in peripheral wrappers. acct_mem resets to all ones, which appears to assert access permissions by default. Unless trusted firmware reprograms access-control before any untrusted master can issue requests, protected peripherals may be accessible during boot or after reset.
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_3:PERM-DMA-LOCK-BYPASS-003
+  status=confirmed_finding conf=high
+  summary=DMA programming registers ignore reglk_ctrl_i, so register-lock policy is ineffective for DMA configuration.
+  files=piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=dma_wrapper; riscv_peripherals
+  signals=reglk_ctrl_i, acct_ctrl_i; start_reg, length_reg, source_addr_lsb_reg, source_addr_msb_reg, dest_addr_lsb_reg, dest_addr_msb_reg, done_reg, core_lock_reg, end_reg; u_dma inputs; i_dma_wrapper; en; DMA register write case; u_dma
+  reason=The DMA wrapper exposes sensitive DMA configuration registers over AXI-lite. Although reglk_ctrl_i is provided to the module, the write path does not check it. Any requester whose acct_ctrl_i bit is set can modify DMA source, destination, length, and start registers regardless of lock state. A local core_lock_reg is present but is not used to block writes to the other DMA registers.
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_3:PERM-PKT-FUSE-004
+  status=potential_warning conf=medium
+  summary=PKT wrapper exposes software-controlled fuse request/address with only access-control gating and partial read masking.
+  files=piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=pkt_wrapper; riscv_peripherals
+  signals=en, fuse_req_o, fuse_addr_o; rdata, pkey_loc, fuse_rdata_i; i_pkt; i_pkt_wrapper, i_fuse_mem; en; fuse_req_o, fuse_addr_o; rdata; fuse_req, fuse_addr, fuse_rdata
+  reason=The PKT wrapper allows software with acct_ctrl_i permission to program fuse_req_o and fuse_addr_o. Register-lock bits are only used to mask some read data, not to prevent programming of the fuse access controls. If access-control is misconfigured, default-allow, or writable by an attacker, protected fuse contents or key-location data may be exposed.
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_3:PERM-REGLK-CORRUPT-005
+  status=confirmed_finding conf=high
+  summary=reglk_wrapper has a copy/paste bug that can modify reglk_mem[2] even when locked.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv
+  modules=reglk_wrapper
+  signals=reglk_mem[2]; reglk_mem write case
+  reason=The register-lock write logic follows the pattern reglk_mem[N] <= lock ? reglk_mem[N] : wdata for most entries. For index 2, the locked path is reglk_mem[3], not reglk_mem[2]. Thus a write to a locked register can still alter reglk_mem[2], corrupting or bypassing intended lock semantics.
+
+baseline:gpt_5_5:h21_dma_pkt_scope:rep_3:PERM-JTAG-UNLOCK-006
+  status=potential_warning conf=medium
+  summary=jtag_unlock clears register-lock memory, creating a debug-mediated lock bypass path.
+  files=piton/design/chip/tile/ariane/src/reglk/reglk_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=reglk_wrapper; riscv_peripherals
+  signals=reglk_mem, jtag_unlock; i_reglk_wrapper.jtag_unlock; jtag_unlock reset condition; i_reglk_wrapper
+  reason=The register-lock wrapper treats jtag_unlock as part of its reset condition. When asserted, reglk_mem entries are cleared to zero, likely unlocking protected registers. This may be intentional for authenticated debug, but it is a permission bypass path if jtag_unlock can be asserted by an attacker or if debug authentication is weak.
+
+### h21_dma_pmp_expansion_scope
+baseline:gpt_5_5:h21_dma_pmp_expansion_scope:rep_1:FINDING_DMA_READ_PMP_BYPASS_WE_FLAG_LENGTH3
+  status=confirmed_finding conf=high
+  summary=DMA source-read PMP enforcement can be bypassed for length 3 when `we_flag` is asserted.
+  files=piton/design/chip/tile/ariane/src/dma/dma.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv; piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv
+  modules=dma; riscv_peripherals; dma_wrapper
+  signals=pmp_allow_new, we_flag, length_d, pmp_data_allow; i_pmp_data, pmp_data_allow; we_flag_3; we_flag; pmp_allow_new; i_pmp_data; i_dma_wrapper.we_flag; u_dma.we_flag
+  reason=The source-read PMP check contains an explicit disjunct `we_flag && length_d == 3` in the permission accumulator. This term can set/keep the load-side allow result true even when the PMP denies the checked source address. Since the DMA's PMP instance is intended to enforce DMA memory permissions at user privilege, this constitutes a permission bypass if an attacker can assert or influence `we_flag` and program a length of 3.
+
+baseline:gpt_5_5:h21_dma_pmp_expansion_scope:rep_1:FINDING_DMA_STORE_PMP_RANGE_ACCUMULATION_FLAW
+  status=confirmed_finding conf=high
+  summary=DMA destination-write PMP checking does not accumulate permission denial across the full transfer range.
+  files=piton/design/chip/tile/ariane/src/dma/dma.sv
+  modules=dma
+  signals=pmp_allow_new, pmp_allow_reg, pmp_data_allow, pmp_check_ctr_reg; pmp_allow_new; dma_ctrl_new
+  reason=The destination-write permission loop checks addresses sequentially but overwrites the accumulated permission state with each current PMP result. If an earlier destination address is denied and a later one is allowed, the earlier denial can be lost. The final transition to CTRL_STORE only uses the most recent registered/current permission results, not a robust AND over the entire transfer range.
+
+baseline:gpt_5_5:h21_dma_pmp_expansion_scope:rep_1:FINDING_DMA_REGLK_UNUSED
+  status=confirmed_finding conf=high
+  summary=DMA register-lock input is connected but unused, leaving DMA configuration registers unprotected by the lock mechanism.
+  files=piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=dma_wrapper; riscv_peripherals
+  signals=reglk_ctrl_i, start_reg, length_reg, source_addr_lsb_reg, source_addr_msb_reg, dest_addr_lsb_reg, dest_addr_msb_reg, done_reg, end_reg, core_lock_reg; reglk_ctrl; reglk_ctrl_i and register write case; en; i_dma_wrapper.reglk_ctrl_i
+  reason=The DMA wrapper has a `reglk_ctrl_i` input and the top level drives it from the system register-lock controller, but the input is not used in the DMA register write path. As a result, DMA configuration registers remain writable whenever `acct_ctrl_i` allows access, even if the register-lock mechanism is intended to freeze them.
+
+baseline:gpt_5_5:h21_dma_pmp_expansion_scope:rep_1:FINDING_PMP_NAPOT_NA4_MATCH_SUSPICIOUS
+  status=potential_warning conf=medium
+  summary=PMP NA4/NAPOT region matching implementation is suspicious and may incorrectly enforce permissions.
+  files=piton/design/chip/tile/ariane/src/pmp/pmp_entry.sv; piton/design/chip/tile/ariane/src/pmp/pmp.sv; piton/design/chip/tile/ariane/src/dma/dma.sv
+  modules=pmp_entry; pmp; dma
+  signals=mask, base, match_o; match, allow_o; i_pmp_data; mask/base/match_o; allow_o
+  reason=The NA4/NAPOT matching logic appears to build an incorrect mask and compare an incorrect subset of address bits. If so, PMP entries may match too broadly or too narrowly. Since PMP uses first-match semantics and DMA depends on this PMP instance, incorrect matching can cause permission grants or denials that do not match the programmed PMP policy.
+
+baseline:gpt_5_5:h21_dma_pmp_expansion_scope:rep_2:FINDING-001
+  status=confirmed_finding conf=high
+  summary=DMA source-read PMP permission can be bypassed when `we_flag && length_d == 3`.
+  files=piton/design/chip/tile/ariane/src/dma/dma.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=dma; riscv_peripherals
+  signals=pmp_allow_new, pmp_data_allow, we_flag, length_d; i_pmp_data, pmp_data_allow; we_flag_3; pmp_allow_new; i_pmp_data; i_dma_wrapper.we_flag
+  reason=The DMA read path is supposed to gate source reads using PMP. However, `pmp_allow_new` is set to true if `(we_flag && length_d == 3)`, regardless of the current PMP result. Since this value contributes to the transition to `CTRL_LOAD`, a requester that can satisfy this condition can bypass PMP read denial for a DMA source transfer of that length.
+
+baseline:gpt_5_5:h21_dma_pmp_expansion_scope:rep_2:FINDING-002
+  status=confirmed_finding conf=high
+  summary=DMA destination-write PMP checks do not accumulate denial across all addresses in the transfer range.
+  files=piton/design/chip/tile/ariane/src/dma/dma.sv
+  modules=dma
+  signals=pmp_allow_new, pmp_allow_reg, pmp_data_allow, pmp_check_ctr_reg; valid_new, VALID_STORE; pmp_allow_new; dma_ctrl_new; VALID_STORE
+  reason=A DMA write spanning multiple beats should be denied if any destination address is denied by PMP. The store-check loop computes successive destination addresses, but `pmp_allow_new` is overwritten on each iteration instead of preserving a prior denial. This means the final permission decision can ignore earlier denied addresses in the transfer range.
+
+baseline:gpt_5_5:h21_dma_pmp_expansion_scope:rep_2:FINDING-003
+  status=potential_warning conf=medium
+  summary=DMA register-lock input appears unused, making DMA register lock permissions potentially ineffective.
+  files=piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=dma_wrapper; riscv_peripherals
+  signals=reglk_ctrl_i, acct_ctrl_i; start_reg, length_reg, source_addr_lsb_reg, source_addr_msb_reg, dest_addr_lsb_reg, dest_addr_msb_reg, done_reg, core_lock_reg, end_reg; reglk_ctrl, acc_ctrl_c; reglk_ctrl_i; en; DMA configuration registers; i_dma_wrapper.reglk_ctrl_i
+  reason=The DMA wrapper receives register-lock controls but does not use them to gate writes to DMA control/address registers. A local `core_lock_reg` is writable but also does not protect the configuration registers. If the lock input is intended to freeze or protect DMA configuration, this implementation leaves that permission control ineffective.
+
+baseline:gpt_5_5:h21_dma_pmp_expansion_scope:rep_3:F1
+  status=confirmed_finding conf=high
+  summary=DMA source/read PMP check can be bypassed when `we_flag` is asserted and `length_d == 3`.
+  files=piton/design/chip/tile/ariane/src/dma/dma.sv; piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=dma; dma_wrapper; riscv_peripherals
+  signals=pmp_allow_new, we_flag, length_d, pmp_data_allow; i_pmp_data, pmp_data_allow; we_flag; we_flag_3; pmp_allow_new; dma_ctrl_new; i_pmp_data; u_dma.we_flag; i_dma_wrapper.we_flag
+  reason=The DMA controller is intended to filter DMA reads through PMP at user privilege. However, in CTRL_CHECK_LOAD, `pmp_allow_new` can be asserted solely by `(we_flag && length_d == 3)`, bypassing the PMP allow output. For a transfer where length_d is 3 and we_flag is high, read permission accumulation can succeed even if pmp_data_allow is false for source addresses. This undermines PMP-based source/read protection.
+
+baseline:gpt_5_5:h21_dma_pmp_expansion_scope:rep_3:F2
+  status=confirmed_finding conf=high
+  summary=DMA destination/write PMP checks are not cumulative across the full transfer range.
+  files=piton/design/chip/tile/ariane/src/dma/dma.sv
+  modules=dma
+  signals=pmp_allow_new, pmp_allow_reg, pmp_data_allow; pmp_check_ctr_new, pmp_allow_new; i_pmp_data, pmp_data_allow; CTRL_LOAD; pmp_allow_new; dma_ctrl_new; i_pmp_data
+  reason=A DMA write range must only be allowed if every destination word/address is PMP-writable. In CTRL_CHECK_STORE, the implementation overwrites `pmp_allow_new` with the current cycle's `pmp_data_allow` instead of computing `pmp_allow_reg && pmp_data_allow`. Therefore, an earlier denied address can be forgotten if subsequent checks are allowed. The final decision does not reliably represent the permissions of the entire destination range.
+
+baseline:gpt_5_5:h21_dma_pmp_expansion_scope:rep_3:F3
+  status=potential_warning conf=medium
+  summary=DMA register-lock input is connected but not used to protect DMA control registers.
+  files=piton/design/chip/tile/ariane/src/dma/dma_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=dma_wrapper; riscv_peripherals
+  signals=reglk_ctrl_i; start_reg, length_reg, source_addr_lsb_reg, source_addr_msb_reg, dest_addr_lsb_reg, dest_addr_msb_reg, done_reg, core_lock_reg, end_reg; en, acct_ctrl_i; en; write case; i_dma_wrapper.reglk_ctrl_i; core_lock_reg
+  reason=The DMA wrapper exposes `reglk_ctrl_i` as a register-lock input and is connected to the top-level register-lock bus, but its write path does not reference this signal. DMA configuration registers are updated solely based on `en && we`, where `en` is gated by account/access control but not by lock state. If the system relies on register locking to freeze DMA configuration, this implementation leaves DMA registers writable after lock.
+
+### h21_fuse_rng_rsa_expansion_scope
+baseline:gpt_5_5:h21_fuse_rng_rsa_expansion_scope:rep_1:FINDING-001
+  status=confirmed_finding conf=high
+  summary=PKT wrapper can expose raw fuse_rdata_i through its default read path without applying the intended reglk_ctrl_i[6] fuse-data lock.
+  files=piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv; piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=pkt_wrapper; fuse_mem; riscv_peripherals
+  signals=en, fuse_req_o, fuse_addr_o, rdata, fuse_rdata_i, reglk_ctrl_i[6]; req_i, addr_i, addr_q, rdata_o, mem; fuse_req, fuse_addr, fuse_rdata, reglk_ctrl, acc_ctrl_c; en; fuse_req_o, fuse_addr_o; rdata, fuse_rdata_i; reglk_ctrl_i[6], fuse_rdata_i; default, fuse_addr_o, rdata; mem; i_pkt_wrapper, i_fuse_me
+  reason=pkt_wrapper permits an accessor with PKT peripheral permission to write fuse_addr_o and fuse_req_o. fuse_mem then returns the selected fuse word as fuse_rdata_i. In the read path, pkt_wrapper sets rdata = fuse_rdata_i for any enabled read before decoding address[7:3]. The intended explicit fuse-data register at address index 4 masks fuse_rdata_i when reglk_ctrl_i[6] is set, but the default branch lacks that mask and only overwrites rdata to zero if fuse_addr_o <= 110. Therefore, for reads to unm
+
+baseline:gpt_5_5:h21_fuse_rng_rsa_expansion_scope:rep_1:FINDING-002
+  status=potential_warning conf=medium
+  summary=fuse_mem containing secure data has no intrinsic permission enforcement and relies entirely on external access-control logic.
+  files=piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=fuse_mem; riscv_peripherals
+  signals=req_i, addr_i, rdata_o, mem; fuse_req, fuse_addr, fuse_rdata; module ports; addr_q; rdata_o; i_fuse_mem
+  reason=fuse_mem is explicitly used to store secure data, but its interface and implementation contain no built-in authorization or lock checks. It accepts a request/address and returns the selected memory word. In the visible integration, it is driven by pkt_wrapper, so the immediate exploitability depends on wrapper correctness. Because Finding 001 shows an inconsistent wrapper check, the lack of intrinsic fuse_mem protection creates a defense-in-depth failure for high-value secrets.
+
+baseline:gpt_5_5:h21_fuse_rng_rsa_expansion_scope:rep_2:PERM-001
+  status=confirmed_finding conf=high
+  summary=AXI-accessible PKT wrapper can read raw secure fuse memory contents.
+  files=piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv; piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=fuse_mem; pkt_wrapper; riscv_peripherals
+  signals=mem, addr_q, rdata_o; en, fuse_req_o, fuse_addr_o, fuse_rdata_i, rdata; fuse_req, fuse_addr, fuse_rdata, i_pkt_wrapper, i_fuse_mem; module comment; mem constant initializer; addr_q update; rdata_o assignment; en assignment; write-side case statement; read-side logic; i_pkt_wrapper and i_fuse_mem ins
+  reason=The design creates a path from an AXI/NoC requester to pkt_wrapper, then to fuse_mem through software-controlled fuse_addr_o and fuse_req_o, and back to the requester through fuse_rdata_i/rdata. The underlying fuse memory is explicitly documented as containing secure data and includes cryptographic keys and access-control values. The visible RTL does not enforce per-entry fuse permissions or distinguish public metadata from secrets; it only uses coarse peripheral access and a local lock bit for 
+
+baseline:gpt_5_5:h21_fuse_rng_rsa_expansion_scope:rep_2:PERM-002
+  status=confirmed_finding conf=high
+  summary=Access-control alias grants PKT access when peripheral 4 is permitted.
+  files=piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=riscv_peripherals
+  signals=acc_ctrl, acc_ctrl_c; i_pkt_wrapper.acct_ctrl_i; acc_ctrl_c generate block; i_pkt_wrapper instance
+  reason=The access-control expression assigns acc_ctrl_c[i][j] = acc_ctrl[j*4+i] | (j==5 && acc_ctrl[4*4+i]). Therefore, for j==5, a privilege level gains PKT access not only from its direct PKT permission bit but also from its peripheral-4 permission bit. Since PKT can access fuse memory contents, this permission alias can expand access to secure fuse data beyond the intended PKT permission.
+
+baseline:gpt_5_5:h21_fuse_rng_rsa_expansion_scope:rep_2:PERM-003
+  status=potential_warning conf=medium
+  summary=RNG debug mode bypasses register-lock protections for sensitive state and configuration.
+  files=piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=rng_wrapper; riscv_peripherals
+  signals=debug_mode_i, reglk_ctrl_i, poly128, poly64, poly32_big, poly16_big, seed, seed128_big_o, seed64_big_o, seed32_big_o, seed16_big_o, rand_seg_o, cs_state_o; i_rng_wrapper.debug_mode_i; en assignment; write-side case statement; read-side case statement; i_rng_wrapper instance
+  reason=Register-lock bits normally mask or prevent access to sensitive RNG state/configuration, but the RTL explicitly chooses the unmasked read/write path when debug_mode_i is asserted. The wrapper does not verify that the AXI requester is a debug-authenticated requester; it only uses acct_ctrl_i. Thus, if debug mode is active while non-debug requesters with RNG peripheral access can issue transactions, they can read or modify locked RNG internals.
+
+baseline:gpt_5_5:h21_fuse_rng_rsa_expansion_scope:rep_3:FINDING-001
+  status=confirmed_finding conf=high
+  summary=PKT provides a memory-mapped path to arbitrarily address and read fuse_mem contents containing security-sensitive data.
+  files=piton/design/chip/tile/ariane/src/pkt/pkt_wrapper.sv; piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=pkt_wrapper; fuse_mem; riscv_peripherals
+  signals=fuse_req_o, fuse_addr_o, fuse_rdata_i, rdata; req_i, addr_i, rdata_o, mem; i_pkt_wrapper, i_fuse_mem, fuse_req, fuse_addr, fuse_rdata; en, fuse_req_o, fuse_addr_o; rdata, fuse_rdata_i; mem, addr_q, rdata_o; mem; acc_ctrl_c, acct_ctrl_i
+  reason=The top-level connects a memory-mapped PKT peripheral to fuse_mem. Inside pkt_wrapper, if en_acct and acct_ctrl_i are true, software can write fuse_req_o and fuse_addr_o, then read fuse_rdata_i through the PKT register map. fuse_mem uses req_i/addr_i to select mem[addr_q] and returns the selected word. The fuse array is explicitly described as holding secure data and includes key material and access-control values. Therefore, any agent granted PKT access can use PKT as a fuse-read oracle unless 
+
+baseline:gpt_5_5:h21_fuse_rng_rsa_expansion_scope:rep_3:FINDING-002
+  status=potential_warning conf=medium
+  summary=RNG debug mode bypasses register-lock permission checks for sensitive RNG reads and writes.
+  files=piton/design/chip/tile/ariane/src/rand_num/rng_wrapper.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=rng_wrapper; riscv_peripherals
+  signals=debug_mode_i, reglk_ctrl_i, seed, poly*, seed*_big_o, rand_seg_o, cs_state_o; debug_mode_i, priv_lvl_i; debug_mode_i, reglk_ctrl_i[5], poly128, poly64, poly32_big, poly16_big; seed, poly*_big, seed*_big_o, rand_seg_o, cs_state_o; debug_mode_i
+  reason=The RNG wrapper intentionally treats debug_mode_i as overriding register-lock controls for both writes and reads. If debug_mode_i can be asserted in contexts where the requester is not fully trusted, locked RNG configuration and internal state can be read or modified despite reglk policy. This is permission-related because a debug-state input bypasses normal register-lock permission checks. The issue is marked potential because the visible evidence does not establish how debug_mode_i is generate
+
+baseline:gpt_5_5:h21_fuse_rng_rsa_expansion_scope:rep_3:FINDING-003
+  status=needs_more_evidence conf=low
+  summary=Core permission state generators for access-control and register-lock policy are missing from the visible source, preventing verification of their protections.
+  files=piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv; .
+  modules=riscv_peripherals
+  signals=acc_ctrl, acc_ctrl_c; i_acct_wrapper, acc_ctrl_o, acct_ctrl_i; i_reglk_wrapper, reglk_ctrl_o, jtag_unlock; i_acct_wrapper; i_reglk_wrapper; acct_wrapper/reglk_wrapper definitions
+  reason=The subsystem's permission model relies on acc_ctrl and reglk_ctrl, but the modules that generate/control these values are instantiated without visible source definitions. Because many wrappers only gate access using acc_ctrl_c[priv_lvl_i][N] and lock sensitive registers using reglk_ctrl_i bits, any weakness in ACCT/REGLK configurability would undermine the entire permission scheme. This cannot be confirmed from visible code, so it is reported as needing more evidence rather than a confirmed vul
+
+### h21_jtag_auth_expansion_scope
+baseline:gpt_5_5:h21_jtag_auth_expansion_scope:rep_1:JTAG-AUTH-001
+  status=confirmed_finding conf=high
+  summary=DTM_PASS authentication operation can enter the normal DMI Write state without a retained pass_mode flag, enabling unauthenticated DMI writes.
+  files=piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv
+  modules=dmi_jtag
+  signals=state_q/state_d, pass_mode, dmi_req_valid, dmi_req.op; state_e; dmi_req.op; pass_mode; DTM_PASS transition; Write state; always_ff state registers
+  reason=The FSM sets pass_mode only during the Idle-cycle combinational handling of DTM_PASS, then transitions state_d to Write. On the next clock, state_q becomes Write, which makes dmi_req.op a DTM_WRITE and causes dmi_req_valid to assert. Since pass_mode is not registered and defaults to 0 at the top of always_comb, the Write state generally takes the non-pass path and returns to Idle rather than entering PassChk. Thus the password/authentication operation can be converted into an unauthenticated DMI
+
+baseline:gpt_5_5:h21_jtag_auth_expansion_scope:rep_1:JTAG-AUTH-002
+  status=confirmed_finding conf=high
+  summary=The JTAG authentication result pass_check is not latched; it is a transient combinational pulse used as the unlock and permission signal.
+  files=piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=dmi_jtag; riscv_peripherals
+  signals=pass_check, jtag_unlock_o; pass_check / jtag_unlock_o; pass_check; authorization checks; PassChkValid; always_ff state registers; jtag_unlock connection
+  reason=pass_check is the apparent authentication/authorization result and directly drives jtag_unlock_o. It is defaulted to 0 each combinational evaluation and set to 1 only in PassChkValid when the hash matches. There is no pass_check_q or other registered authenticated state in the sequential block. Therefore successful authentication is a pulse rather than a durable permission state, making subsequent authorization checks unreliable and potentially causing edge/pulse-sensitive downstream unlock beha
+
+baseline:gpt_5_5:h21_jtag_auth_expansion_scope:rep_1:JTAG-AUTH-003
+  status=potential_warning conf=medium
+  summary=DMI reads are permitted without pass_check when we_flag is 0, making read protection dependent on external we_flag_4 semantics.
+  files=piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=dmi_jtag; riscv_peripherals
+  signals=we_flag, pass_check, priv_lvl_i; we_flag_4; priv_lvl_i, we_flag; read authorization condition; i_dmi_jtag.we_flag; priv_lvl_i
+  reason=The read permission condition is based on pass_check OR deasserted we_flag. Since pass_check is normally false without authentication, reads can still be allowed when we_flag is 0. This may be intentional if we_flag_4 indicates an unlocked/debug-enabled policy, but the visible code does not show a stronger authentication or privilege gate, and priv_lvl_i is unused in dmi_jtag.sv.
+
+baseline:gpt_5_5:h21_jtag_auth_expansion_scope:rep_2:FINDING-001
+  status=confirmed_finding conf=medium
+  summary=DMI reads can be authorized without successful JTAG authentication when we_flag is low.
+  files=piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=dmi_jtag; riscv_peripherals
+  signals=pass_check, we_flag, state_d; we_flag_4, debug_req, debug_req_valid, jtag_unlock; DMI read authorization condition; DMI write authorization condition; i_dmi_jtag
+  reason=In dmi_jtag.sv, the read permission check is not solely based on successful authentication. It allows a DMI read when `(pass_check | ~we_flag == 1)` is true. Because pass_check defaults to zero in the combinational block except during a successful hash-valid state, a low we_flag can permit reads without a successful password/HMAC authentication. This is a permission bypass for the JTAG/DMI read path if we_flag_4 can be low in a locked or deployed configuration.
+
+baseline:gpt_5_5:h21_jtag_auth_expansion_scope:rep_2:FINDING-002
+  status=confirmed_finding conf=high
+  summary=JTAG authentication success is combinational/transient and not persistently latched.
+  files=piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=dmi_jtag; riscv_peripherals
+  signals=pass_check, jtag_unlock_o; pass_check, state_d; jtag_unlock; jtag_unlock_o; pass_check; PassChkValid; i_reglk_wrapper
+  reason=The code uses pass_check as the authentication/permission signal and directly exposes it as jtag_unlock_o. However, pass_check is combinational, defaults to zero, and is asserted only during the PassChkValid state when the HMAC comparison succeeds. No persistent pass_check_q or authenticated-session register is visible. Therefore, a successful authentication is not latched as a durable permission state, making authorization unreliable and likely only a transient pulse.
+
+baseline:gpt_5_5:h21_jtag_auth_expansion_scope:rep_2:FINDING-003
+  status=potential_warning conf=medium
+  summary=fuse_mem exposes sensitive fuse contents through a read interface without local authorization checks.
+  files=piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=fuse_mem; riscv_peripherals
+  signals=req_i, addr_i, rdata_o; mem; addr_q, rdata_o; fuse_req, fuse_addr, fuse_rdata; module interface; rdata_o; i_pkt_wrapper and i_fuse_mem
+  reason=The fuse_mem module stores highly sensitive security data and provides a generic read port. Any assertion of req_i captures the low address bits, and rdata_o returns the selected word. The module itself has no authorization input or access-control logic. Although an external pkt_wrapper may restrict access, that source is not in the visible scope and cannot be verified. At module level, this is a missing local authorization boundary around secrets.
+
+baseline:gpt_5_5:h21_jtag_auth_expansion_scope:rep_2:FINDING-004
+  status=potential_warning conf=high
+  summary=The JTAG HMAC authentication key is hardcoded as a literal RTL constant.
+  files=piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv
+  modules=dmi_jtag
+  signals=key_i, pass_data, pass_hash; hmac instance
+  reason=The JTAG authentication HMAC key is a fixed literal in the RTL. If the RTL or bitstream reverse-engineering exposes this value, the authentication mechanism may be compromised. This is not a permission check logic bug by itself, but it undermines the permission mechanism protecting JTAG/DMI access.
+
+baseline:gpt_5_5:h21_jtag_auth_expansion_scope:rep_3:FINDING-001
+  status=confirmed_finding conf=high
+  summary=DTM_PASS authentication operation can issue an unauthenticated DMI write before password/HMAC validation.
+  files=piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv
+  modules=dmi_jtag
+  signals=dmi_req.op, state_q; state_d, pass_check, pass_mode; dmi_req_valid, pass_mode, pass_data; pass_check, exp_hash, pass_hash; dmi_req.op; DTM_PASS transition; Write state; PassChkValid state
+  reason=The intended design appears to authenticate JTAG debug access through a DTM_PASS operation and HMAC comparison. However, the FSM routes DTM_PASS into the Write state before authentication succeeds. In the Write state, dmi_req_valid is asserted, and line 96 maps any Write state to dm::DTM_WRITE. Therefore a JTAG user can submit a DTM_PASS transaction carrying address/data and cause a DMI write before the HMAC result is checked.
+
+baseline:gpt_5_5:h21_jtag_auth_expansion_scope:rep_3:FINDING-002
+  status=confirmed_finding conf=medium
+  summary=JTAG authentication success is not latched; pass_check/pass_mode are transient combinational signals used for authorization.
+  files=piton/design/chip/tile/ariane/src/riscv-dbg/src/dmi_jtag.sv
+  modules=dmi_jtag
+  signals=jtag_unlock_o, pass_check; pass_check, pass_mode; pass_check; state_q, address_q, data_q, error_q; jtag_unlock_o; registered state
+  reason=pass_check is used as both the JTAG unlock output and the authorization condition for DMI writes, but it is a combinational signal defaulted to zero and not stored in the sequential state block. A successful HMAC comparison only drives pass_check high transiently in PassChkValid. This makes the intended authentication/unlock state non-persistent and can cause unreliable permission enforcement. It also contributes to the DTM_PASS write bug because pass_mode is similarly not latched across the tra
+
+baseline:gpt_5_5:h21_jtag_auth_expansion_scope:rep_3:FINDING-003
+  status=potential_warning conf=medium
+  summary=fuse_mem stores sensitive security material and exposes a generic read interface without local permission checks.
+  files=piton/design/chip/tile/ariane/src/fuse_mem/fuse_mem.sv; piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv
+  modules=fuse_mem; riscv_peripherals
+  signals=mem; req_i, addr_i, addr_q, rdata_o; fuse_req, fuse_addr, fuse_rdata, acct_ctrl_i; i_fuse_mem, fuse_req, fuse_addr, fuse_rdata; rdata_o; i_pkt_wrapper fuse interface; i_fuse_mem
+  reason=The fuse_mem module contains keys, hashes, and access-control words. Its local interface has only req_i and addr_i for reads and does not include or enforce privilege, lock, or authorization checks. The visible top-level connects this interface to pkt_wrapper, which receives an acct_ctrl_i input, but pkt_wrapper source was not visible, so the external enforcement cannot be verified. From visible code, fuse_mem is not self-protecting and could expose sensitive data if the upstream wrapper is bypa
+

@@ -13,11 +13,13 @@ GT_CASE_COLUMNS = [
     "case_id",
     "benchmark_id",
     "input_scope",
+    "official_description",
     "case_description",
     "gt_files",
     "gt_modules",
     "gt_signals_or_registers",
     "gt_evidence_notes",
+    "case_doc_path",
 ]
 
 FINDING_REVIEW_COLUMNS = [

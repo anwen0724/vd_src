@@ -32,9 +32,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from evaluation.build_finding_review import build_finding_review
 
 
-METHOD_NAME = "baseline"
+METHOD_NAME = "proposed"
 MODEL_FAMILY: str | None = "deepseek_v4_pro"
-BATCH_ID = "baseline_hackatdac_deepseek_gpt_pilot_v1"
+BATCH_ID = "proposed_hackatdac_deepseek_pilot_v1"
 
 BATCH_DIR = PROJECT_ROOT / "runs" / METHOD_NAME / BATCH_ID
 OUTPUT_FINDING_REVIEW_DRAFT = (
