@@ -1,0 +1,1819 @@
+{
+  "graph_id": "hackatdac19__h19_debug_jtag_scope",
+  "schema_version": "0.1",
+  "description": "Unvalidated LLM finding outputs before evidence validation and filtering.",
+  "raw_llm_findings": [
+    {
+      "chain_id": "CHAIN-0001",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0001",
+        "has_finding": true,
+        "finding": {
+          "summary": "The `rom2` module allows unrestricted memory-mapped writes to `secure_reg`, which contains system access control policies and the JTAG debug key.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The `secure_reg` state is updated with `wdata_i` whenever `req_i` and `we_i` are asserted, with no access control, privilege check, or locking mechanism.",
+              "supports_claim": "Demonstrates that the secure registers intended to hold read-only or fused keys can be arbitrarily modified during runtime."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "impact",
+              "description": "The outputs from `secure_reg` (`key_reg_out`) are directly assigned to the system's `jtag_key` and `access_ctrl_reg`.",
+              "supports_claim": "Shows that an attacker modifying `secure_reg` can directly manipulate the AXI access control matrices and JTAG authentication keys."
+            }
+          ],
+          "reasoning_summary": "The `rom2` module is designed to hold critical security configuration values (JTAG key, AES key, and access control matrices) initialized from a hardcoded memory array. However, it implements an unprotected write path that allows any bus master capable of issuing memory writes to overwrite the `secure_reg` array. Since these registers directly drive the system's access control policies (`access_ctrl_reg`) and debug keys (`jtag_key`), this missing guard allows complete privilege escalation and bypass of hardware root-of-trust.",
+          "security_impact": "High. Any code executing with memory-mapped I/O access can overwrite system-wide access controls and debug keys, leading to total compromise of the SoC's hardware security and isolation.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The instantiation of `ariane_peripherals` and `rom2` within a `tb/` (testbench) directory suggests this might be a mockup or simulation model rather than production silicon logic. However, evaluated as RTL, it poses a critical vulnerability."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0004",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0004",
+        "has_finding": true,
+        "finding": {
+          "summary": "JTAG authentication bypass on DMI writes and insecure memory-mapped access to authentication keys.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "The debug module interface evaluates DMI operations and checks `pass_chk == 1'b1` before allowing `DTM_READ` requests, but `DTM_WRITE` requests are processed without checking the `pass_chk` authorization guard.",
+              "supports_claim": "Demonstrates a missing authentication guard that allows unauthorized write operations to the JTAG debug module interface."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "protected_resource",
+              "description": "The keys and access control lists initialized from `mem` are stored in `secure_reg`, which is accessible over the memory-mapped bus. The RTL allows unrestricted reads and writes (`secure_reg[...] <= wdata_i`) based simply on the `we_i` signal without any privilege checks.",
+              "supports_claim": "Proves that the supposedly protected JTAG authentication keys and master access control lists can be trivially read or overwritten by any bus master."
+            }
+          ],
+          "reasoning_summary": "The debug interface (`dmi_jtag`) implements a JTAG authentication mechanism via a password check (`pass_chk`). However, the access control logic only requires this check for read operations, leaving write operations entirely exposed to unauthenticated users. In parallel, the backing storage for the system's cryptographic keys and access policies (`rom2.sv`) is directly attached to the system bus as memory-mapped registers. Lacking any access restrictions, an attacker could trivially read out the authentication keys or overwrite them to fully bypass the security mechanisms.",
+          "security_impact": "Critical. Unauthenticated users can perform arbitrary DMI write operations, allowing them to compromise core execution state. The exposed keys in memory mean an attacker can easily dump the hardcoded JTAG password or modify the system's access control configurations, leading to full system compromise and privilege escalation.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0005",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0005",
+        "has_finding": true,
+        "finding": {
+          "summary": "Sensitive security keys and access control configurations in the ROM2 peripheral can be arbitrarily read and overwritten via the AXI bus due to missing privilege or lock checks.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "In `rom2.sv`, the `secure_reg` array containing sensitive keys (JTAG, AES, access control matrix) allows unrestricted writes (`secure_reg[...] <= wdata_i;`) and reads (`rdata_o = ... secure_reg[raddr_q]`) based on generic request signals (`req_i`, `we_i`) without any privilege, secure state, or lock validation.",
+              "supports_claim": "Demonstrates missing guard logic on critical protection state variables and sensitive readback of keys."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "access_entry",
+              "description": "The `axi2mem` block directly translates AXI memory transactions into `rom2_req`, `rom2_we`, and data signals.",
+              "supports_claim": "Shows that any bus master with access to the ROM2 memory map can initiate unauthenticated reads and writes."
+            },
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "permission_state",
+              "description": "The output of `rom2` (`key_reg_out`) is continuously assigned to critical system security signals like `jtag_key` and `access_ctrl_reg`.",
+              "supports_claim": "Confirms that modifying the unprotected ROM2 registers directly alters system-level permissions and debug access."
+            }
+          ],
+          "reasoning_summary": "The `rom2` module holds critical system keys including the JTAG authentication key, the AES key, and the access control matrix for peripherals. These keys are populated from a hardcoded memory map on reset into `secure_reg`. However, `rom2` exposes a fully writable and readable memory interface directly hooked to the AXI bus via `axi2mem`. Because there are no access control checks, privilege level checks, or lock mechanisms guarding `req_i` and `we_i` in `rom2`, any software or bus master can read out the sensitive keys or overwrite them to escalate privileges or unlock debug access.",
+          "security_impact": "High. An attacker (even with low privileges, if the bus does not filter accesses beforehand) can read the AES/JTAG keys and overwrite the hardware access control matrix to grant themselves full system access, bypassing all intended privilege isolation.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0007",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0007",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing access control on the rom2 peripheral allows arbitrary AXI masters to overwrite sensitive security keys.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The secure_reg registers containing sensitive keys (JTAG, AES, access control) are updated based solely on req_i and we_i, with no privilege, secure state, or lock checks.",
+              "supports_claim": "Shows that any write request to the rom2 module will unconditionally overwrite the security keys."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "access_entry",
+              "description": "The rom2 module is connected directly to the AXI interconnect via an axi2mem bridge, exposing it to system-level read/write transactions.",
+              "supports_claim": "Demonstrates that any master capable of generating AXI transactions can trigger the unprotected write logic in rom2."
+            }
+          ],
+          "reasoning_summary": "The rom2 module stores highly sensitive key material in the secure_reg array. However, the module accepts write transactions directly from the AXI bus without performing any permission, privilege, or lock checks. Furthermore, it assigns 64-bit wdata_i to 192-bit registers, which zero-extends and corrupts the remaining bits. As a result, any software or AXI master can overwrite these critical keys, compromising the system's access control and cryptographic features.",
+          "security_impact": "An attacker with bus access (e.g., executing code on the core) can overwrite AES and JTAG keys, as well as peripheral access control matrices. This allows complete security bypass, privilege escalation, and disruption of trusted cryptographic operations.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0010",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0010",
+        "has_finding": true,
+        "finding": {
+          "summary": "The secure key registers in the ROM2 module can be overwritten by any AXI bus master without any access control or privilege checks.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The secure_reg array is written unconditionally when req_i and we_i are asserted, completely lacking privilege, role, or lock checks.",
+              "supports_claim": "Demonstrates missing guard logic for sensitive key registers, allowing arbitrary writes."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "access_entry",
+              "description": "The rom2 module's request (rom2_req) and write-enable (rom2_we) signals are driven directly from the AXI bus via an axi2mem component.",
+              "supports_claim": "Shows that any bus master on the AXI interconnect can initiate writes to the rom2 module."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "impact",
+              "description": "The key_reg_out signal (which exposes secure_reg) is directly assigned to critical system security signals such as jtag_key and access_ctrl_reg.",
+              "supports_claim": "Proves that overwriting these registers directly compromises system access controls and JTAG debug security."
+            }
+          ],
+          "reasoning_summary": "The 'rom2' module stores critical system keys and access control configurations in the 'secure_reg' array, which initializes from a hardcoded memory array mimicking fuses. However, the module implements writable logic that allows any incoming request with 'we_i' asserted to overwrite these secure registers. Because the module is connected directly to the system AXI bus via an 'axi2mem' converter, any bus master can write to these registers. The lack of any access control, privilege, or lock checks means an attacker can arbitrarily alter the 'jtag_key' or 'access_ctrl_reg' configurations, completely bypassing intended security policies.",
+          "security_impact": "An attacker capable of executing software or controlling a bus master can overwrite the system's root keys and access control configurations, leading to unauthorized JTAG debug access, privilege escalation, and full system compromise.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0017",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0017",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing write protection on secure_reg allows arbitrary modification of access control policies and keys.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "permission_state",
+              "description": "secure_reg is instantiated to hold JTAG keys and Access Control configurations initialized from fuse memory.",
+              "supports_claim": "Confirms the register holds sensitive security configuration state."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "secure_reg can be directly overwritten by memory-mapped writes (wdata_i) if req_i and we_i are asserted, with no access control, privilege, or lock checks.",
+              "supports_claim": "Demonstrates the absence of any write-protection or privilege guard on the security state."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "impact",
+              "description": "The contents of secure_reg (key_reg_out) are continuously assigned to jtag_key and access_ctrl_reg.",
+              "supports_claim": "Shows that unauthorized writes immediately affect downstream hardware access control and debug keys."
+            }
+          ],
+          "reasoning_summary": "The ROM2 module exposes secure_reg, which holds critical configuration for JTAG keys and master/peripheral access control policies. The module allows arbitrary writes to this register via a standard memory interface (req_i, we_i, wdata_i) without implementing any hardware locks, privilege checks, or write-protect mechanisms. An attacker capable of writing to this memory region can maliciously overwrite the system's access control matrices and debug keys.",
+          "security_impact": "Malicious modification of secure_reg allows privilege escalation, unauthorized peripheral access, and compromise of debug features, undermining the entire SoC security model.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0020",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0020",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded authentication bypass in the debug module grants unconditional debug access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "access_entry",
+              "description": "JTAG and DMI debug requests are routed into the system's debug logic via `debug_req`.",
+              "supports_claim": "Shows the unauthenticated entry points for external debug signals."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "The debug module CSR logic explicitly hardcodes `dmstatus.authenticated = 1'b1;` with the comment `// no authentication implemented`.",
+              "supports_claim": "Confirms that any connected debugger is automatically authenticated, bypassing any security checks."
+            }
+          ],
+          "reasoning_summary": "The debug module explicitly lacks an authentication mechanism and ties the `authenticated` status signal to high (`1'b1`). Because of this hardcoded bypass, any user or attacker connecting via the JTAG/DMI interface is automatically granted full, authenticated access to the hardware's debug capabilities without needing to provide credentials or pass a privilege check.",
+          "security_impact": "An attacker with physical or network access to the JTAG/DMI interface can bypass debug authentication to gain unrestricted access. This allows reading sensitive core registers/memory, tampering with execution, or compromising the entire system state.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0023",
+      "status": "discarded",
+      "discard_reason": "missing_violation_evidence",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0023",
+        "has_finding": true,
+        "finding": {
+          "summary": "Debug module authentication is hardcoded to true, bypassing debug access control.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "permission_state",
+              "description": "The debug status register field `dmstatus.authenticated` is hardcoded to 1 (true) with a comment explicitly stating 'no authentication implemented'.",
+              "supports_claim": "Confirms that the debug authentication mechanism is entirely bypassed and disabled by default."
+            }
+          ],
+          "reasoning_summary": "The RTL hardcodes the 'authenticated' state of the debug module to true (1'b1). By skipping a genuine authentication process, any attached debugger is automatically granted full access to the target's debug features.",
+          "security_impact": "An attacker with physical or transport (JTAG/DMI) access can gain unauthorized debug privileges, allowing them to read/write arbitrary memory, control execution, and fully compromise the hardware without requiring valid credentials.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0024",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0024",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug module unconditionally grants authenticated status to any connected debugger, bypassing authentication entirely.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "The 'dmstatus.authenticated' flag is hardcoded to 1'b1, with a comment explicitly stating 'no authentication implemented'.",
+              "supports_claim": "Proves that the debug authentication check is missing and bypassed, granting full debug access unconditionally."
+            }
+          ],
+          "reasoning_summary": "The debug module RTL (dm_csrs.sv) hardcodes the `authenticated` bit of the `dmstatus` register to 1. Because no authentication mechanism is implemented, the debug module automatically and unconditionally grants full debug privileges to any connected interface. This allows unrestricted debug access.",
+          "security_impact": "An attacker with physical or logical access to the debug interface (such as JTAG) can bypass all authentication requirements. This leads to a complete system compromise, enabling arbitrary memory read/write, processor halt/resume control, and privilege escalation.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0025",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0025",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug module completely omits authentication, hardcoding the authenticated state to true and always returning success for debug requests.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "The dmstatus.authenticated bit is hardcoded to 1'b1 with a comment explicitly stating 'no authentication implemented'.",
+              "supports_claim": "Shows that any connected debugger is automatically granted authenticated privileges without any checks."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "impact",
+              "description": "The debug module interface response is hardcoded to always return dm::DTM_SUCCESS (0).",
+              "supports_claim": "Confirms that all incoming debug transport commands are treated as successful, further indicating a lack of access control or error propagation for unpermitted actions."
+            }
+          ],
+          "reasoning_summary": "The RISC-V Debug specification allows for an authentication mechanism to restrict access to the debug module. In this RTL implementation, authentication is explicitly omitted, and the 'authenticated' state is statically tied to 1. This allows any entity with access to the debug transport (e.g., JTAG) to halt the core, read/write memory, and alter execution unconditionally.",
+          "security_impact": "An attacker with physical or remote access to the JTAG/DMI interface can take full control of the core, bypass all software isolation/privilege levels, and extract sensitive data.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0033",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0033",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded debug authentication bypasses access control, granting unrestricted debug access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The 'dmstatus.authenticated' field is unconditionally set to 1'b1 with a comment indicating 'no authentication implemented'.",
+              "supports_claim": "Demonstrates that the debug module unconditionally reports itself as authenticated without verifying any credentials or permissions."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "protected_resource",
+              "description": "The read response logic for 'dm::DMStatus' returns the fully authenticated 'dmstatus' variable.",
+              "supports_claim": "Exposes the unprotected state directly to the debug interface when a read is requested."
+            }
+          ],
+          "reasoning_summary": "The hardware debug CSR module (`dm_csrs`) is responsible for tracking and enforcing debug state. It unconditionally hardcodes the `dmstatus.authenticated` bit to 1, explicitly bypassing any authentication sequence. Any entity interacting with the Debug Module Interface (via JTAG or DMI) will be treated as fully authenticated and given privileged access to debug features.",
+          "security_impact": "An attacker with physical access to the debug interface (e.g., JTAG port) or capable of injecting debug requests can access the core's debug module without authentication. This allows the attacker to halt the core, read/write sensitive registers, dump memory, and execute arbitrary code.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0034",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0034",
+        "has_finding": true,
+        "finding": {
+          "summary": "Unrestricted debug access due to hardcoded authentication bypass in the debug module.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The debug module status register (dmstatus) explicitly hardcodes the 'authenticated' bit to 1, bypassing any actual authentication logic.",
+              "supports_claim": "Demonstrates that debug authentication is permanently granted without any verification, as noted by the comment 'no authentication implemented'."
+            }
+          ],
+          "reasoning_summary": "The RTL hardcodes `dmstatus.authenticated = 1'b1;` inside the Debug Module CSR implementation. By explicitly bypassing authentication mechanisms, any entity connecting to the debug interface (such as via JTAG or DMI) automatically receives full authenticated debug privileges.",
+          "security_impact": "An attacker with physical access or remote reachability to the debug interface (e.g., via JTAG) automatically gains full SoC control. They can halt the core, read and write arbitrary memory or registers, extract sensitive data or cryptographic keys, and permanently compromise the system.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0042",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0042",
+        "has_finding": true,
+        "finding": {
+          "summary": "Unauthenticated JTAG DMI write access due to missing password check for DTM_WRITE commands.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The logic checking for DTM_WRITE omits the `pass_chk == 1'b1` condition (unlike DTM_READ), allowing state_d to transition to Write without authentication.",
+              "supports_claim": "Proves the missing access guard on the JTAG DMI write path."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "protected_resource",
+              "description": "In the Write state, `dmi_req_valid` is asserted, exposing the system to unauthenticated writes.",
+              "supports_claim": "Demonstrates the direct consequence of bypassing the write authentication."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "access_entry",
+              "description": "The authentication logic processes a DTM_PASS command and sets `pass_chk` when the provided data matches the password.",
+              "supports_claim": "Establishes that a password protection mechanism was intended but improperly enforced."
+            }
+          ],
+          "reasoning_summary": "The debug JTAG interface implements a password authentication mechanism that sets the `pass_chk` flag upon successfully validating a DTM_PASS command. While DTM_READ operations explicitly require `pass_chk == 1'b1` to proceed, DTM_WRITE operations entirely omit this guard condition. This oversight allows any attacker connected to the JTAG interface to issue unauthenticated write commands directly to the debug module.",
+          "security_impact": "High. An unauthenticated attacker with physical JTAG access can perform arbitrary writes via the debug module. This allows unauthorized state modification, writing to system memory/registers, and potential escalation of privileges, entirely bypassing the JTAG security lock.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0044",
+      "status": "discarded",
+      "discard_reason": "missing_violation_evidence",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0044",
+        "has_finding": true,
+        "finding": {
+          "summary": "The hardware debug module (dm_csrs) lacks an authentication mechanism, hardcoding the authenticated status to true and granting unrestricted debug access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "permission_state",
+              "description": "The 'dmstatus.authenticated' flag is permanently tied to 1 with a comment explicitly stating '// no authentication implemented'.",
+              "supports_claim": "Demonstrates the complete absence of a hardware debug authentication mechanism in the RISC-V Debug Module."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "protected_resource",
+              "description": "Incoming DMI read and write requests directly access sensitive debug CSRs (like the data registers) because the system fundamentally assumes all debuggers are authenticated.",
+              "supports_claim": "Shows that arbitrary debug capabilities are immediately accessible to any connected client, with no auth barriers."
+            }
+          ],
+          "reasoning_summary": "The debug control and status register module (dm_csrs) entirely bypasses RISC-V debug authentication by hardcoding 'dmstatus.authenticated = 1'b1'. Because of this omission, any connection to the debug interface (via JTAG or DTM) is automatically considered an authenticated debugger. This allows an attacker to freely read/write debug registers, inspect memory, and manipulate processor execution state without supplying a key or passing an authentication challenge.",
+          "security_impact": "An attacker with physical or remote access to the DMI/JTAG interface can completely compromise the system, bypass OS/software security perimeters, and extract sensitive assets like cryptographic keys.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The real-world exploitability relies on whether the SoC platform externally gates the JTAG pins. If a separate external secure-boot controller locks the physical JTAG interface, this module-level flaw would be safely mitigated."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0046",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0046",
+        "has_finding": true,
+        "finding": {
+          "summary": "JTAG DMI write operations bypass the password authentication check, allowing unauthenticated JTAG writes.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The JTAG DMI state machine transitions to the Write state for DTM_WRITE operations without verifying pass_chk, whereas DTM_READ correctly requires pass_chk == 1'b1.",
+              "supports_claim": "Demonstrates that the authentication guard is missing for write operations, leading to an access control bypass."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "permission_state",
+              "description": "The expected password 'pass' is initialized from 'jtag_key' on reset, which establishes the expected authentication secret for DMI access.",
+              "supports_claim": "Confirms that a password-based permission model is intended for the JTAG interface."
+            }
+          ],
+          "reasoning_summary": "The hardware implements a JTAG authentication mechanism where access to the Debug Module Interface (DMI) requires a password check. When a 'DTM_PASS' operation provides the correct password, 'pass_chk' is asserted. However, while 'DTM_READ' operations correctly check that 'pass_chk == 1'b1' before proceeding, 'DTM_WRITE' operations completely lack this guard. As a result, an unauthenticated attacker can arbitrarily write to the DMI registers without supplying the correct password.",
+          "security_impact": "An attacker with physical or remote access to the JTAG interface can bypass authentication to perform arbitrary writes to the Debug Module. This allows the attacker to alter processor state, modify memory, or achieve privilege escalation and arbitrary code execution.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0051",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0051",
+        "has_finding": true,
+        "finding": {
+          "summary": "Privilege level check is explicitly bypassed for the Machine Exception Program Counter (MEPC) register.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0014",
+              "evidence_role": "violation",
+              "description": "The exception guard logic for checking CSR privilege levels has been modified to bypass the check for `CSR_MEPC`.",
+              "supports_claim": "The boolean logic `&& !(csr_addr.address==riscv::CSR_MEPC)` in line 854 prevents an `ILLEGAL_INSTR` exception from being raised when lower privileged modes access the MEPC register."
+            }
+          ],
+          "reasoning_summary": "The RTL implements a privilege check for accessing CSRs, ensuring that the current operating mode has sufficient privileges to access a given register. However, line 854 explicitly exempts `riscv::CSR_MEPC` from this check, replacing the correct, originally commented-out check on line 853. This allows software running at any privilege level (e.g., User or Supervisor mode) to read and write the Machine Exception Program Counter. An attacker could exploit this by writing a malicious address to MEPC, causing the processor to jump to attacker-controlled code with Machine privileges upon the next MRET (machine return) execution.",
+          "security_impact": "Critical. By reading the MEPC register, an attacker can bypass ASLR/leak privileged execution state. By writing the MEPC register, lower-privileged software can hijack the control flow of the processor running in Machine mode, leading to a complete compromise of the system through privilege escalation.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0052",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0052",
+        "has_finding": true,
+        "finding": {
+          "summary": "Bypassed privilege level check for the MEPC (Machine Exception Program Counter) CSR allows unauthorized access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0014",
+              "evidence_role": "violation",
+              "description": "The logic intended to enforce CSR privilege levels explicitly ignores the check when the accessed register is MEPC.",
+              "supports_claim": "Line 854 explicitly suppresses the illegal instruction exception for riscv::CSR_MEPC when privilege levels do not match, demonstrating a bypassed privilege check."
+            }
+          ],
+          "reasoning_summary": "The hardware relies on a privilege check to ensure that a given CSR is accessed only by code running at an equal or higher privilege level. In the RTL, this guard condition explicitly excludes the Machine Exception Program Counter (MEPC) register (`!(csr_addr.address==riscv::CSR_MEPC)`). This effectively allows lower-privileged code (like User or Supervisor modes) to access and modify this critical Machine-mode register without triggering an access exception.",
+          "security_impact": "High. This allows local privilege escalation. By overwriting MEPC, an unprivileged attacker can control the execution flow of Machine-mode code upon an execution of an mret instruction (or equivalent trap return), leading to arbitrary code execution in the highest privilege mode and full system compromise.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0053",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0053",
+        "has_finding": true,
+        "finding": {
+          "summary": "Lower privilege Supervisor mode can manipulate Machine mode trap handler execution due to incorrectly combined vector mode bits.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0013",
+              "evidence_role": "violation",
+              "description": "The logic evaluates `(mtvec_q[0] || stvec_q[0])` to apply the vectored interrupt offset to `trap_vector_base_o`, meaning S-mode configuration can wrongly force M-mode traps to behave as vectored.",
+              "supports_claim": "Shows that the application of the vector exception offset is not isolated by the active trap privilege level, allowing a cross-privilege control flow hijack."
+            }
+          ],
+          "reasoning_summary": "In the RISC-V specification, trap vector base addresses and mode configurations (Direct vs. Vectored) are separated by privilege level (`mtvec` for M-mode, `stvec` for S-mode). The implemented logic applies the vectored offset to the base address if `mtvec_q[0]` OR `stvec_q[0]` is asserted, regardless of the target privilege level of the exception. Because `stvec` is writable from Supervisor mode, a less privileged S-mode payload can set `stvec_q[0] = 1`. If an interrupt traps to M-mode (where `mtvec_q[0]` may be 0 for Direct mode), the hardware will improperly calculate a vectored base address (`BASE + 4 * cause`), hijacking the M-mode execution flow to an unhandled or attacker-controlled offset.",
+          "security_impact": "Privilege Escalation and Control Flow Hijack. A malicious Supervisor mode payload can compromise Machine mode execution, leading to arbitrary code execution at the highest privilege level or Denial of Service.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0055",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0055",
+        "has_finding": true,
+        "finding": {
+          "summary": "Privilege check explicitly bypassed for the Machine Exception Program Counter (MEPC) register.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0014",
+              "evidence_role": "violation",
+              "description": "The logic checks if the requested CSR access violates the privilege level. However, an explicit condition `&& !(csr_addr.address==riscv::CSR_MEPC)` bypasses the privilege check specifically for the MEPC register, preventing an illegal instruction exception from being raised.",
+              "supports_claim": "Shows that unauthorized accesses to MEPC will not trigger the expected ILLEGAL_INSTR exception, allowing lower privileges to bypass access control."
+            }
+          ],
+          "reasoning_summary": "The RTL implements a general privilege check for CSR reads and writes. A vulnerability is introduced by explicitly exempting the MEPC (Machine Exception Program Counter) register from this check. Because the exception is suppressed, software operating at lower privilege levels (such as User or Supervisor mode) can read and write the M-mode MEPC register.",
+          "security_impact": "Critical. An attacker in a lower privilege mode can overwrite the MEPC register to redirect control flow when the processor executes an M-mode return (mret). This allows privilege escalation and arbitrary code execution in Machine mode.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0056",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0056",
+        "has_finding": true,
+        "finding": {
+          "summary": "Privilege check bypass for MEPC CSR allows unauthorized access from lower privilege levels.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0012",
+              "evidence_role": "violation",
+              "description": "The CSR privilege check logic explicitly excludes the Machine Exception Program Counter (MEPC) register by adding the condition `&& !(csr_addr.address==riscv::CSR_MEPC)`. This prevents an illegal instruction exception when a lower privilege mode attempts an unauthorized access.",
+              "supports_claim": "Shows the direct and flawed modification in the RTL that disables privilege enforcement for the MEPC register."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "protected_resource",
+              "description": "The read assignment for CSR_MEPC (`csr_rdata = mepc_q`), which becomes readable to any privilege level because the guard logic in SNIP-0012 fails to raise an exception.",
+              "supports_claim": "Confirms that the MEPC value is actively placed on the read data path and exposed to the bypass."
+            }
+          ],
+          "reasoning_summary": "The hardware module enforces CSR access privileges by comparing the current privilege level (`priv_lvl_o`) against the required privilege level decoded from the CSR address. However, SNIP-0012 reveals that this check has been explicitly bypassed for the MEPC register (`riscv::CSR_MEPC`). Because of this exclusion, if a lower-privileged entity (such as User or Supervisor mode) attempts to read or write the MEPC register, the module will not raise an illegal instruction exception. SNIP-0002 confirms that MEPC is mapped and readable, meaning its data can be successfully exfiltrated by unprivileged code.",
+          "security_impact": "Bypassing the MEPC privilege check allows lower-privilege software to read the Machine Exception Program Counter, causing an information leak of machine-mode execution context. If write logic exists and is also exposed by this bypass, an unprivileged attacker could overwrite MEPC, hijacking the machine-mode control flow upon the next `mret` and achieving full system compromise.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The provided snippets do not show the explicit write data path for MEPC, so it is uncertain whether a lower-privilege write to MEPC would successfully update the register or just fail silently. However, the read path is clearly exposed."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0057",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0057",
+        "has_finding": true,
+        "finding": {
+          "summary": "Privilege check bypass for MEPC CSR allows unauthorized access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0012",
+              "evidence_role": "violation",
+              "description": "The privilege level check for CSR reads and writes explicitly excludes the Machine Exception Program Counter (riscv::CSR_MEPC) from generating an illegal instruction exception.",
+              "supports_claim": "The hardcoded condition `&& !(csr_addr.address==riscv::CSR_MEPC)` bypasses the standard privilege verification."
+            }
+          ],
+          "reasoning_summary": "The RTL implements privilege verification for CSR reads and writes by checking if the current privilege level is sufficient for the target CSR. However, the condition intentionally ignores this check when accessing `riscv::CSR_MEPC`. As a result, lower-privileged execution modes (User or Supervisor) can access the M-mode MEPC register without triggering an illegal instruction exception, which violates the standard RISC-V architectural isolation boundaries.",
+          "security_impact": "High. Allowing lower privileged contexts to access M-mode CSRs compromises the execution state of Machine Mode. If writable, an attacker can hijack the M-mode execution flow upon an `mret` instruction, leading to full privilege escalation. If only readable, it leaks sensitive M-mode control flow data.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0058",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0058",
+        "has_finding": true,
+        "finding": {
+          "summary": "Privilege check bypasses allow unauthorized access to the MEPC register and escalate User Mode privileges.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0012",
+              "evidence_role": "violation",
+              "description": "The CSR privilege check logic contains a hardcoded bypass `!(csr_addr.address==riscv::CSR_MEPC)`, allowing any privilege level to read and write the Machine Exception Program Counter.",
+              "supports_claim": "Demonstrates a direct bypass of access control checks for a critical machine-mode resource."
+            },
+            {
+              "snippet_id": "SNIP-0013",
+              "evidence_role": "permission_state",
+              "description": "The current privilege level (`priv_lvl_o`) is unconditionally evaluated as `PRIV_LVL_M` when `umode_i` is high.",
+              "supports_claim": "Indicates a critical flaw where user mode (`umode_i`) is granted machine-mode privileges, nullifying isolation."
+            }
+          ],
+          "reasoning_summary": "The CSR register file contains two severe access control vulnerabilities. First, the privilege check for reading/writing CSRs explicitly excludes `CSR_MEPC`, allowing lower-privileged contexts to overwrite it and hijack machine-mode control flow upon `mret`. Second, the privilege level output `priv_lvl_o` is forcefully escalated to M-mode when `umode_i` is active, effectively breaking all CSR access restrictions for user-mode execution.",
+          "security_impact": "An attacker in unprivileged modes (like User Mode) can trivially overwrite `mepc` to gain arbitrary code execution in Machine Mode. Furthermore, the `umode_i` privilege escalation backdoor grants unfettered access to all CSRs.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0060",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0060",
+        "has_finding": true,
+        "finding": {
+          "summary": "Privilege check bypass for Machine Exception Program Counter (MEPC) CSR.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0014",
+              "evidence_role": "violation",
+              "description": "The logic verifying the privilege level for CSR reads and writes explicitly exempts the MEPC CSR. This bypasses the guard that normally prevents lower-privilege (e.g., User or Supervisor mode) code from accessing M-mode CSRs.",
+              "supports_claim": "The explicit bypass `!(csr_addr.address==riscv::CSR_MEPC)` allows any privilege level to read or write MEPC without throwing an illegal instruction exception, leading to privilege escalation by allowing an attacker to hijack the Machine-mode return address."
+            }
+          ],
+          "reasoning_summary": "The `csr_regfile` module contains a guard to check if the current execution privilege level is sufficient to access the requested CSR. However, the guard logic contains an explicitly added exception for `riscv::CSR_MEPC` (the original secure check is commented out). This allows any privilege level, including User mode, to access the Machine Exception Program Counter without generating an exception. Consequently, unprivileged code can read or write the MEPC register, allowing it to potentially hijack the control flow of the Machine mode exception handler and execute arbitrary code with Machine privileges.",
+          "security_impact": "Critical privilege escalation. Unprivileged (User or Supervisor) code can write to MEPC, hijacking the M-mode return address upon executing `mret`. This completely compromises the isolation and security boundaries of the core.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0061",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0061",
+        "has_finding": true,
+        "finding": {
+          "summary": "Privilege check bypass allows unprivileged access to the MEPC CSR.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0014",
+              "evidence_role": "violation",
+              "description": "The CSR read/write privilege check explicitly exempts riscv::CSR_MEPC, allowing lower-privilege modes to read/write the Machine Exception Program Counter without raising an exception.",
+              "supports_claim": "Demonstrates a direct bypass of the CSR privilege enforcement for MEPC."
+            }
+          ],
+          "reasoning_summary": "The RTL implements an access control check to ensure that the current privilege level is sufficient to access a given CSR. However, an explicit condition `!(csr_addr.address==riscv::CSR_MEPC)` bypasses this check for the MEPC register. This allows unprivileged code (such as User or Supervisor mode) to write to the Machine Mode Exception Program Counter. An attacker could exploit this to overwrite MEPC and hijack control flow upon an MRET instruction, gaining Machine Mode execution capabilities.",
+          "security_impact": "Privilege escalation and arbitrary code execution in Machine Mode (M-mode) from any lower-privileged mode, leading to complete system compromise.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0063",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0063",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing debug mode guard for DCSR write access allows unauthorized modification of debug state.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "violation",
+              "description": "The logic for updating CSR_DCSR assigns to dcsr_d without checking if the core is in debug mode, failing to set update_access_exception for invalid accesses.",
+              "supports_claim": "Shows the lack of a guard (e.g., debug_mode_q check) before writing to the sensitive debug CSR."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "guard_logic",
+              "description": "Other CSRs like CSR_FFLAGS properly check state (e.g., mstatus_q.fs) and set update_access_exception if the check fails.",
+              "supports_claim": "Demonstrates the intended mechanism for access control within this switch block, which is notably missing for DCSR."
+            }
+          ],
+          "reasoning_summary": "In RISC-V, debug CSRs such as DCSR must only be accessible while the hart is in Debug Mode. The RTL fails to check 'debug_mode_q' when handling writes to CSR_DCSR, allowing software executing outside of Debug Mode to modify debug state. This missing guard violates the architecture specification and creates a vulnerability where software can corrupt debug state or manipulate hardware execution control.",
+          "security_impact": "Unauthorized software could manipulate debug control settings, potentially leading to unauthorized system state changes, unexpected stalls, or bypassing of normal execution controls.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0066",
+      "status": "discarded",
+      "discard_reason": "missing_violation_evidence",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0066",
+        "has_finding": true,
+        "finding": {
+          "summary": "Privilege escalation vulnerability where the user mode signal erroneously grants Machine Mode (M-Mode) privileges.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "permission_state",
+              "description": "The logic assigns priv_lvl_o to riscv::PRIV_LVL_M when umode_i is asserted, directly overriding the current privilege level. The preceding comment indicates this elevation should only occur for debug_mode_q.",
+              "supports_claim": "Demonstrates a direct bypass of privilege level separation, erroneously granting maximum privileges (M-Mode) when the umode_i signal is active."
+            }
+          ],
+          "reasoning_summary": "The CSR register file calculates the effective privilege level `priv_lvl_o` for the core. The ternary assignment `(debug_mode_q || umode_i) ? riscv::PRIV_LVL_M : priv_lvl_q` incorrectly forces Machine Mode (`PRIV_LVL_M`) whenever the `umode_i` input is asserted. The adjacent comment explicitly states that M-Mode execution is intended only for debug mode. Granting M-Mode privileges based on `umode_i` allows execution under User Mode to bypass hardware isolation and execute with the highest system privileges.",
+          "security_impact": "Complete compromise of CPU privilege separation. Software running in U-mode or tied to the `umode_i` state would operate with Machine-mode privileges, allowing arbitrary access to M-mode CSRs, restricted memory pages, and total control over the system.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact top-level connection of the `umode_i` input is missing from the snippets; however, the localized assignment is clearly a violation of intended privilege separation logic based on standard RISC-V semantics and the developer's own code comment."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0072",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0072",
+        "has_finding": true,
+        "finding": {
+          "summary": "Improper privilege escalation via undocumented 'umode_i' signal forcing Machine Mode.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "access_entry",
+              "description": "Declares the umode_i signal as an input to the csr_regfile module.",
+              "supports_claim": "Establishes umode_i as an external input signal capable of influencing the CSR register file behavior."
+            },
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "violation",
+              "description": "The logic assigns priv_lvl_o to PRIV_LVL_M whenever debug_mode_q OR umode_i is true, contradicting the comment that only mentions debug mode.",
+              "supports_claim": "Demonstrates that the 'umode_i' input bypasses the legitimate privilege level register (priv_lvl_q) and unjustifiably elevates the output system privilege to Machine Mode."
+            }
+          ],
+          "reasoning_summary": "The hardware logic contains a critical flaw where the 'umode_i' input arbitrarily overrides the active privilege level to Machine Mode (PRIV_LVL_M). The accompanying code comment specifically only justifies M-mode execution during debug mode, implying the inclusion of 'umode_i' is an unintended bug or a deliberate backdoor. This assignment breaks standard architectural privilege separation.",
+          "security_impact": "Critical. If a user-mode process or untrusted component can assert the 'umode_i' signal, it will immediately gain Machine Mode privileges. This entirely compromises memory protection architectures (such as MMU bypass) and enables full arbitrary control over the processor core and CSRs.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The top-level instantiation showing exactly what drives the 'umode_i' signal is not provided, but its direct use in the privilege level multiplexer inherently violates secure privilege management principles."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0073",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0073",
+        "has_finding": true,
+        "finding": {
+          "summary": "The privilege level check for CSR accesses explicitly bypasses protection for the Machine Exception Program Counter (MEPC) register, allowing under-privileged access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0013",
+              "evidence_role": "violation",
+              "description": "The logic determining illegal instruction exceptions for CSR accesses explicitly ignores privilege violations if the target is the MEPC register.",
+              "supports_claim": "The condition `&& !(csr_addr.address==riscv::CSR_MEPC)` in the privilege check allows unauthorized reads and writes to MEPC without triggering a trap."
+            }
+          ],
+          "reasoning_summary": "In the CSR read/write access control block, the RTL checks if the current privilege level satisfies the required privilege level for the targeted CSR. If the check fails, it normally triggers an ILLEGAL_INSTR exception. However, an explicit override `!(csr_addr.address==riscv::CSR_MEPC)` prevents the exception from being raised specifically for the MEPC register. This allows lower privileged execution modes (such as User or Supervisor mode) to read and modify MEPC without authorization.",
+          "security_impact": "An attacker running in a lower privilege mode can overwrite the MEPC register. When the processor subsequently executes an `mret` instruction, it will return to the attacker-controlled address while operating in Machine mode, leading to control-flow hijacking and full privilege escalation.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0077",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0077",
+        "has_finding": true,
+        "finding": {
+          "summary": "Privilege level is incorrectly elevated to Machine Mode when the User Mode (umode_i) signal is asserted, bypassing authorization and address translation protections.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0013",
+              "evidence_role": "violation",
+              "description": "The effective privilege level output 'priv_lvl_o' is unconditionally forced to 'riscv::PRIV_LVL_M' if 'umode_i' is true.",
+              "supports_claim": "Assigning Machine Mode privilege whenever umode_i is asserted causes unauthorized privilege escalation."
+            },
+            {
+              "snippet_id": "SNIP-0013",
+              "evidence_role": "impact",
+              "description": "The address translation enable signal 'en_translation_o' evaluates to 1'b0 because 'priv_lvl_o' is equal to 'riscv::PRIV_LVL_M'.",
+              "supports_claim": "Memory protections via MMU address translation are bypassed due to the false Machine Mode privilege state."
+            }
+          ],
+          "reasoning_summary": "The hardware assigns the output privilege level (priv_lvl_o) to Machine Mode when the input 'umode_i' (typically representing User Mode) is high. This improperly elevates the apparent execution privilege to the highest level, circumventing permission checks in external pipeline stages and internally disabling memory address translation (bare memory mode).",
+          "security_impact": "An attacker or unprivileged software capable of running in User Mode could execute with full Machine Mode privileges, allowing complete system compromise and bypassing all memory translation protections.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The precise origin and functional intent of 'umode_i' are not fully defined within the provided snippets; however, elevating a generic input to Machine Mode (especially alongside debug_mode_q) represents a concrete privilege violation in a standard RISC-V CSR context."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0078",
+      "status": "discarded",
+      "discard_reason": "missing_violation_evidence",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0078",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded privilege check bypass for Machine Exception Program Counter (MEPC)",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0014",
+              "evidence_role": "guard_logic",
+              "description": "The CSR access privilege check explicitly excludes riscv::CSR_MEPC, allowing accesses that would otherwise correctly throw an illegal instruction exception.",
+              "supports_claim": "Demonstrates that the privilege enforcement guard is intentionally bypassed for the MEPC register, leaving it unprotected against unprivileged access."
+            }
+          ],
+          "reasoning_summary": "The CSR access control logic implements a privilege check to ensure only suitably privileged execution modes can access restricted CSRs. However, the guard logic (line 854) contains a hardcoded exception for the Machine Exception Program Counter (`riscv::CSR_MEPC`). This explicit bypass permits lower-privilege code (e.g., User or Supervisor mode) to read and modify MEPC without triggering an illegal instruction trap. An attacker can exploit this by overwriting MEPC with an arbitrary address, causing the processor to jump to attacker-controlled code with Machine-mode privileges upon executing an MRET instruction.",
+          "security_impact": "Critical. Bypassing the privilege check for MEPC allows unprivileged software to hijack the Machine-mode exception handler return flow, resulting in arbitrary code execution at the highest privilege level (M-mode privilege escalation).",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0083",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0083",
+        "has_finding": true,
+        "finding": {
+          "summary": "The Debug Module hardcodes the authenticated status to 1, completely bypassing debug authentication.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The `authenticated` bit of `dmstatus` is hardcoded to `1'b1` with the comment 'no authentication implemented'.",
+              "supports_claim": "Confirms that debug authentication is not implemented and permanently bypassed, granting full privileges."
+            }
+          ],
+          "reasoning_summary": "The debug module CSR implementation explicitly sets the `authenticated` status bit to 1 at all times. By bypassing authentication, any entity communicating over the debug interface is automatically granted full authenticated privileges, allowing arbitrary system control, core halting, and unrestricted memory access.",
+          "security_impact": "An unauthorized attacker with physical or network access to the debug interface (e.g., JTAG) can gain full control of the processor and system memory, bypassing any intended security boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0085",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0085",
+        "has_finding": true,
+        "finding": {
+          "summary": "Debug module authentication is completely bypassed by hardcoding the authenticated status to true.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The 'authenticated' field of the 'dmstatus' CSR is hardcoded to 1'b1 (line 171), with a comment stating no authentication is implemented.",
+              "supports_claim": "Any debug connection is automatically treated as authenticated, bypassing any potential debug authorization checks."
+            }
+          ],
+          "reasoning_summary": "The debug module (dm_csrs) hardcodes `dmstatus.authenticated = 1'b1` and explicitly states in comments that no authentication is implemented. This allows unconditional debug access to the system, which can bypass all internal hardware and software security policies if left exposed in a production environment.",
+          "security_impact": "An attacker with access to the debug interface (e.g., JTAG) can gain unfettered access to the system, allowing them to inspect memory, modify execution flow, and extract sensitive secrets without providing any credentials.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "External SoC-level mechanisms (e.g., physically blowing a JTAG fuse or an external debug authorization module) might mitigate this issue in production, but at the analyzed module level, the required software-accessible authentication flow is missing."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0086",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0086",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug module hardcodes the authentication state to true, granting full debug privileges without any authentication check.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The debug module status register unconditionally sets the authenticated bit to 1, with a comment stating no authentication is implemented.",
+              "supports_claim": "Demonstrates that any entity connecting to the debug interface is automatically granted full authenticated privileges."
+            }
+          ],
+          "reasoning_summary": "In the debug CSR logic, `dmstatus.authenticated` is hardcoded to `1'b1` (SNIP-0002, line 171). The comment explicitly acknowledges 'no authentication implemented'. Since the Debug Transport Module (DTM) gives extensive access to processor state (halting, resuming, reading/writing registers, and system bus access), a lack of authentication allows complete system compromise by any connected debug client.",
+          "security_impact": "An attacker with access to the debug interface (e.g., via JTAG) can bypass all hardware and software security policies. They can halt the processor, read out sensitive memory (including cryptographic keys), write to arbitrary memory to inject malicious code, and escalate privileges.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The impact assumes the debug interface (e.g., JTAG pins) is accessible in the final deployed product. If the SoC physically disables or fuses off debug access in production environments, the risk is mitigated at the system level."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0092",
+      "status": "discarded",
+      "discard_reason": "missing_violation_evidence",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0092",
+        "has_finding": true,
+        "finding": {
+          "summary": "Debug authentication is unimplemented and permanently hardcoded to true, granting unrestricted access to debug functionalities.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "permission_state",
+              "description": "The dmstatus.authenticated bit is hardcoded to 1'b1, bypassing any debug authentication mechanism.",
+              "supports_claim": "Demonstrates that the system considers any debug connection as fully authenticated by default."
+            }
+          ],
+          "reasoning_summary": "The debug CSR module (`dm_csrs.sv`) explicitly states 'no authentication implemented' and hardcodes the `dmstatus.authenticated` bit to 1. This means any user or process with access to the debug interface (such as JTAG or DMI) automatically possesses full authenticated privileges. Consequently, a critical permission guard for hardware debug access is missing.",
+          "security_impact": "An unauthorized attacker with physical or remote access to the debug interface can freely attach a debugger, halt the core, arbitrarily read/write memory and registers (potentially extracting secrets or cryptographic keys), and issue non-debug module resets.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0093",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0093",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug module hardcodes the authentication status to 1 without implementing any actual authentication mechanism, unconditionally granting debug access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The `dmstatus.authenticated` bit is explicitly hardcoded to `1'b1` with the comment `// no authentication implemented`.",
+              "supports_claim": "Proves that the debug module bypasses authentication checks, granting full debug privileges to any connected entity."
+            }
+          ],
+          "reasoning_summary": "The design sets the 'authenticated' bit in the debug status register ('dmstatus') to 1 unconditionally. The developer comment confirms that no authentication is implemented. This allows anyone with access to the debug interface (such as JTAG) to bypass standard security checks and interact with the system with full debug privileges.",
+          "security_impact": "An attacker with physical or JTAG access to the debug transport module can immediately authenticate and gain complete control over the system harts. This allows arbitrary code execution, read/write access to sensitive memory, and full system compromise.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0094",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0094",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded authentication bypass in the RISC-V Debug Module CSRs allows unauthorized debug access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The Debug Module status register (dmstatus) hardcodes the 'authenticated' flag to 1 with an explicit comment stating '// no authentication implemented'.",
+              "supports_claim": "Demonstrates that the module grants authenticated status to all debug connections by default, completely bypassing debug authentication mechanisms."
+            },
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "protected_resource",
+              "description": "Critical debug controls such as 'dmactive', 'ndmreset', 'haltreq', and 'resumereq' can be arbitrarily written and executed because the debug module assumes the session is authenticated.",
+              "supports_claim": "Highlights the sensitive debug controls that are exposed to an unauthenticated attacker."
+            },
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "access_entry",
+              "description": "The DMI (Debug Module Interface) is connected to a JTAG TAP controller (dmi_jtag), providing physical or external access to the Debug Module.",
+              "supports_claim": "Establishes the entry point through which an external attacker can interact with the vulnerable debug module."
+            }
+          ],
+          "reasoning_summary": "The RISC-V Debug Module (dm_csrs) explicitly hardcodes its 'authenticated' status flag to true (1'b1), acknowledging that no authentication is implemented. As a result, any interface that can drive the DMI signals (such as the connected JTAG interface) is automatically fully authenticated. This lack of an authentication guard allows an attacker to issue privileged debug commands (e.g., halt, reset, system bus read/write) without any privilege or key check.",
+          "security_impact": "An attacker with physical access or access to the external JTAG interface can take full control of the core, extract sensitive cryptographic keys or data from memory via System Bus Access, and bypass software security boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0097",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0097",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug module omits debug authentication, hardcoding the `authenticated` status to true and granting open access to privileged debug commands.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The debug status register (dmstatus) explicitly sets the `authenticated` bit to 1 with the comment 'no authentication implemented'.",
+              "supports_claim": "Confirms the absence of any challenge-response or token-based authentication mechanism to restrict debug interface access."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "protected_resource",
+              "description": "The control logic allows unrestricted writes to `dmcontrol` (which controls halt and reset) and processes abstract commands directly from the DMI request interface.",
+              "supports_claim": "Proves that any DMI requester can execute sensitive operations, such as halting the processor or triggering system resets, because no authentication check gates these capabilities."
+            }
+          ],
+          "reasoning_summary": "The debug module (`dm_csrs`) implements the RISC-V debug interface but intentionally leaves out the optional authentication mechanism by hardcoding `dmstatus.authenticated` to 1. Unless physical access to the JTAG/DMI interface is strictly restricted at the board or pin-mux level, any entity connecting to the debug port can execute privileged commands. This includes halting execution, resetting the system (`ndmreset`), and performing arbitrary reads/writes to system memory via the System Bus Access (SBA), effectively bypassing all software-based privilege isolation.",
+          "security_impact": "High. Complete compromise of system integrity and confidentiality. An attacker with access to the debug interface can bypass all software-level security boundaries, read secure memory/keys, and arbitrarily alter execution.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0099",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0099",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug module hardcodes the authentication status to true, bypassing debug access controls and allowing unauthenticated access to the system.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The debug status register assignment hardcodes `dmstatus.authenticated = 1'b1` with a comment stating 'no authentication implemented'.",
+              "supports_claim": "Confirms the complete absence of a debug authentication mechanism, automatically granting access to any debug request."
+            }
+          ],
+          "reasoning_summary": "The SystemVerilog source code for the debug CSRs explicitly hardcodes the `authenticated` flag to 1, completely bypassing any required access checks for the debug interface. In a production SoC context, this allows unrestricted access to core registers, memory, and execution control.",
+          "security_impact": "An attacker with physical or logical access to the debug interface (such as JTAG) can halt the core, read sensitive memory, and execute arbitrary commands, completely compromising the system's security.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The impact assumes this debug module is deployed as-is in production silicon without an external wrapper that enforces security policies."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0101",
+      "status": "discarded",
+      "discard_reason": "missing_violation_evidence",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0101",
+        "has_finding": true,
+        "finding": {
+          "summary": "Debug module authentication is completely bypassed by hardcoding the authenticated status to 1.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "permission_state",
+              "description": "The 'authenticated' bit of the dmstatus register is hardcoded to 1'b1 with the explicit comment 'no authentication implemented'.",
+              "supports_claim": "Demonstrates that the debug module grants full debug privileges automatically, skipping any actual authentication check or key exchange."
+            }
+          ],
+          "reasoning_summary": "The debug module logic explicitly bypasses authentication by hardwiring 'dmstatus.authenticated' to 1. Consequently, any interface (e.g., JTAG or DMI) connecting to the debug module automatically receives full debug permissions without having to provide any credentials. An attacker with access to the debug interface can leverage this to halt the processor, read or write arbitrary memory, and completely compromise system security.",
+          "security_impact": "Unauthorized actors with physical or logical access to the hardware debug port (JTAG/DMI) can bypass security boundaries, extract sensitive data such as cryptographic keys, inject malicious code, or alter execution state, leading to a total system compromise.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0102",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0102",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded debug authentication grants unrestricted debug access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The debug status CSR (dmstatus) explicitly hardcodes the 'authenticated' field to 1'b1.",
+              "supports_claim": "The comment '// no authentication implemented' and the hardcoded 1'b1 assignment confirm the absence of debug authentication guards."
+            }
+          ],
+          "reasoning_summary": "The debug module status register hardcodes the 'authenticated' bit to true because authentication logic is not implemented. This effectively bypasses any debug access control, allowing an unauthorized entity with JTAG or debug interface access to halt the processor, execute abstract commands, and arbitrarily access system memory via the System Bus Access (SBA) interface.",
+          "security_impact": "An attacker with physical or JTAG access can completely compromise the system, bypass OS/hardware isolation, leak sensitive memory, and arbitrarily alter the processor execution state.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0105",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0105",
+        "has_finding": true,
+        "finding": {
+          "summary": "Unauthenticated JTAG debug access due to missing check of the JTAG authentication key.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0007",
+              "evidence_role": "permission_state",
+              "description": "The expected JTAG key (`jtag_key`) is loaded into the `pass` register on reset, indicating an intent to implement debug authentication.",
+              "supports_claim": "Establishes the existence of an authentication key storage mechanism."
+            },
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "violation",
+              "description": "The debug module interface (DMI) request signals (`dmi_req.addr`, `dmi_req.data`, `dmi_req.op`) are assigned directly from the internal TAP state without any gating based on `pass` or `pass_chk`.",
+              "supports_claim": "Proves that debug requests are unconditionally forwarded to the debug module, bypassing the intended authentication."
+            }
+          ],
+          "reasoning_summary": "The RTL design intends to protect JTAG access using a `jtag_key`, which is correctly loaded into the `pass` register during reset. However, the DMI request fields are unconditionally driven from the JTAG TAP state registers without evaluating `pass` or `pass_chk`. Furthermore, the graph data confirms that the `pass` register is written to but never read (a dead store), confirming the total absence of an authentication check. This allows unauthenticated external access to the debug module.",
+          "security_impact": "An attacker with physical JTAG access can bypass intended access controls and obtain full debug privileges. This enables them to halt the core, arbitrarily read/write memory and registers, and completely compromise the system's security boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact driver for `dmi_req_valid_o` is excluded from the snippets, but the unconditional assignment of the core `dmi_req` payload and the verified lack of reads from the `pass` register strongly confirm the authentication bypass."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0107",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0107",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug module hardcodes the authentication state to true and directly exposes the core's execution state over the debug interface without access checks.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "Authentication is explicitly not implemented, and the dmstatus.authenticated flag is hardcoded to 1'b1.",
+              "supports_claim": "Confirms the absence of necessary access control and authentication mechanisms for the debug interface."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "protected_resource",
+              "description": "The debug module aggregates sensitive core execution state (halted_i) into summary signals (haltsum0, haltsum1, etc.).",
+              "supports_claim": "Identifies the core execution state as the sensitive resource being processed and monitored by the debug interface."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "access_entry",
+              "description": "The aggregated haltsum CSRs are directly copied to resp_queue_data upon receiving a read request, without any guarding access checks.",
+              "supports_claim": "Demonstrates that any connected debugger can read the unprotected core state due to the lack of an authentication barrier."
+            }
+          ],
+          "reasoning_summary": "The RTL shows that core debug status (such as haltsum representing the halted state of harts) is directly readable via debug interface accesses. Simultaneously, the module's authentication mechanism is completely bypassed by hardcoding `dmstatus.authenticated` to 1'b1. This means any connection to the debug interface will be inherently treated as fully authenticated, allowing arbitrary readout of sensitive core states and enabling potential misuse of debug control.",
+          "security_impact": "An unauthorized party with physical or remote access to the debug interface (e.g., via JTAG or DTM) can observe the core's execution status, bypass security boundaries, and potentially issue arbitrary debug commands, leading to complete system compromise or information disclosure.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0110",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0110",
+        "has_finding": true,
+        "finding": {
+          "summary": "Debug module unconditionally bypasses authentication by hardcoding the authenticated status.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The 'authenticated' bit of the 'dmstatus' CSR is hardcoded to 1'b1, explicitly accompanied by the comment 'no authentication implemented'.",
+              "supports_claim": "Shows that any debug transport module (DTM) request is treated as fully authenticated without any actual credential or state check."
+            }
+          ],
+          "reasoning_summary": "The debug module CSR logic assigns a static value of 1 to 'dmstatus.authenticated'. This completely omits the security guard intended by the RISC-V Debug specification for systems requiring authorization before granting debug capabilities. An attacker can connect to the debug interface and instantly gain full debug privileges.",
+          "security_impact": "An unauthorized attacker with physical or low-level access to the debug interface (e.g., JTAG) can halt the processor, read or modify sensitive memory, and execute arbitrary code, leading to a total system compromise.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0111",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0111",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing bounds check on `hartsel_o` allows debug operations on non-existent harts to alias to valid harts, causing unintended halt or resume actions.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "debug_or_test_control",
+              "description": "The logic detects out-of-bounds hart selections (`hartsel_o > NrHarts - 1`) and correctly updates `dmstatus` to indicate non-existent harts.",
+              "supports_claim": "Confirms the possibility of out-of-bounds target selection by the debugger and establishes that the system evaluates this condition but does not use it as a guard for actions."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "The target hart index is simply truncated (`selected_hart = hartsel_o[HartSelLen-1:0]`) and used to assert `haltreq_o` and `resumereq_o` without any out-of-bounds guard condition.",
+              "supports_claim": "Demonstrates the vulnerability: requesting a debug action on an out-of-bounds (non-existent) hart aliases to a valid hart due to truncation, bypassing intended separation."
+            }
+          ],
+          "reasoning_summary": "The Debug Module accepts a 20-bit target hart selection (`hartsel_o`). It computes a truncated internal index (`selected_hart` of width `$clog2(NrHarts)`). Although the module flags out-of-bounds requests in the `dmstatus` register, it fails to guard the actual output signals (`haltreq_o` and `resumereq_o`) with a bounds check. Consequently, an out-of-bounds target index (e.g., selecting a non-existent hart) is truncated and mapped to an existing core, allowing unintended debug control commands to be executed on active harts.",
+          "security_impact": "Unintended halt or resume of active harts due to aliased target indices. An external interface could inadvertently or maliciously trigger debug state changes in operational cores when interacting with out-of-bounds targets, leading to denial of service, unexpected test state transitions, or system disruption.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "None. The RTL explicitly truncates the target index and omits a required bounds guard on the debug operation signals."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0112",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0112",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug module does not implement authentication, hardcoding the authenticated status to true. This grants arbitrary debug and system bus access without any access control.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The authenticated bit in the dmstatus register is hardcoded to 1'b1 without any underlying verification logic.",
+              "supports_claim": "Demonstrates the complete bypass of debug access control and authentication."
+            }
+          ],
+          "reasoning_summary": "The debug module explicitly hardcodes the 'authenticated' bit to 1, as shown by the comment '// no authentication implemented'. By doing so, any user connecting to the debug interface (e.g., via JTAG or internal connection) is automatically granted authenticated status. This is a critical security violation, as it allows unauthorized physical or local attackers to abuse the debug interface, System Bus Access (SBA), and Program Buffer to read/write arbitrary memory or execute code, bypassing all system protections.",
+          "security_impact": "Full system compromise. An unauthenticated attacker can control the processor, read arbitrary memory (including secure keys or sensitive data), and execute malicious code via the openly accessible debug interface.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "It is unknown if there is an external secure gating mechanism implemented for the JTAG/debug ports at the SoC boundary. However, the debug module RTL itself explicitly omits an internal authentication guard."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0115",
+      "status": "discarded",
+      "discard_reason": "missing_violation_evidence",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0115",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded debug authentication bypass allows unauthorized system halt and control.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "permission_state",
+              "description": "The debug module status hardcodes the 'authenticated' bit to 1, with an explicit comment stating 'no authentication implemented'.",
+              "supports_claim": "Confirms that debug accesses are unconditionally treated as authenticated, bypassing any security restrictions on debug commands."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "impact",
+              "description": "The unauthenticated debug control register directly drives critical control signals like 'haltreq_o'.",
+              "supports_claim": "Shows that an attacker with access to the debug interface can freely halt the system."
+            }
+          ],
+          "reasoning_summary": "The debug module implements the RISC-V debug interface but explicitly omits authentication by tying the 'authenticated' status bit to 1. Consequently, any external connection to the debug interface has unrestricted privileges to issue commands such as system halt (haltreq_o) or System Bus accesses (SBA), leading to full system compromise if the debug port is physically accessible.",
+          "security_impact": "An attacker with physical or JTAG access can halt cores, read/write arbitrary memory, and bypass all software security boundaries, leading to a total loss of system confidentiality and integrity.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "It is assumed this module is instantiated in a system where debug pins remain physically accessible or routable in production. If debug interfaces are strictly disabled or physically fused off at the SoC level in production, the risk is mitigated externally."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0117",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0117",
+        "has_finding": true,
+        "finding": {
+          "summary": "The Debug Module hardcodes the `authenticated` status to 1, completely bypassing debug authentication.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The CSR read/write logic assigns `dmstatus.authenticated = 1'b1;`, explicitly commenting that no authentication is implemented.",
+              "supports_claim": "This confirms that debug authentication is permanently bypassed, violating secure debug access requirements."
+            }
+          ],
+          "reasoning_summary": "The RTL implementation of the debug module explicitly bypasses debug authentication by hardcoding `dmstatus.authenticated` to 1. Without an authentication mechanism, any user or attacker with access to the debug transport interface (e.g., JTAG/DMI) is automatically granted full debug privileges.",
+          "security_impact": "An attacker with physical or JTAG access can completely compromise the SoC by halting harts, reading/writing memory, and modifying registers, circumventing all system security protections.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0118",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0118",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded debug authentication bypass allows unauthenticated debug access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The 'dmstatus.authenticated' flag is hardcoded to 1'b1, indicating that debug authentication is not implemented and all debug accesses are automatically treated as authenticated.",
+              "supports_claim": "Shows the exact location where debug authentication is bypassed by design."
+            }
+          ],
+          "reasoning_summary": "The RTL assigns a constant 1 to 'dmstatus.authenticated' with a comment noting that no authentication is implemented. This completely bypasses any debug authentication mechanisms, granting unconditional access to debug features such as halting harts, reading system state, and modifying memory via the debug interface.",
+          "security_impact": "An attacker with physical or logic-level access to the debug interface (e.g., via JTAG) can bypass authentication, halt the system, read sensitive data, and execute arbitrary code, leading to total system compromise.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0119",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0119",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug module unconditionally bypasses authentication by hardcoding the authenticated status bit to 1, granting full debug access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The 'authenticated' field of the 'dmstatus' CSR is permanently tied to 1'b1, accompanied by the comment 'no authentication implemented'.",
+              "supports_claim": "Confirms that debug authentication is entirely omitted and bypassed, automatically trusting any connection."
+            }
+          ],
+          "reasoning_summary": "In the debug Control and Status Registers (CSRs), the 'authenticated' bit in the 'dmstatus' register is statically assigned to 1'b1. This implementation automatically grants fully authenticated debug privileges to any external debug connection (such as over JTAG) without a challenge-response or authorization check. This bypasses standard debug security barriers.",
+          "security_impact": "An attacker with access to the debug interface can unconditionally halt the processor, modify internal registers, read out memory, and execute arbitrary code, leading to a total compromise of device confidentiality and integrity.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0122",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0122",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded debug authentication bypass in the Debug Module Status (dmstatus) CSR.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The debug module hardcodes dmstatus.authenticated to 1 with the comment 'no authentication implemented'.",
+              "supports_claim": "This shows that the authentication mechanism is bypassed, unconditionally granting authenticated status to any debug connection."
+            }
+          ],
+          "reasoning_summary": "The debug module status register (dmstatus) unconditionally sets the `authenticated` bit to 1, indicating that debug authorization is not implemented and checks are bypassed. Any entity connecting to the debug interface is automatically treated as authenticated and can issue arbitrary debug commands, bypassing System-on-Chip authorization protections.",
+          "security_impact": "An attacker with access to the debug interface (e.g., via JTAG) can bypass system security boundaries, halt execution, read/write arbitrary memory and CSRs, and fully compromise the system's confidentiality and integrity.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0130",
+      "status": "discarded",
+      "discard_reason": "missing_violation_evidence",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0130",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug module hardcodes the authenticated status bit to 1, completely bypassing debug authentication.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "permission_state",
+              "description": "The dmstatus.authenticated bit is unconditionally tied to 1 with a comment stating 'no authentication implemented'.",
+              "supports_claim": "Shows that any connected debugger is automatically granted authenticated privileges without any challenge."
+            }
+          ],
+          "reasoning_summary": "RISC-V debug modules typically use the 'authenticated' bit to restrict sensitive debug operations to authorized entities. By hardcoding this bit to 1, the design unconditionally trusts any connected debugger. This allows any attacker with access to the debug interface (such as JTAG) to immediately halt the core, read/write memory via SBA, and execute arbitrary abstract commands.",
+          "security_impact": "An attacker with physical or logical access to the debug interface can completely compromise system confidentiality, integrity, and availability by halting execution, extracting secrets, and altering system state.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "None. The code and accompanying comments explicitly confirm that authentication is not implemented and the status is always granted."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0133",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0133",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing authentication guard on DMI JTAG write operations and broken password verification mechanism.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The DMI JTAG interface transitions to the Write state upon a DTM_WRITE operation without checking the `pass_chk` flag, bypassing authentication. Furthermore, the `pass` variable used for DTM_PASS authentication is uninitialized and the `jtag_key` input is completely ignored.",
+              "supports_claim": "Confirms that write operations are unprotected and the intended JTAG password mechanism is non-functional."
+            }
+          ],
+          "reasoning_summary": "The debug module interface (DMI) intends to restrict access using a password check (setting `pass_chk`). However, the RTL logic only checks `pass_chk` before servicing read requests. Write operations proceed immediately to the Write state regardless of authentication. Additionally, the password verification checks input against an uninitialized `pass` signal instead of the provided `jtag_key` input port.",
+          "security_impact": "An attacker with JTAG access can bypass debug authentication to perform arbitrary memory or register writes, potentially leading to full system compromise or privilege escalation. The broken password check also renders any read protection trivial or unpredictable to bypass.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0144",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0144",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing authentication guard on JTAG DMI write operations allows an unauthenticated attacker to bypass the password check and perform arbitrary writes.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "guard_logic",
+              "description": "The state machine transition for DMI read operations is properly guarded by the authentication check '(pass_chk == 1'b1)'.",
+              "supports_claim": "Demonstrates that the intended security policy requires authentication before permitting access to the debug interface."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "The 'else if' branch for 'dm::DTM_WRITE' transitions the state to 'Write' without checking if 'pass_chk == 1'b1'.",
+              "supports_claim": "Proves a critical access control bypass where unauthorized write operations are permitted."
+            }
+          ],
+          "reasoning_summary": "The JTAG debug module interface (dmi_jtag) implements a password-based authentication mechanism. The authentication state is stored in 'pass_chk'. While read requests correctly verify that 'pass_chk == 1'b1' before executing, write requests (DTM_WRITE) completely omit this guard. This oversight allows an unauthenticated attacker to issue arbitrary write commands to the debug module. Additionally, 'pass_chk' is implemented as an uninitialized latch within an always_comb block, meaning it is not cleared on system reset, further exacerbating the vulnerability by making the authentication state unreliable and persistent across resets.",
+          "security_impact": "High. An attacker with access to the JTAG interface can bypass debug authentication and execute arbitrary writes to the system, leading to unauthorized memory modification, state corruption, or full compromise of the core.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0146",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0146",
+        "has_finding": true,
+        "finding": {
+          "summary": "JTAG authentication bypass due to an unassigned password signal and ignored JTAG key input.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "The internal signal `pass` is declared but never assigned (the hardcoded assignment on line 88 is commented out). Meanwhile, the actual input `jtag_key` is completely ignored within the module.",
+              "supports_claim": "Because `pass` is uninitialized, it will likely synthesize to a constant 0, rendering the password completely insecure."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "guard_logic",
+              "description": "The JTAG DMI access authentication check relies on comparing the input data `data_d` with the unassigned `pass` signal.",
+              "supports_claim": "The check `if (data_d == pass)` (line 116) controls the authentication state `pass_chk = 1'b1`, which subsequently elevates privileges."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "impact",
+              "description": "Successfully bypassing the `pass` check sets `umode_o = 1'b1`, granting elevated access/machine-mode.",
+              "supports_claim": "Lines 177-179 demonstrate that the flawed `pass_chk` result directly controls the `umode_o` output."
+            }
+          ],
+          "reasoning_summary": "The `dmi_jtag` module receives a 32-bit `jtag_key` input port intended for authenticating JTAG access. However, the authentication logic instead compares the incoming data against an internal signal named `pass`. The `pass` signal is declared but never assigned (a hardcoded assignment is commented out). Since `pass` is unassigned and `jtag_key` is ignored, the password check defaults to an uninitialized value (synthesizing to zero), allowing a trivial bypass of JTAG authentication.",
+          "security_impact": "An attacker can bypass the JTAG authentication mechanism by providing a zeroed or predictable password, gaining unauthorized debug access and elevated system privileges (machine mode). This compromises the entire security posture of the SoC.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0148",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0148",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug module hardcodes its authentication status to true, bypassing authentication and granting immediate unauthenticated debug access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The debug module explicitly hardcodes 'dmstatus.authenticated = 1'b1;' with a comment stating 'no authentication implemented'.",
+              "supports_claim": "Directly demonstrates that debug authentication is completely bypassed, reporting the debug session as fully authenticated at all times."
+            },
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "impact",
+              "description": "The active debug session allows controlling halt requests, system resets (ndmreset), and executing abstract commands.",
+              "supports_claim": "Highlights the critical impact of unauthenticated debug access, as an attacker can halt the processor, manipulate CPU state, or access system memory."
+            }
+          ],
+          "reasoning_summary": "The hardware debug module (dm_csrs.sv) reports itself as permanently authenticated by hardcoding the 'authenticated' bit in the 'dmstatus' register to 1. Because no challenge-response or key verification is enforced before granting access to debug module control registers (like dmcontrol or abstract commands), any user connecting via the JTAG/DMI interface receives full privileges to halt harts, issue non-debug module resets, and read/write system memory.",
+          "security_impact": "An attacker with physical JTAG access can assume full control over the CPU, halt execution, extract sensitive memory and keys, and bypass all software-level security boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0149",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0149",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing access control check on JTAG DMI write operations allows an attacker to bypass the JTAG password lock and perform arbitrary writes.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "guard_logic",
+              "description": "The logic in the Idle state checks if `dmi.op == dm::DTM_READ` and correctly enforces the `pass_chk == 1'b1` requirement to enter the Read state. However, the subsequent branch for `dm::DTM_WRITE` entirely omits the `pass_chk` requirement.",
+              "supports_claim": "Shows that the JTAG password lock is selectively enforced for reads but skipped for writes."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "Because the `pass_chk` guard is missing for writes, unauthenticated users can transition `state_d` to `Write`, which then asserts `dmi_req_valid = 1'b1` unconditionally.",
+              "supports_claim": "Confirms an unauthenticated attacker can initiate valid write operations to the Debug Module."
+            }
+          ],
+          "reasoning_summary": "The JTAG DMI implements a password mechanism (pass_chk) to gate debug access. While read operations properly check this flag, write operations (DTM_WRITE) completely lack this check, allowing unauthenticated JTAG writes. Additionally, pass_chk is assigned inside an always_comb block without a default assignment or synchronous reset, inferring a latch that may fail to clear authentication state across JTAG resets.",
+          "security_impact": "High. An attacker can write to arbitrary debug registers via JTAG without the password. This allows compromising the CPU state, modifying memory, and redirecting execution flow, defeating the SoC's debug security boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0150",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0150",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug authentication state `pass_chk` is improperly implemented as an inferred latch within combinational logic, making the system vulnerable to glitch attacks and preventing the debug privilege from being revoked upon JTAG reset.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "permission_state",
+              "description": "The debug authorization flag `pass_chk` is declared as a combinational logic variable without an associated flip-flop.",
+              "supports_claim": "Demonstrates that the critical privilege state relies on unclocked logic rather than a synchronous register."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "guard_logic",
+              "description": "Inside the `always_comb` block, `pass_chk` is conditionally set to `1'b1` upon a password match (line 117) but is never provided a default assignment. This infers a level-sensitive latch.",
+              "supports_claim": "Confirms the latching behavior that causes the unlock state to become permanently stuck at 1 and exposes it to combinational logic glitches."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The `always_ff` block handles the JTAG test logic reset (`trst_ni`) for standard JTAG registers but cannot and does not reset the latched `pass_chk` signal.",
+              "supports_claim": "Proves that a JTAG reset cannot securely revoke the debug privilege once it has been granted."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "impact",
+              "description": "The improperly latched `pass_chk` signal continuously drives the `umode_o` output high (line 178).",
+              "supports_claim": "Shows that the vulnerable combinational latch directly locks the output privilege signal."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "protected_resource",
+              "description": "The `umode_o` signal from the `dmi_jtag` interface is wired directly to `ariane_umode` in the test harness.",
+              "supports_claim": "Validates the system-level impact, demonstrating that the vulnerability persistently forces the protected processor core into machine mode."
+            }
+          ],
+          "reasoning_summary": "The authorization signal `pass_chk` is assigned inside an `always_comb` block without a default value, inferring a combinational latch. This non-synchronous design flaw prevents the debug privilege from being reliably initialized or cleared by JTAG resets (`trst_ni`). Furthermore, combinational latches are susceptible to transient glitches in data paths, which could inadvertently trigger the latch and unlock the debug interface, granting an attacker persistent machine-mode access until a full system power cycle.",
+          "security_impact": "An attacker might exploit data-path glitches to bypass the debug password check. Even during normal debug operations, once the correct password is provided, the processor is permanently locked in machine mode. The JTAG reset interface cannot revoke this escalated privilege, leading to unsafe debug lifecycles.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0154",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0154",
+        "has_finding": true,
+        "finding": {
+          "summary": "The JTAG TAP controller directly drives the sensitive `dmi_reset_o` signal from the `dtmcs_q` shift register without a shadow update register, causing spurious resets during JTAG shifting.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "protected_resource",
+              "description": "The debug module reset signal `dmi_reset_o` is continuously assigned directly to the `dmireset` bit of the `dtmcs_q` register.",
+              "supports_claim": "Shows that the system reset is driven directly by the live state of the JTAG data register without any Update-DR buffering."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "The `dtmcs_q` register behaves as a shift register during the `Shift-DR` state (`dtmcs_d = {td_i, dtmcs_q[31:1]}`).",
+              "supports_claim": "Because `dtmcs_q` is shifted dynamically while directly driving `dmi_reset_o`, any logic '1' bits passing through the `dmireset` bit index during the shift will cause spurious, unintended assertions of the debug reset."
+            }
+          ],
+          "reasoning_summary": "In standard JTAG TAP implementations, control signals must be buffered by an Update-DR shadow register so that intermediate values do not affect system state during the Shift-DR phase. The RTL connects the `dmi_reset_o` output directly to the `dtmcs_q` shift register. Whenever data is shifted through the DTMCS register via JTAG, intermediate bits will pass through the `dmireset` bit position, causing uncontrolled toggling of the debug reset signal.",
+          "security_impact": "Spurious debug resets during normal JTAG operations can destabilize the debug module. This behavior can be exploited to reset debug protection states, interrupt critical JTAG operations, or cause a denial-of-service condition within the debug domain.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0158",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0158",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing synchronous JTAG TAP reset assertion during Test-Logic-Reset state.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "The test_logic_reset_o signal is initialized to 0 in the TAP FSM always_comb block (line 241) but is never asserted to 1, notably missing in the TestLogicReset state (line 253).",
+              "supports_claim": "Proves that test_logic_reset_o remains permanently 0, meaning the JTAG TAP soft reset (5-cycle TMS sequence) fails to trigger the synchronous internal reset."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "impact",
+              "description": "The TAP logic relies on test_logic_reset_o (line 102 and 166) to clear the instruction register (IR) to IDCODE and reset data registers. Because it is never asserted, these registers are not cleared.",
+              "supports_claim": "Demonstrates the security impact where active JTAG debug instructions and internal states persist across JTAG soft resets."
+            }
+          ],
+          "reasoning_summary": "In the JTAG TAP FSM, the `test_logic_reset_o` signal is initialized to `1'b0` but is never set to `1'b1` during the `TestLogicReset` state. Because of this missing assignment, the signal is permanently 0. As a consequence, the synchronous reset logic that is supposed to reset the JTAG Instruction Register (IR) and Data Registers (DR) is bypassed. This violates the IEEE 1149.1 standard and introduces a security vulnerability: sensitive debug modes or custom instructions can persist across JTAG soft resets. In debug implementations without an asynchronous `trst_ni` pin, the debug state cannot be reliably locked or cleared out, potentially allowing an attacker to maintain unauthorized access.",
+          "security_impact": "Debug state persistence across Test-Logic-Reset. Attackers can bypass expected lifecycle or debug-lockout protections that rely on JTAG soft resets to clear out active debugging modes.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0160",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0160",
+        "has_finding": true,
+        "finding": {
+          "summary": "The rom2 module allows arbitrary writes to the secure_reg registers containing critical system keys and access control configurations, bypassing expected security boundaries.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The secure_reg is updated with wdata_i whenever we_i is asserted, with no authentication, locking mechanism, or privilege level checks.",
+              "supports_claim": "Shows that sensitive configurations like JTAG keys and access controls can be trivially overwritten."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "access_entry",
+              "description": "The axi2mem instance connects the AXI bus interface directly to the rom2 request and write enable signals without any access filtering.",
+              "supports_claim": "Confirms that writes to the memory-mapped address range directly drive the we_i signal."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "protected_resource",
+              "description": "The secure_reg output (key_reg_out) is directly assigned to jtag_key and access_ctrl_reg.",
+              "supports_claim": "Shows the direct impact of the unprotected writes on the system's JTAG authentication key and peripheral access control matrix."
+            }
+          ],
+          "reasoning_summary": "The `rom2` component holds critical system security parameters, such as the JTAG authentication key and the master access control configurations. However, it implements an unprotected memory-mapped write interface that unconditionally allows any bus master to overwrite these keys in `secure_reg` upon the assertion of `we_i`. Because there are no guard blocks, locks, or privilege-level checks on this logic, malicious software or a compromised bus master could rewrite the access control matrix and JTAG keys to elevate privileges or bypass debug restrictions.",
+          "security_impact": "An attacker with generic bus write capabilities can overwrite the JTAG authentication key and system access control registers. This allows full bypass of debug restrictions and unauthorized access to otherwise protected peripherals.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    }
+  ]
+}

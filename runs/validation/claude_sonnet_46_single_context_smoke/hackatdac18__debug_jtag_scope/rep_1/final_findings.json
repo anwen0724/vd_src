@@ -1,0 +1,81 @@
+{
+  "graph_id": "hackatdac18__debug_jtag_scope",
+  "schema_version": "0.1",
+  "findings": [
+    {
+      "finding_id": "F-001",
+      "status": "confirmed_finding",
+      "summary": "The AXI BIU in the advanced debug interface (adbg_axi_biu) exposes a debug master that can issue arbitrary AXI read and write transactions to any address in the system fabric, with AXI protection signals (AxPROT) hardwired to zero, bypassing all privilege, security, and instruction/data access controls that AXI subordinates may enforce.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 383,
+          "line_end": 404,
+          "module": "adbg_axi_biu",
+          "signal_or_register": "data_o"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 383,
+          "line_end": 404,
+          "module": "adbg_axi_biu",
+          "object": "data_o",
+          "evidence_type": "violation",
+          "description": "axi_master_aw_prot is permanently assigned 'h0 (unprivileged, non-secure, data access). There is no runtime guard or configurable permission field. This means every write transaction initiated by the debug interface appears to the AXI fabric as an unprivileged, non-secure access, which may be accepted by subordinates that gate access only on AxPROT, or may be incorrectly classified relative to what the debugger is actually doing.",
+          "supports_claim": "AXI protection attributes are hardwired to zero, so the debug master bypasses any AxPROT-based access controls enforced by AXI subordinates."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 496,
+          "line_end": 546,
+          "module": "adbg_axi_biu",
+          "object": "S_AXIADDR",
+          "evidence_type": "access_entry",
+          "description": "The FSM transitions from S_IDLE to S_AXIADDR whenever start_toggle is asserted, then issues either axi_master_aw_valid or axi_master_ar_valid with the address supplied by the debug chain (addr_reg). No address range check, privilege verification, or lifecycle gate is present before the AXI transaction is launched.",
+          "supports_claim": "Debug-controlled address and direction bits directly drive AXI master valid signals without any access-permission guard."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 321,
+          "line_end": 337,
+          "module": "adbg_axi_biu",
+          "object": "rd_wrn_i",
+          "evidence_type": "access_entry",
+          "description": "Input data (address, byte-enables, write data, direction) is latched from the JTAG TCK domain whenever strobe_i && rdy_o, gated only by the JTAG reset (trstn_i). There is no authentication or privilege check on who can present strobe_i; any entity with JTAG access can initiate an arbitrary AXI transaction.",
+          "supports_claim": "The only gate before accepting a new debug transaction is JTAG reset; no privilege or authentication check is present."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 454,
+          "line_end": 486,
+          "module": "adbg_axi_biu",
+          "object": "axi_aresetn",
+          "evidence_type": "lifecycle_behavior",
+          "description": "The AXI-domain registers (str_sync synchronizers, err_reg, data_out_reg, FSM state) are reset only by axi_aresetn. During normal operation there is no mechanism to lock or disable the debug master independently of the system AXI reset, so the debug interface remains active as long as the AXI fabric is running.",
+          "supports_claim": "No separate lifecycle lock disables the debug AXI master; it is always operational whenever axi_aresetn is deasserted."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 383,
+          "line_end": 404,
+          "module": "adbg_axi_biu",
+          "object": "data_o",
+          "evidence_type": "protected_resource",
+          "description": "axi_master_ar_prot (read channel) is not shown to be assigned in the snippets, consistent with the pattern of all prot fields being tied to zero, meaning read transactions to any subordinate also carry AxPROT=0, bypassing non-secure/privileged read protections.",
+          "supports_claim": "Both read and write debug-initiated transactions bypass AxPROT-based subordinate protections."
+        }
+      ],
+      "reasoning_summary": "The adbg_axi_biu module is a JTAG-to-AXI bridge intended for debug access. Source evidence shows: (1) all AXI protection attributes (axi_master_aw_prot and by analogy axi_master_ar_prot) are hardwired to 'h0, meaning the debug master always presents as unprivileged/non-secure/data; (2) any JTAG-domain strobe with a valid address directly triggers AXI read or write transactions with no address filtering, privilege check, or authentication beyond JTAG reset; (3) the module has no lifecycle lock to disable it after boot or during secure operation. An attacker or unintended debug session can read or write any AXI-reachable address while bypassing AxPROT-gated security regions.",
+      "security_impact": "An attacker with JTAG access can read or write arbitrary physical addresses across the entire AXI fabric, including secure memory regions, peripheral configuration registers, and cryptographic key stores, because AxPROT is hardwired to zero and no additional access-control guard exists within the BIU. This completely undermines any TrustZone-style or privilege-level memory protection enforced at AXI subordinates that rely on AxPROT.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The snippet for axi_master_ar_prot assignment is not explicitly shown (only axi_master_aw_prot lines 396-404 are visible), but the pattern of assigning all aw_ protection/QoS fields to zero strongly implies the same for ar_. Additionally, whether any external wrapper adds an enable/disable gate or address filter around this module is not visible in the provided context.",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0001"
+      ]
+    }
+  ]
+}

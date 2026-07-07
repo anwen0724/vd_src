@@ -1,0 +1,3219 @@
+{
+  "graph_id": "hackatdac21__h21_access_lock_scope",
+  "chain_count": 69,
+  "analyzed_chain_count": 69,
+  "llm_call_count": 69,
+  "input_tokens": 1616848,
+  "output_tokens": 243265,
+  "total_tokens": 1860113,
+  "started_at": "2026-07-07T18:25:03.593200+08:00",
+  "completed_at": "2026-07-07T19:01:28.122812+08:00",
+  "elapsed_seconds": 2184.5310000000027,
+  "final_finding_count": 42,
+  "raw_llm_finding_count": 51,
+  "discarded_finding_count": 11,
+  "no_finding_count": 16,
+  "per_chain": [
+    {
+      "chain_id": "CHAIN-0001",
+      "started_at": "2026-07-07T18:25:03.612270+08:00",
+      "completed_at": "2026-07-07T18:25:37.466741+08:00",
+      "elapsed_seconds": 33.86000000000058,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:25:03.613270+08:00",
+        "completed_at": "2026-07-07T18:25:37.462732+08:00",
+        "elapsed_seconds": 33.86000000000058,
+        "input_tokens": 30622,
+        "output_tokens": 3704,
+        "total_tokens": 34326,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0001",
+        "has_finding": true,
+        "finding": {
+          "summary": "Soft reset (rst_6) resets the access control memory (acct_mem) to a permissive state (all 1s), bypassing register locks and granting full permissions.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "violation",
+              "description": "The acct_mem state is reset to 32'hffffffff upon rst_6 assertion. This bypasses the reglk_ctrl locks that correctly restrict normal memory-mapped writes.",
+              "supports_claim": "Shows that a soft reset can bypass locking mechanisms and force access control permissions into an overly permissive (fail-open) state."
+            },
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "permission_state",
+              "description": "The acct_mem array directly drives the acc_ctrl_o signal, which broadcasts access control policies to SoC peripherals.",
+              "supports_claim": "Confirms that forcing acct_mem to all 1s results in granting maximum access permissions across the system."
+            }
+          ],
+          "reasoning_summary": "The access control configuration for peripherals is stored in the acct_mem array. While memory-mapped writes to this array are properly guarded by register locks (reglk_ctrl), the reset logic improperly allows a soft reset signal (rst_6) to bypass these locks and unconditionally set all acct_mem entries to 32'hffffffff (all 1s). Since acct_mem directly determines the access permissions (via acc_ctrl_o), this unsafe reset behavior acts as a fail-open condition. An attacker who can trigger the soft reset can effectively unlock and escalate their privileges to gain full access to all protected peripherals.",
+          "security_impact": "Privilege escalation and lock bypass. An attacker capable of triggering the soft reset can bypass the register lock protections and gain unauthorized maximum permissions over SoC components.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0001",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0002",
+      "started_at": "2026-07-07T18:25:37.466741+08:00",
+      "completed_at": "2026-07-07T18:26:35.466346+08:00",
+      "elapsed_seconds": 58.0,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:25:37.470737+08:00",
+        "completed_at": "2026-07-07T18:26:35.462345+08:00",
+        "elapsed_seconds": 58.0,
+        "input_tokens": 36182,
+        "output_tokens": 7251,
+        "total_tokens": 43433,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0002",
+        "has_finding": true,
+        "finding": {
+          "summary": "Privilege-based access control signal (acct_ctrl_i) is ignored in peripheral wrappers like hmac_wrapper, completely bypassing intended permission checks.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "access_entry",
+              "description": "The hmac_wrapper module is instantiated and receives acct_ctrl_i based on the current privilege level (acc_ctrl_c[priv_lvl_i][4]).",
+              "supports_claim": "Shows that the system intends to restrict access to the HMAC peripheral based on the caller's privilege level."
+            },
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "guard_logic",
+              "description": "In acct_wrapper, the acct_ctrl_i signal is correctly used to gate memory operations via `assign en = en_acct && acct_ctrl_i;`.",
+              "supports_claim": "Demonstrates the correct and intended access control enforcement pattern within the SoC."
+            },
+            {
+              "snippet_id": "SNIP-0012",
+              "evidence_role": "violation",
+              "description": "In hmac_wrapper, while en and en_acct are declared, there is no assignment gating en with acct_ctrl_i. The privilege check is missing.",
+              "supports_claim": "Confirms that the access control input is completely unused in the peripheral, leading to an authorization bypass."
+            },
+            {
+              "snippet_id": "SNIP-0013",
+              "evidence_role": "protected_resource",
+              "description": "The hmac_wrapper updates its sensitive internal state (startHash, keys, data) when `en && we` is true, without any acct_ctrl_i restriction.",
+              "supports_claim": "Proves that the missing access check allows uncontrolled write access to the HMAC peripheral's configuration and data."
+            }
+          ],
+          "reasoning_summary": "The SoC provides a privilege-based access control signal (acct_ctrl_i) to peripherals to enforce security boundaries. While acct_wrapper properly implements this guard by gating its enable signal (en = en_acct && acct_ctrl_i), other critical modules such as hmac_wrapper omit this check entirely. The access control signal is passed into the module but ignored, allowing operations to proceed unconditionally as long as AXI transactions are initiated (en && we). This omission bypasses the intended privilege levels.",
+          "security_impact": "Unprivileged components or user-mode software can bypass access restrictions to interact with secure peripherals directly. This allows unauthorized use of the HMAC cryptographic functions, potentially leading to forged signatures, key extraction, or denial of service by corrupting the peripheral's state.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The AXI interface instantiation in hmac_wrapper is not fully shown, but the data flow graph confirms there are no read edges on hmac_wrapper.acct_ctrl_i, proving it is never evaluated."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0002",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0003",
+      "started_at": "2026-07-07T18:26:35.466346+08:00",
+      "completed_at": "2026-07-07T18:26:42.239004+08:00",
+      "elapsed_seconds": 6.764999999999418,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:26:35.466346+08:00",
+        "completed_at": "2026-07-07T18:26:42.239004+08:00",
+        "elapsed_seconds": 6.764999999999418,
+        "input_tokens": 1074,
+        "output_tokens": 309,
+        "total_tokens": 1383,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0003",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The provided context only contains port and signal declarations for the acct_wrapper module without any functional logic or assignments, making it impossible to evaluate permission-related vulnerabilities."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0003",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0004",
+      "started_at": "2026-07-07T18:26:42.239004+08:00",
+      "completed_at": "2026-07-07T18:27:13.660588+08:00",
+      "elapsed_seconds": 31.421999999991385,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:26:42.241004+08:00",
+        "completed_at": "2026-07-07T18:27:13.658588+08:00",
+        "elapsed_seconds": 31.421999999991385,
+        "input_tokens": 9565,
+        "output_tokens": 3454,
+        "total_tokens": 13019,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0004",
+        "has_finding": true,
+        "finding": {
+          "summary": "AXI privilege and security signals (`prot`) are hardcoded to zero for accesses to the Access Control (ACCT) module, stripping transaction security context.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "Continuous assignments tie off `acct_axi_req.aw.prot` and `acct_axi_req.ar.prot` to `'0`. This strips the Privilege and Security context (Secure/Non-secure, Privileged/Unprivileged) from transactions targeting the Access Control module.",
+              "supports_claim": "Demonstrates the direct destruction of access control metadata (AXI PROT) on the request interface."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "protected_resource",
+              "description": "The `acct_axi_req` signal is routed directly to the `acct_wrapper` (Access Control module) instance.",
+              "supports_claim": "Confirms that the stripped transaction reaches the ACCT module."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "impact",
+              "description": "The `acct_wrapper` module generates `acc_ctrl_o` (Access control values) for the system's peripherals based on these AXI requests.",
+              "supports_claim": "Shows that compromising the configuration of this module allows an attacker to alter the access control permissions for all attached peripherals."
+            }
+          ],
+          "reasoning_summary": "The system hardcodes the AXI `prot` (protection) signals to `'0` for all read and write requests targeting the Access Control (`acct_wrapper`) module, ostensibly because they are 'not used by AXI-lite'. However, AXI4-Lite does support the `PROT` signal for access control. By tying `prot` to `'0` (which implies Unprivileged, Secure, Data access), the system strips the true privilege level of the requester. Consequently, the Access Control module cannot enforce hardware-level privilege checks on its own configuration registers, allowing either unprivileged reconfiguration (privilege escalation) or denial of service if the module rejects unprivileged accesses.",
+          "security_impact": "An attacker with unprivileged execution capabilities may be able to reconfigure the system's peripheral access controls (`acc_ctrl_o`), leading to privilege escalation, unauthorized peripheral access, or complete system compromise.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The internal implementation of `acct_wrapper` is not provided to confirm whether it strictly enforces `prot` checks or ignores them entirely, but tying off `prot` on a security-critical configuration interface is inherently flawed in either case."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0004",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0005",
+      "started_at": "2026-07-07T18:27:13.660588+08:00",
+      "completed_at": "2026-07-07T18:27:20.542669+08:00",
+      "elapsed_seconds": 6.89100000000326,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:27:13.660588+08:00",
+        "completed_at": "2026-07-07T18:27:20.542669+08:00",
+        "elapsed_seconds": 6.89100000000326,
+        "input_tokens": 1985,
+        "output_tokens": 438,
+        "total_tokens": 2423,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0005",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The provided source snippets only show structural declarations, module port definitions, and instance connections for the 'acct_wrapper' module. There is no internal logic provided (e.g., AXI transaction handling, access control logic, or register lock usage) to evaluate whether a permission-related vulnerability exists."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0005",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0006",
+      "started_at": "2026-07-07T18:27:20.542669+08:00",
+      "completed_at": "2026-07-07T18:28:09.680787+08:00",
+      "elapsed_seconds": 49.14100000000326,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:27:20.546666+08:00",
+        "completed_at": "2026-07-07T18:28:09.678791+08:00",
+        "elapsed_seconds": 49.125,
+        "input_tokens": 35450,
+        "output_tokens": 5965,
+        "total_tokens": 41415,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0006",
+        "has_finding": true,
+        "finding": {
+          "summary": "The `acct_wrapper` module bypasses write locks for access control memory entries 3, 4, and 5 due to an out-of-bounds bit reference. It uses `reglk_ctrl[13]` as the lock condition, but the underlying input `reglk_ctrl_i` is only 8 bits wide, causing bit 13 to be permanently zero.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "access_entry",
+              "description": "The lock input `reglk_ctrl_i` is declared as an 8-bit signal (`input logic [7:0] reglk_ctrl_i`). It is then assigned to the 16-bit internal signal `reglk_ctrl`, causing a zero-extension where bits 8-15 are permanently tied to 0.",
+              "supports_claim": "Establishes the size mismatch that forces `reglk_ctrl[13]` to be 0."
+            },
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "guard_logic",
+              "description": "The write protection logic for `acct_mem[03]`, `acct_mem[04]`, and `acct_mem[05]` relies on the ternary guard condition `reglk_ctrl[13] ? acct_mem[...] : wdata`. Because bit 13 is always 0, writes to these entries are unconditionally permitted.",
+              "supports_claim": "Demonstrates that the intended register lock is permanently bypassed for these memory indices."
+            }
+          ],
+          "reasoning_summary": "In `acct_wrapper.sv`, `reglk_ctrl` is a 16-bit internal logic signal continuously assigned from `reglk_ctrl_i`, which is explicitly sized as an 8-bit input port. This zero-extends the value, guaranteeing that `reglk_ctrl[15:8]` are 0. The write path for updating the access control memory array uses `reglk_ctrl[13]` to lock indices 3, 4, and 5. Since `reglk_ctrl[13]` evaluates to a constant 0, the protection mechanism is silently dead code, and an attacker can overwrite these security configuration registers at any time, completely bypassing the lock.",
+          "security_impact": "An attacker with standard write access can manipulate the access control state for `acct_mem[3:5]` regardless of whether the system software has locked the configuration. This completely defeats the register lock protection model, allowing unauthorized access or privilege escalation to connected peripherals.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The impact practically manifests if the module is parameterized or configured to use `acct_mem` entries beyond index 2 (e.g., `NB_SLAVE` > 1), but the flaw in the guard logic itself is definitively present in the RTL."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0006",
+        "status": "discarded",
+        "discard_reason": "missing_violation_evidence",
+        "invalid_snippet_ids": []
+      },
+      "status": "discarded"
+    },
+    {
+      "chain_id": "CHAIN-0007",
+      "started_at": "2026-07-07T18:28:09.680787+08:00",
+      "completed_at": "2026-07-07T18:28:54.465662+08:00",
+      "elapsed_seconds": 44.78100000000268,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:28:09.684783+08:00",
+        "completed_at": "2026-07-07T18:28:54.463663+08:00",
+        "elapsed_seconds": 44.78100000000268,
+        "input_tokens": 35561,
+        "output_tokens": 5654,
+        "total_tokens": 41215,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0007",
+        "has_finding": true,
+        "finding": {
+          "summary": "Lock bypass vulnerability in acct_wrapper due to an out-of-bounds register lock control bit check.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0007",
+              "evidence_role": "permission_state",
+              "description": "The module takes an 8-bit lock control signal `reglk_ctrl_i` and assigns it to a 16-bit logic `reglk_ctrl`. This zero-extends the signal, permanently tying bits 8 through 15 to 0.",
+              "supports_claim": "Establishes that any lock checks using bits 8-15 of `reglk_ctrl` will always evaluate to 0 (unlocked)."
+            },
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "violation",
+              "description": "The write guards for `acct_mem` entries 3, 4, and 5 incorrectly check `reglk_ctrl[13]`. Since bit 13 is permanently 0, the lock check is bypassed and the registers are unconditionally updated with `wdata` upon receiving a write enable.",
+              "supports_claim": "Proves a typographical error (using bit 13 instead of likely bit 3) results in a complete bypass of the lock enforcement mechanism for these access control memory entries."
+            }
+          ],
+          "reasoning_summary": "In `acct_wrapper`, the access control memory entries for indices 3, 4, and 5 are intended to be protected by a register lock mechanism. However, the RTL incorrectly checks `reglk_ctrl[13]` for the lock state (likely a typo for `reglk_ctrl[3]`, given the read logic uses bit 2 and other writes use odd-numbered bits like 1, 5, and 7). Because `reglk_ctrl` is zero-extended from the 8-bit input `reglk_ctrl_i`, bit 13 is permanently tied to 0. Consequently, the ternary assignment always falls through to updating the register with `wdata`, completely bypassing the lock guard and allowing unauthorized modifications to these access control entries.",
+          "security_impact": "High. The lock mechanism can be silently bypassed, allowing untrusted or lower-privileged software to modify access control policies, potentially leading to privilege escalation or bypassing system-wide security boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0007",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0008",
+      "started_at": "2026-07-07T18:28:54.465662+08:00",
+      "completed_at": "2026-07-07T18:29:16.482929+08:00",
+      "elapsed_seconds": 22.014999999999418,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:28:54.468666+08:00",
+        "completed_at": "2026-07-07T18:29:16.482929+08:00",
+        "elapsed_seconds": 22.014999999999418,
+        "input_tokens": 35449,
+        "output_tokens": 1994,
+        "total_tokens": 37443,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0008",
+        "has_finding": true,
+        "finding": {
+          "summary": "A soft reset signal (rst_6) bypasses register locks on the access control memory, allowing an attacker to revert protected security permissions to a permissive state.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "violation",
+              "description": "The `acct_mem` state is protected by `reglk_ctrl` on writes, but the soft reset `rst_6` takes precedence and forces `acct_mem` to an insecure default (`32'hffffffff`), completely bypassing the lock.",
+              "supports_claim": "Shows that a reset bypasses the intended register locking mechanism."
+            }
+          ],
+          "reasoning_summary": "The access control memory (`acct_mem`) uses `reglk_ctrl` to prevent unauthorized write modifications (e.g., `acct_mem[00] <= reglk_ctrl[5] ? acct_mem[00] : wdata`). However, the `always` block evaluates the reset condition `~(rst_ni && ~rst_6)` first. When the soft reset `rst_6` is asserted, it overwrites the entire `acct_mem` array with `32'hffffffff`, representing a fully permissive access state. An attacker who can trigger this soft reset can bypass the `reglk_ctrl` locks and clear security constraints.",
+          "security_impact": "High. Privilege escalation and security feature bypass. An attacker can reset the system's access controls, granting themselves full permissions to otherwise locked regions or peripherals.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact source and access controls surrounding the `rst_6` trigger are not fully visible in the snippets, but relying on a soft reset to clear locked security configurations to a permissive default is a severe structural flaw."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0008",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0009",
+      "started_at": "2026-07-07T18:29:16.482929+08:00",
+      "completed_at": "2026-07-07T18:29:39.309864+08:00",
+      "elapsed_seconds": 22.828999999997905,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:29:16.484928+08:00",
+        "completed_at": "2026-07-07T18:29:39.307867+08:00",
+        "elapsed_seconds": 22.828999999997905,
+        "input_tokens": 35360,
+        "output_tokens": 2621,
+        "total_tokens": 37981,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0009",
+        "has_finding": true,
+        "finding": {
+          "summary": "Access control registers are unsafely initialized to all 1s (fail-open) on reset, granting full permissions by default.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "violation",
+              "description": "On reset, the access control memory (acct_mem) is initialized to 32'hffffffff, assigning open permissions to all entries.",
+              "supports_claim": "Demonstrates a fail-open design where access controls default to granting maximum access rather than zero-trust restrictive defaults upon reset."
+            },
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "permission_state",
+              "description": "The acct_mem state is directly assigned to acc_ctrl_o, which dictates the access control values for the peripherals.",
+              "supports_claim": "Confirms that the all-1s initialization translates directly into granting access control privileges."
+            }
+          ],
+          "reasoning_summary": "The SystemVerilog RTL initializes the 'acct_mem' access control registers to 32'hffffffff on reset. Because these registers control peripheral access permissions (as shown by their assignment to acc_ctrl_o), defaulting to all 1s causes a fail-open security state. Immediately following a reset, or if an attacker can trigger the specific module reset signal (rst_6), all access controls are effectively unlocked. This violates the principle of fail-safe defaults and provides a window for unauthorized peripheral access before the system software configures proper restrictions.",
+          "security_impact": "An attacker can gain unauthorized access to protected peripherals by interacting with the system immediately after reset or by intentionally triggering a subsystem reset to clear access controls.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0009",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0010",
+      "started_at": "2026-07-07T18:29:39.309864+08:00",
+      "completed_at": "2026-07-07T18:30:08.832994+08:00",
+      "elapsed_seconds": 29.514999999999418,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:29:39.312861+08:00",
+        "completed_at": "2026-07-07T18:30:08.828993+08:00",
+        "elapsed_seconds": 29.514999999999418,
+        "input_tokens": 35799,
+        "output_tokens": 3241,
+        "total_tokens": 39040,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0010",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing privilege check in HMAC wrapper allows bypassing of access control.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "access_entry",
+              "description": "In `riscv_peripherals`, the HMAC module is instantiated with the `acct_ctrl_i` port connected to the access control privilege matrix `acc_ctrl_c[priv_lvl_i][4]`, indicating an intention to restrict access based on the CPU's current privilege level.",
+              "supports_claim": "Establishes that a privilege-based authorization signal is supplied to the HMAC peripheral."
+            },
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "guard_logic",
+              "description": "In a correctly implemented module like `acct_wrapper`, the access control signal correctly gates the enable line via `assign en = en_acct && acct_ctrl_i;`.",
+              "supports_claim": "Provides the expected protection pattern where AXI accesses are gated by the `acct_ctrl_i` privilege check."
+            },
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "violation",
+              "description": "In `hmac_wrapper`, `acct_ctrl_i` is declared as an input (Line 21), and `en` and `en_acct` are declared (Line 49). However, there is no logic linking `acct_ctrl_i` to `en`, meaning the access control check is ignored and `acct_ctrl_i` acts as an unused input.",
+              "supports_claim": "Proves the absence of the authorization guard logic in the HMAC wrapper, resulting in a bypassed privilege check."
+            },
+            {
+              "snippet_id": "SNIP-0012",
+              "evidence_role": "protected_resource",
+              "description": "State updates for the HMAC internal registers (like `startHash`, `newMessage`, and `data` blocks) are gated only by `en` and `we`. Because `en` is not gated by `acct_ctrl_i`, any caller can modify these registers.",
+              "supports_claim": "Demonstrates the direct impact where unprivileged writes can alter critical cryptographic configuration and data."
+            }
+          ],
+          "reasoning_summary": "The `hmac_wrapper` receives an access control signal (`acct_ctrl_i`) derived from the current privilege level. However, this signal is declared but never read or used to gate the AXI access enable signal (`en`). As a result, the privilege check is completely bypassed, allowing arbitrary access to the HMAC memory-mapped registers. The absence of the gating logic (e.g., `assign en = en_acct && acct_ctrl_i;` seen in other wrappers) constitutes a critical security vulnerability.",
+          "security_impact": "An unprivileged attacker can freely read and write to HMAC configuration and data registers. This could allow them to manipulate hash operations, inject malicious data, or potentially extract cryptographic material, completely subverting the system's hardware privilege guarantees.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0010",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0011",
+      "started_at": "2026-07-07T18:30:08.832994+08:00",
+      "completed_at": "2026-07-07T18:30:15.186135+08:00",
+      "elapsed_seconds": 6.360000000000582,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:30:08.832994+08:00",
+        "completed_at": "2026-07-07T18:30:15.186135+08:00",
+        "elapsed_seconds": 6.360000000000582,
+        "input_tokens": 1011,
+        "output_tokens": 445,
+        "total_tokens": 1456,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0011",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The provided source snippets only contain module port declarations and internal signal definitions. There is no behavioral logic, state machine, or access control implementation present in the context to analyze for vulnerabilities."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0011",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0012",
+      "started_at": "2026-07-07T18:30:15.186135+08:00",
+      "completed_at": "2026-07-07T18:30:37.165169+08:00",
+      "elapsed_seconds": 21.98399999999674,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:30:15.188137+08:00",
+        "completed_at": "2026-07-07T18:30:37.162170+08:00",
+        "elapsed_seconds": 21.96799999999348,
+        "input_tokens": 9539,
+        "output_tokens": 2167,
+        "total_tokens": 11706,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0012",
+        "has_finding": true,
+        "finding": {
+          "summary": "AXI protection (`prot`) and `lock` signals for the HMAC wrapper are hardcoded to zero, dropping the standard security and privilege context of transactions.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "Continuous assignments tie AXI `prot` and `lock` signals to '0 for both read (ar) and write (aw) requests on the HMAC interface.",
+              "supports_claim": "Shows concrete source code where AXI security metadata is statically stripped, bypassing dynamic propagation of the transaction's true privilege and security level."
+            }
+          ],
+          "reasoning_summary": "The AXI `prot` signals define the privilege and security context of a transaction (e.g., privileged vs. unprivileged, secure vs. non-secure). Hardcoding these signals to zero forces all transactions to the HMAC wrapper to appear as Unprivileged, Secure Data accesses. This strips standard AXI permission state, preventing downstream components or standard interconnect firewalls from correctly enforcing access control based on the origin's actual privilege level.",
+          "security_impact": "Loss of transaction privilege and security visibility on the AXI bus. If standard AXI protection firewalls are used, they will fail to distinguish between privileged and unprivileged accesses, potentially leading to unauthorized access or privilege escalation within the HMAC module.",
+          "confidence": "medium",
+          "uncertainty_or_missing_evidence": "The HMAC wrapper instance also takes a sideband `acct_ctrl_i` signal tied to `acc_ctrl_c[priv_lvl_i][4]` (seen in SNIP-0001). This suggests the design might intentionally ignore AXI `prot` in favor of its own custom sideband privilege control. If `prot` is truly unused throughout the SoC for this peripheral, the vulnerability is mitigated."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0012",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0013",
+      "started_at": "2026-07-07T18:30:37.165169+08:00",
+      "completed_at": "2026-07-07T18:30:48.056303+08:00",
+      "elapsed_seconds": 10.89100000000326,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:30:37.165169+08:00",
+        "completed_at": "2026-07-07T18:30:48.056303+08:00",
+        "elapsed_seconds": 10.89100000000326,
+        "input_tokens": 1929,
+        "output_tokens": 951,
+        "total_tokens": 2880,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0013",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The provided snippets only show the structural instantiation and port declarations of the hmac_wrapper module. While access control signals (reglk_ctrl_i, acct_ctrl_i, debug_mode_i) are routed into the module, there is no internal logic provided demonstrating how these signals are actually used to gate AXI responses or requests. Without the internal implementation details of hmac_wrapper, there is no concrete evidence to support a claim of missing guards, privilege bypasses, or other permission-related vulnerabilities."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0013",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0014",
+      "started_at": "2026-07-07T18:30:48.056303+08:00",
+      "completed_at": "2026-07-07T18:31:48.841550+08:00",
+      "elapsed_seconds": 60.78100000000268,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:30:48.060308+08:00",
+        "completed_at": "2026-07-07T18:31:48.838549+08:00",
+        "elapsed_seconds": 60.78100000000268,
+        "input_tokens": 33773,
+        "output_tokens": 7182,
+        "total_tokens": 40955,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0014",
+        "has_finding": true,
+        "finding": {
+          "summary": "Inconsistent debug key zeroization and missing reset clearing for HMAC cryptographic keys.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "debug_or_test_control",
+              "description": "Debug mode overrides the `key` and `okey_hash` signals to zero, but leaves `ikey_hash` intact. This inconsistency allows operations with partially known keys.",
+              "supports_claim": "Demonstrates an unsafe debug behavior where sensitive cryptographic keys are overridden to known values inconsistently, creating an exploitable cryptographic oracle."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "lifecycle_behavior",
+              "description": "The synchronous reset block clears control signals and the `data` array, but fails to clear the key registers (`key0`, `ikey_hash_bytes`, `okey_hash_bytes`).",
+              "supports_claim": "Demonstrates an unsafe reset behavior where sensitive cryptographic key material is left uncleared during a reset, enabling warm-reset attacks."
+            }
+          ],
+          "reasoning_summary": "The HMAC wrapper exhibits two critical vulnerabilities. First, the debug mode implementation inconsistently zeroes out the 'key' and 'okey_hash' signals while leaving 'ikey_hash' intact, which can allow an attacker to bypass authentication or perform cryptographic operations with partially known keys. Second, the reset logic clears message data but fails to clear the internal key registers, meaning that sensitive key material persists across warm resets, violating secure lifecycle requirements.",
+          "security_impact": "High. The vulnerabilities allow for potential forgery of HMAC signatures by abusing debug mode overrides, as well as the unauthorized retention and potential extraction of cryptographic keys across system resets.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact impact of the debug override depends on whether the core continues to operate in debug mode and if 'debug_mode_i' is adequately protected at the system level. The omission of the AXI interface logic limits the ability to verify if AXI access control ('acct_ctrl_i') is correctly enforced."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0014",
+        "status": "discarded",
+        "discard_reason": "missing_violation_evidence",
+        "invalid_snippet_ids": []
+      },
+      "status": "discarded"
+    },
+    {
+      "chain_id": "CHAIN-0015",
+      "started_at": "2026-07-07T18:31:48.841550+08:00",
+      "completed_at": "2026-07-07T18:32:29.349984+08:00",
+      "elapsed_seconds": 40.5,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:31:48.844547+08:00",
+        "completed_at": "2026-07-07T18:32:29.348479+08:00",
+        "elapsed_seconds": 40.5,
+        "input_tokens": 35231,
+        "output_tokens": 4814,
+        "total_tokens": 40045,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0015",
+        "has_finding": true,
+        "finding": {
+          "summary": "Soft reset bypasses register locks on HMAC data registers.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "guard_logic",
+              "description": "Write operations to the `data` registers are conditional on `reglk_ctrl_i[3]`, acting as a register lock to prevent unauthorized modification.",
+              "supports_claim": "Establishes that the `data` registers are explicitly intended to be protected by a lock."
+            },
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "lifecycle_behavior",
+              "description": "The asynchronous reset block clears the `data` registers to 0 when the soft reset signal `rst_4` is asserted.",
+              "supports_claim": "Demonstrates that a soft reset alters the register contents."
+            },
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "violation",
+              "description": "The reset condition `~(rst_ni && ~rst_4)` clears the registers without checking the `reglk_ctrl_i[3]` lock status.",
+              "supports_claim": "Proves that the register lock can be bypassed by triggering a soft reset, violating the lock's security guarantee."
+            }
+          ],
+          "reasoning_summary": "The HMAC wrapper protects its `data` registers from unauthorized write access using a register lock (`reglk_ctrl_i[3]`). However, this lock is not enforced during a soft reset (`rst_4`). Because the soft reset clears the registers to 0 regardless of the lock state, an attacker capable of triggering the soft reset can bypass the lock and forcibly clear the protected registers. This violates the integrity guarantees intended by the register lock.",
+          "security_impact": "An attacker can bypass access control mechanisms to clear locked cryptographic input data, compromising data integrity, manipulating cryptographic outcomes, or causing a denial of service.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact privilege level required to trigger the `rst_4` signal in the reset controller is not explicitly defined in the provided snippets. However, soft resets are typically software-controllable, making this a standard lock-bypass vulnerability."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0015",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0016",
+      "started_at": "2026-07-07T18:32:29.349984+08:00",
+      "completed_at": "2026-07-07T18:32:58.399523+08:00",
+      "elapsed_seconds": 29.061999999990803,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:32:29.350989+08:00",
+        "completed_at": "2026-07-07T18:32:58.396525+08:00",
+        "elapsed_seconds": 29.031999999991967,
+        "input_tokens": 33459,
+        "output_tokens": 3240,
+        "total_tokens": 36699,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0016",
+        "has_finding": true,
+        "finding": {
+          "summary": "Debug mode overrides HMAC keys with zeroes, allowing cryptographic bypass.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "debug_or_test_control",
+              "description": "The debug_mode_i signal directly overrides the configured key and okey_hash with 256'b0.",
+              "supports_claim": "Demonstrates that asserting the debug mode forces the hardware to use a known all-zero key instead of the secret key."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "protected_resource",
+              "description": "The key0 and okey_hash_bytes registers are configured via memory-mapped I/O and protected by reglk_ctrl_i[5].",
+              "supports_claim": "Shows that the keys are meant to be securely locked resources, but this locking mechanism is rendered ineffective by the debug override."
+            }
+          ],
+          "reasoning_summary": "The HMAC wrapper module contains a debug mechanism that forces its secret key (key) and outer key hash (okey_hash) to zero when the debug_mode_i signal is asserted. This overrides the internally stored keys, which are otherwise protected by register lock controls (reglk_ctrl_i). If an attacker can trigger debug mode in a production environment, they can force the cryptographic module to use a known all-zero key, trivially allowing them to bypass HMAC authentication and forge valid signatures.",
+          "security_impact": "An attacker can forge valid HMAC signatures and bypass cryptographic authentication by forcing the module to operate with a known, all-zero key.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The broader system context showing whether debug_mode_i is permanently gated or disabled in production (e.g., via hardware fuses) is not present. If debug mode is securely disabled post-manufacturing, this finding is mitigated at the system level."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0016",
+        "status": "discarded",
+        "discard_reason": "missing_violation_evidence",
+        "invalid_snippet_ids": []
+      },
+      "status": "discarded"
+    },
+    {
+      "chain_id": "CHAIN-0017",
+      "started_at": "2026-07-07T18:32:58.399523+08:00",
+      "completed_at": "2026-07-07T18:33:35.537995+08:00",
+      "elapsed_seconds": 37.125,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:32:58.401522+08:00",
+        "completed_at": "2026-07-07T18:33:35.535998+08:00",
+        "elapsed_seconds": 37.125,
+        "input_tokens": 35617,
+        "output_tokens": 4449,
+        "total_tokens": 40066,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0017",
+        "has_finding": true,
+        "finding": {
+          "summary": "Sensitive HMAC key registers and control flags are not cleared during reset, leading to data remanence and uninitialized state vulnerabilities.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "protected_resource",
+              "description": "Internal registers for keys (`key0`, `ikey_hash_bytes`, `okey_hash_bytes`) and the `key_hash_bypass` control flag are declared.",
+              "supports_claim": "Identifies the security-critical state variables that hold cryptographic material and require clearing on reset."
+            },
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "violation",
+              "description": "The sequential reset block (lines 102-122) clears `startHash`, `newMessage`, and `data[0:15]`, but explicitly omits `key0`, `ikey_hash_bytes`, `okey_hash_bytes`, and `key_hash_bypass`.",
+              "supports_claim": "Proves that a system reset does not wipe the secret keys, leaving them exposed to data remanence or predictable uninitialized states."
+            }
+          ],
+          "reasoning_summary": "The HMAC wrapper module contains a synchronous `always` block (SNIP-0010) that handles resets via `rst_ni` and `rst_4`. While this block zeroes out the message data registers, it fails to clear the sensitive cryptographic key registers (`key0`, `ikey_hash_bytes`, `okey_hash_bytes`) and the `key_hash_bypass` configuration. This missing reset allows secret keys to persist across soft resets. An attacker could exploit this data remanence to extract key material post-reset or reuse a previously configured key inappropriately.",
+          "security_impact": "An attacker can exploit the lack of key reset to extract leftover key material after a system soft reset (Data Remanence) or cause the module to operate with predictable uninitialized keys at power-up, fundamentally compromising cryptographic integrity and confidentiality.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0017",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0020",
+      "started_at": "2026-07-07T18:33:35.537995+08:00",
+      "completed_at": "2026-07-07T18:34:00.945681+08:00",
+      "elapsed_seconds": 25.422000000005937,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:33:35.541001+08:00",
+        "completed_at": "2026-07-07T18:34:00.943679+08:00",
+        "elapsed_seconds": 25.39100000000326,
+        "input_tokens": 35555,
+        "output_tokens": 2881,
+        "total_tokens": 38436,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0020",
+        "has_finding": true,
+        "finding": {
+          "summary": "The HMAC wrapper fails to mask or zeroize the internal key hash (`ikey_hash`) when debug mode is active, unlike other sensitive key materials.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "violation",
+              "description": "The HMAC wrapper applies `debug_mode_i` to mask `key` and `okey_hash` to zero. However, `ikey_hash` is assigned directly from `ikey_hash_bytes` without the `debug_mode_i` check.",
+              "supports_claim": "Demonstrates missing debug mode protection on sensitive intermediate key state (`ikey_hash`), violating the intended debug zeroization policy applied to adjacent key materials."
+            }
+          ],
+          "reasoning_summary": "The code explicitly masks `key` and `okey_hash` with zeroes when `debug_mode_i` is asserted to prevent leakage of key material through debug interfaces. However, it fails to apply the same masking to `ikey_hash`, which holds the inner pad hash of the key. Exposing this internal state violates the defense-in-depth security policy designed to protect key components during debug.",
+          "security_impact": "An attacker with debug access could read out the `ikey_hash`. Exposing this key-derived material could weaken the cryptographic security of the system, aid in offline dictionary attacks if the key is weak, or assist in bypassing authentication boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact data paths allowing readback of `ikey_hash` via the AXI interface or internal routing are not fully shown in the snippets, but the explicit lack of `debug_mode_i` masking relative to `key` and `okey_hash` is a clear and verifiable omission."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0020",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0021",
+      "started_at": "2026-07-07T18:34:00.945681+08:00",
+      "completed_at": "2026-07-07T18:34:28.138081+08:00",
+      "elapsed_seconds": 27.187999999994645,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:34:00.949678+08:00",
+        "completed_at": "2026-07-07T18:34:28.135083+08:00",
+        "elapsed_seconds": 27.187999999994645,
+        "input_tokens": 35214,
+        "output_tokens": 2378,
+        "total_tokens": 37592,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0021",
+        "has_finding": true,
+        "finding": {
+          "summary": "The HMAC key is forced to zero when debug mode is active, completely bypassing cryptographic security.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "violation",
+              "description": "The HMAC key (key) and outer key hash (okey_hash) are assigned to an all-zero value (256'b0) when debug_mode_i is asserted.",
+              "supports_claim": "Using a known, hardcoded zero key in debug mode undermines the cryptographic strength of the HMAC, allowing for trivial forgery."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "debug_or_test_control",
+              "description": "The system debug_mode_i signal is passed directly from the riscv_peripherals wrapper to the hmac_wrapper module.",
+              "supports_claim": "Confirms that asserting the system-level debug signal influences the security-critical HMAC core."
+            }
+          ],
+          "reasoning_summary": "The HMAC wrapper explicitly zeroizes the primary cryptographic key (`key`) and the outer key hash (`okey_hash`) when `debug_mode_i` is true. While intended to facilitate testing or debugging, this unsafe debug behavior exposes the system to trivial cryptographic bypasses. An attacker who can enable debug mode can forge valid HMAC signatures because the secret key is replaced with a universally known value (all zeros).",
+          "security_impact": "High. An attacker who gains debug access can easily spoof cryptographic authentication or bypass integrity checks reliant on this HMAC module, compromising the system's security boundary.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0021",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0022",
+      "started_at": "2026-07-07T18:34:28.138081+08:00",
+      "completed_at": "2026-07-07T18:34:55.257693+08:00",
+      "elapsed_seconds": 27.125,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:34:28.140588+08:00",
+        "completed_at": "2026-07-07T18:34:55.254692+08:00",
+        "elapsed_seconds": 27.109000000011292,
+        "input_tokens": 33502,
+        "output_tokens": 2866,
+        "total_tokens": 36368,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0022",
+        "has_finding": true,
+        "finding": {
+          "summary": "Inconsistent debug mode protection leaves ikey_hash exposed.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "violation",
+              "description": "The assignment for ikey_hash lacks the debug_mode_i zeroization check that is present for key and okey_hash.",
+              "supports_claim": "Shows that while 'key' and 'okey_hash' are safely zeroed out when the system is in debug mode, 'ikey_hash' is left intact and exposed."
+            }
+          ],
+          "reasoning_summary": "The design intends to protect sensitive key materials during debug mode by zeroizing them, as evidenced by the assignments to 'key' and 'okey_hash'. However, the assignment to 'ikey_hash' omits the 'debug_mode_i' check. This inconsistency means that the inner key hash remains active or readable even when debug mode is engaged, failing to fully secure the HMAC secrets against debug-based extraction or misuse.",
+          "security_impact": "An attacker with debug access could potentially extract or misuse the 'ikey_hash' internal state. This compromises the HMAC integrity and could facilitate forging authentication tags or recovering derived cryptographic material.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0022",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0023",
+      "started_at": "2026-07-07T18:34:55.257693+08:00",
+      "completed_at": "2026-07-07T18:35:27.079974+08:00",
+      "elapsed_seconds": 31.812000000005355,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:34:55.261689+08:00",
+        "completed_at": "2026-07-07T18:35:27.075978+08:00",
+        "elapsed_seconds": 31.812000000005355,
+        "input_tokens": 35616,
+        "output_tokens": 3128,
+        "total_tokens": 38744,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0023",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing access control check for HMAC key_hash_bypass configuration.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "protected_resource",
+              "description": "The system instantiates hmac_wrapper and passes priv_lvl_i based access control to acct_ctrl_i.",
+              "supports_claim": "Establishes intent that the HMAC wrapper is subject to privilege-based access control."
+            },
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "access_entry",
+              "description": "The hmac_wrapper module receives the acct_ctrl_i signal and declares en and en_acct logic signals.",
+              "supports_claim": "Demonstrates the module is aware of access control signals."
+            },
+            {
+              "snippet_id": "SNIP-0012",
+              "evidence_role": "violation",
+              "description": "The state update block for key_hash_bypass only checks 'if(en && we)' and the lock signal 'reglk_ctrl_i[1]', completely ignoring the 'acct_ctrl_i' privilege signal.",
+              "supports_claim": "Provides concrete proof that the required access control privileges are bypassed during configuration writes."
+            }
+          ],
+          "reasoning_summary": "The HMAC wrapper receives a privilege-based access control signal (acct_ctrl_i), but fails to use it to gate register writes. As a result, critical configuration registers like key_hash_bypass can be modified by unauthorized users as long as the register is not explicitly locked by reglk_ctrl_i.",
+          "security_impact": "Unauthorized system components or unprivileged users can modify the key_hash_bypass register, potentially bypassing key hashing requirements, weakening the HMAC cryptographic guarantees, and resulting in unauthorized cryptographic operations.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The internal implementation of axi_lite_interface is not provided, but the explicit use of 'en' instead of 'en_acct' or 'acct_ctrl_i' in the register state update block strongly points to a missing privilege check."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0023",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0025",
+      "started_at": "2026-07-07T18:35:27.079974+08:00",
+      "completed_at": "2026-07-07T18:36:05.738571+08:00",
+      "elapsed_seconds": 38.65600000000268,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:35:27.080971+08:00",
+        "completed_at": "2026-07-07T18:36:05.735575+08:00",
+        "elapsed_seconds": 38.65600000000268,
+        "input_tokens": 35784,
+        "output_tokens": 4778,
+        "total_tokens": 40562,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0025",
+        "has_finding": true,
+        "finding": {
+          "summary": "Unsafe debug behavior in HMAC wrapper forces cryptographic keys to zero.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "debug_or_test_control",
+              "description": "The logic assigns `key` and `okey_hash` to `256'b0` whenever `debug_mode_i` is active, overriding the actual configured keys.",
+              "supports_claim": "Provides concrete evidence of unsafe debug behavior compromising the protected key material."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "access_entry",
+              "description": "The `debug_mode_i` signal is passed into the `hmac_wrapper` from the top-level `riscv_peripherals` module.",
+              "supports_claim": "Shows that the debug mode signal is connected at the system level, exposing the key-zeroing vulnerability to debug access."
+            }
+          ],
+          "reasoning_summary": "The HMAC wrapper contains an unsafe debug mode implementation. When the `debug_mode_i` signal is asserted, the actual configured cryptographic keys (`key` and `okey_hash`) are ignored and forced to an all-zero value (`256'b0`). This completely bypasses the cryptographic security of the HMAC module, allowing anyone who can assert debug mode to predictably forge signatures or bypass authentication using a known, hardcoded zero key.",
+          "security_impact": "High. Activating debug mode overrides the secret HMAC keys with a publicly known value (all zeros), allowing trivial signature forgery and defeating authentication checks reliant on the HMAC core.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0025",
+        "status": "discarded",
+        "discard_reason": "missing_violation_evidence",
+        "invalid_snippet_ids": []
+      },
+      "status": "discarded"
+    },
+    {
+      "chain_id": "CHAIN-0028",
+      "started_at": "2026-07-07T18:36:05.738571+08:00",
+      "completed_at": "2026-07-07T18:36:57.726425+08:00",
+      "elapsed_seconds": 52.0,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:36:05.741569+08:00",
+        "completed_at": "2026-07-07T18:36:57.724427+08:00",
+        "elapsed_seconds": 51.96899999999732,
+        "input_tokens": 35242,
+        "output_tokens": 6403,
+        "total_tokens": 41645,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0028",
+        "has_finding": true,
+        "finding": {
+          "summary": "Unsafe reset behavior leaves HMAC secret keys uncleared across resets, and inconsistent debug mode masking leaves ikey_hash exposed.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "lifecycle_behavior",
+              "description": "The sequential reset block clears data buffers and some control flags but entirely omits the `key0`, `ikey_hash_bytes`, and `key_hash_bypass` registers, causing them to hold sensitive values persistently across system resets.",
+              "supports_claim": "Keys are not wiped on reset, allowing cross-domain key leakage or unauthorized cryptographic operations post-reset."
+            },
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "debug_or_test_control",
+              "description": "The continuous assignments apply `debug_mode_i` to zero out `key` and `okey_hash`, but omit this protection for `ikey_hash`, making the inner key hash accessible to the core even when debug mode is asserted.",
+              "supports_claim": "The debug mode security boundary is bypassed for the inner key hash, risking key extraction or unauthorized use."
+            }
+          ],
+          "reasoning_summary": "The HMAC wrapper suffers from two permission/security lifecycle issues. First, the reset logic in the 'always @(posedge clk_i)' block fails to clear sensitive cryptographic materials (such as 'key0' and 'ikey_hash_bytes') and the 'key_hash_bypass' flag, which violates secure reset principles and enables attacks leveraging state persistence across resets. Second, the debug protection logic intentionally zeroes out 'key' and 'okey_hash' when 'debug_mode_i' is active to prevent key extraction, but inconsistently omits this mask for 'ikey_hash', exposing the inner HMAC key hash during debugging.",
+          "security_impact": "An attacker capable of triggering a system reset can preserve secret keys and use them in a new, clean security context. Additionally, an attacker with debug access can exploit the unmasked 'ikey_hash' to bypass intended debug lockouts, allowing unauthorized HMAC computations or extraction.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0028",
+        "status": "discarded",
+        "discard_reason": "missing_violation_evidence",
+        "invalid_snippet_ids": []
+      },
+      "status": "discarded"
+    },
+    {
+      "chain_id": "CHAIN-0029",
+      "started_at": "2026-07-07T18:36:57.726425+08:00",
+      "completed_at": "2026-07-07T18:37:23.994537+08:00",
+      "elapsed_seconds": 26.26600000000326,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:36:57.728424+08:00",
+        "completed_at": "2026-07-07T18:37:23.991540+08:00",
+        "elapsed_seconds": 26.26600000000326,
+        "input_tokens": 34545,
+        "output_tokens": 3044,
+        "total_tokens": 37589,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0029",
+        "has_finding": true,
+        "finding": {
+          "summary": "Register lock logic in `acct_wrapper` is bypassed for certain access control memory locations due to a bit-width mismatch, allowing permanent unauthorized writes.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "permission_state",
+              "description": "The module `acct_wrapper` takes an 8-bit `reglk_ctrl_i` input, which is assigned to a 16-bit internal signal `reglk_ctrl`, resulting in bits 8 through 15 being zero-extended and always evaluating to 0.",
+              "supports_claim": "Demonstrates that any upper bit of `reglk_ctrl` (bit index 8 or higher) will constantly remain 0 regardless of lock state."
+            },
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "violation",
+              "description": "The update logic for `acct_mem[03]`, `acct_mem[04]`, and `acct_mem[05]` uses `reglk_ctrl[13]` as the guard condition to lock out writes (`wdata`).",
+              "supports_claim": "Because `reglk_ctrl[13]` is guaranteed to be 0, the lock logic is effectively bypassed, allowing unprotected writes."
+            }
+          ],
+          "reasoning_summary": "In `acct_wrapper.sv`, the register lock input `reglk_ctrl_i` is defined as 8 bits wide but is zero-extended to the 16-bit `reglk_ctrl` internal signal. When evaluating write operations to `acct_mem[03]`, `[04]`, and `[05]`, the guard check incorrectly evaluates `reglk_ctrl[13]`. Since bit 13 is zero-extended, it constantly returns 0. The ternary operator `reglk_ctrl[13] ? acct_mem : wdata` therefore always updates the protected register with `wdata`, completely bypassing the lock mechanism.",
+          "security_impact": "An adversary can write to specific access control configuration registers (`acct_mem[03:05]`) at any time, potentially compromising privilege rules and escalating access to associated peripheral hardware.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0029",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0030",
+      "started_at": "2026-07-07T18:37:23.994537+08:00",
+      "completed_at": "2026-07-07T18:38:27.842317+08:00",
+      "elapsed_seconds": 63.84399999999732,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:37:23.998534+08:00",
+        "completed_at": "2026-07-07T18:38:27.839318+08:00",
+        "elapsed_seconds": 63.84399999999732,
+        "input_tokens": 34810,
+        "output_tokens": 7766,
+        "total_tokens": 42576,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0030",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing reset for the security-critical `key_hash_bypass` register and lock bypass via soft reset in `hmac_wrapper`.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "violation",
+              "description": "The `key_hash_bypass` register is updated on writes but omitted from the reset block, leaving its initial state undefined. Additionally, locked registers (`startHash`, `data`) are cleared by `rst_4` regardless of their `reglk_ctrl_i` lock status.",
+              "supports_claim": "Confirms the missing reset for `key_hash_bypass` and the forced clearing of lock-protected registers during a soft reset."
+            },
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "protected_resource",
+              "description": "Defines `key_hash_bypass`, `startHash`, and `data` signals, indicating `key_hash_bypass` controls whether key hashing is bypassed.",
+              "supports_claim": "Shows the security relevance of the `key_hash_bypass` signal."
+            }
+          ],
+          "reasoning_summary": "The `hmac_wrapper` module contains an `always` block that handles the reset and writing of configuration registers. The security-critical `key_hash_bypass` register is updated on memory-mapped writes but is missing from the reset block `if(~(rst_ni && ~rst_4))`. This leaves the register uninitialized, meaning it could power up in an enabled state, inadvertently bypassing HMAC key hashing. Furthermore, the reset block clears `startHash`, `newMessage`, and `data` unconditionally when the `rst_4` soft reset is asserted, completely bypassing the register locks (`reglk_ctrl_i[1]` and `reglk_ctrl_i[3]`) that are intended to protect these registers from modification.",
+          "security_impact": "An attacker could bypass HMAC key hashing if `key_hash_bypass` randomly powers up as 1. Additionally, an attacker who can trigger the `rst_4` soft reset can maliciously clear locked HMAC configuration and data, bypassing the `reglk` write protections.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The impact of the soft reset bypass depends on whether `rst_4` generation is itself protected by a lock in the reset controller, which is not fully visible in the provided snippets."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0030",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0031",
+      "started_at": "2026-07-07T18:38:27.842317+08:00",
+      "completed_at": "2026-07-07T18:38:55.065103+08:00",
+      "elapsed_seconds": 27.218999999997322,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:38:27.845316+08:00",
+        "completed_at": "2026-07-07T18:38:55.062106+08:00",
+        "elapsed_seconds": 27.218999999997322,
+        "input_tokens": 34495,
+        "output_tokens": 2862,
+        "total_tokens": 37357,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0031",
+        "has_finding": true,
+        "finding": {
+          "summary": "Unsafe localized soft resets allow bypassing of register locks and access control configurations.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "violation",
+              "description": "In `acct_wrapper`, the access control memory `acct_mem` is reset to `32'hffffffff` whenever the localized soft reset `rst_6` is asserted. This reset condition takes precedence over the write-enable logic that enforces `reglk_ctrl` locks, allowing the locks to be completely bypassed.",
+              "supports_claim": "Demonstrates that an attacker capable of triggering the soft reset `rst_6` can revert locked access control configurations to their default permissive state."
+            },
+            {
+              "snippet_id": "SNIP-0014",
+              "evidence_role": "violation",
+              "description": "In `reglk_wrapper`, the register lock memory `reglk_mem` itself is cleared to 0 upon assertion of the localized soft reset `rst_9` or the debug signal `jtag_unlock`. This drops all register locks currently in place.",
+              "supports_claim": "Shows that triggering `rst_9` or `jtag_unlock` disables the entire locking mechanism, leaving the system vulnerable to unauthorized modifications."
+            }
+          ],
+          "reasoning_summary": "The hardware implements register locks to protect security-critical configurations like `acct_mem` and `reglk_mem` from being modified after initialization. However, these modules accept localized soft resets (`rst_6`, `rst_9`) that forcibly reset the protected state to default values (e.g., unlocking or granting full permissions). Because the reset evaluations take priority over the write operations guarded by the locks, an attacker can simply trigger the corresponding soft resets to bypass the lock protections, clear the security policies, and potentially elevate privileges.",
+          "security_impact": "An attacker with the ability to toggle soft resets can trivially drop register locks and erase access control restrictions, leading to full compromise of protected peripheral configurations, privilege escalation, and bypass of system security policies.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0031",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0034",
+      "started_at": "2026-07-07T18:38:55.065103+08:00",
+      "completed_at": "2026-07-07T18:39:42.349346+08:00",
+      "elapsed_seconds": 47.28100000000268,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:38:55.067103+08:00",
+        "completed_at": "2026-07-07T18:39:42.346344+08:00",
+        "elapsed_seconds": 47.28100000000268,
+        "input_tokens": 35115,
+        "output_tokens": 5845,
+        "total_tokens": 40960,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0034",
+        "has_finding": true,
+        "finding": {
+          "summary": "Unsafe debug behavior in HMAC wrapper zeroes cryptographic keys, and an out-of-bounds array reference in Account wrapper bypasses register lock checks.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "debug_or_test_control",
+              "description": "In hmac_wrapper, the internal symmetric key and okey_hash are forcibly set to zero when debug_mode_i is active.",
+              "supports_claim": "Demonstrates unsafe debug behavior that deterministically degrades cryptographic keys, enabling an attacker to forge HMACs."
+            },
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "permission_state",
+              "description": "In acct_wrapper, reglk_ctrl_i is explicitly declared as an 8-bit input vector (logic [7:0]).",
+              "supports_claim": "Establishes the valid dimensions for the register lock signal array."
+            },
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "violation",
+              "description": "In acct_wrapper, the state update logic uses out-of-bounds indexes like reglk_ctrl[13] to guard writes to acct_mem[03], [04], and [05].",
+              "supports_claim": "Shows that the lock logic relies on an out-of-bounds signal which resolves to 0/undef, permanently bypassing the lock protection for these sensitive access control registers."
+            }
+          ],
+          "reasoning_summary": "The design exhibits two distinct permission-security vulnerabilities. First, the hmac_wrapper implements an unsafe debug override that zeroes out authentication keys, severely weakening security during debug or if debug mode is erroneously/maliciously asserted. Second, the acct_wrapper incorrectly attempts to index bit 13 of an 8-bit register lock array (reglk_ctrl). In SystemVerilog, this out-of-bounds bit select evaluates to zero, which means the lock check always passes and the protected access control configurations can be modified perpetually.",
+          "security_impact": "If an attacker can assert debug mode, they can perfectly forge HMAC signatures due to the zeroed key. Moreover, the failure in the account wrapper's lock logic allows software to illicitly alter access control configurations that were intended to be permanently locked.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0034",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0035",
+      "started_at": "2026-07-07T18:39:42.349346+08:00",
+      "completed_at": "2026-07-07T18:40:29.897611+08:00",
+      "elapsed_seconds": 47.546999999991385,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:39:42.352344+08:00",
+        "completed_at": "2026-07-07T18:40:29.895613+08:00",
+        "elapsed_seconds": 47.53199999999197,
+        "input_tokens": 31685,
+        "output_tokens": 5949,
+        "total_tokens": 37634,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0035",
+        "has_finding": true,
+        "finding": {
+          "summary": "The access control matrix contains a critical privilege escalation flaw where granting access to the HMAC peripheral automatically bypasses permissions to grant access to the PKT (fuse) peripheral.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The logic generating `acc_ctrl_c` explicitly ORs the HMAC access control bit (`acc_ctrl[4*4+i]`) with the PKT access control bit condition (`j==5`). This statically guarantees that any privilege level with access to HMAC is automatically granted access to PKT.",
+              "supports_claim": "Demonstrates the exact line of SystemVerilog where privilege escalation occurs and access controls are overridden."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "protected_resource",
+              "description": "The HMAC wrapper is instantiated using index 4 (`acc_ctrl_c[priv_lvl_i][4]`), confirming that `acc_ctrl[4*4+i]` maps to the HMAC permission state.",
+              "supports_claim": "Proves that index 4 is indeed the HMAC peripheral."
+            },
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "impact",
+              "description": "The PKT wrapper is instantiated using index 5 (`reglk_ctrl[5*8+7:5*8]`) and has direct access to the system fuses (`fuse_req`, `fuse_addr`, `fuse_rdata`).",
+              "supports_claim": "Confirms that index 5 is the PKT peripheral and establishes the severe security impact of unauthorized fuse access."
+            }
+          ],
+          "reasoning_summary": "The `riscv_peripherals` module dynamically applies access permissions to various peripherals via the `acc_ctrl_c` matrix. The calculation logic contains a flawed hardcoded exception (`j==5 && acc_ctrl[4*4+i]`) that merges permissions between two independent peripherals. Because peripheral 4 is HMAC and peripheral 5 is PKT (which interacts with critical hardware fuses), an attacker or unauthorized software granted access to the crypto accelerator (HMAC) will implicitly bypass access boundaries to read/write fuses. This violates the principle of least privilege.",
+          "security_impact": "High. By exploiting HMAC permissions to interact with the PKT peripheral, an attacker can directly read or write hardware fuses. Fuses typically hold root-of-trust keys, secure boot policies, and critical configuration parameters. Unauthorized interaction can lead to full device compromise and permanent circumvention of hardware security mechanisms.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0035",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0036",
+      "started_at": "2026-07-07T18:40:29.897611+08:00",
+      "completed_at": "2026-07-07T18:40:40.533333+08:00",
+      "elapsed_seconds": 10.639999999999418,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:40:29.897611+08:00",
+        "completed_at": "2026-07-07T18:40:40.533333+08:00",
+        "elapsed_seconds": 10.639999999999418,
+        "input_tokens": 1025,
+        "output_tokens": 989,
+        "total_tokens": 2014,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0036",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The provided source snippet only contains module port definitions and a wire declaration. There is no operational logic, state update, or permission enforcement mechanism shown to determine if an access control vulnerability exists."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0036",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0037",
+      "started_at": "2026-07-07T18:40:40.533333+08:00",
+      "completed_at": "2026-07-07T18:41:12.540256+08:00",
+      "elapsed_seconds": 32.01600000000326,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:40:40.534333+08:00",
+        "completed_at": "2026-07-07T18:41:12.537251+08:00",
+        "elapsed_seconds": 32.0,
+        "input_tokens": 9548,
+        "output_tokens": 3429,
+        "total_tokens": 12977,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0037",
+        "has_finding": true,
+        "finding": {
+          "summary": "AXI-Lite protection signals (PROT) are incorrectly tied off to zero, stripping privilege and security metadata and potentially forcing accesses to appear as Secure/Unprivileged.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The designer incorrectly assumes AXI-lite does not use protection signals and hardcodes aw.prot and ar.prot to 0.",
+              "supports_claim": "Assigning '0 to PROT signals strips the transaction of its original privilege (bit 0) and security (bit 1) status. A value of 0 explicitly marks transactions as 'Secure' and 'Unprivileged', which allows Non-Secure masters to masquerade as Secure."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "protected_resource",
+              "description": "The pkt_wrapper module handles the AXI requests and interfaces with sensitive functionality (indicated by FUSE_MEM_SIZE).",
+              "supports_claim": "The dropped PROT signals apply to a security-critical component wrapper, meaning hardware-level privilege and security domain checks cannot be correctly enforced."
+            }
+          ],
+          "reasoning_summary": "The wrapper integration incorrectly ties off the AXI 'prot' (protection) signals to 0 under the false assumption that AXI-Lite does not use them (as seen in the code comment). This effectively destroys the privilege and security metadata from incoming transactions. In the AXI specification, a 'prot' value of 0 indicates an Unprivileged, Secure, Data access. By hardcoding this, all accesses to the packet wrapper and its underlying fuse/key memory are artificially treated as Secure, bypassing any upstream Non-Secure restrictions and preventing the downstream peripheral from enforcing proper privilege separation.",
+          "security_impact": "Loss of system-level privilege separation and security domain isolation (e.g., TrustZone). Non-secure or unprivileged attackers could potentially bypass security boundaries to access sensitive cryptographic material or fuses.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The internal RTL of `pkt_wrapper` is not fully provided, so it is unknown if the module actually attempts to enforce access control based on `axi_req_i.ar.prot` or `aw.prot`. However, destroying the metadata at the bus boundary is inherently a vulnerability as it precludes any such checks."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0037",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0038",
+      "started_at": "2026-07-07T18:41:12.540256+08:00",
+      "completed_at": "2026-07-07T18:41:20.459062+08:00",
+      "elapsed_seconds": 7.9060000000026776,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:41:12.541255+08:00",
+        "completed_at": "2026-07-07T18:41:20.459062+08:00",
+        "elapsed_seconds": 7.9060000000026776,
+        "input_tokens": 1931,
+        "output_tokens": 683,
+        "total_tokens": 2614,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0038",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The provided source snippets only show module port declarations and instantiation wiring for pkt_wrapper and riscv_peripherals. There is no internal logic, access control mechanism, or state update behavior included in the context to evaluate for a permission-related vulnerability."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0038",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0039",
+      "started_at": "2026-07-07T18:41:20.459062+08:00",
+      "completed_at": "2026-07-07T18:42:24.443052+08:00",
+      "elapsed_seconds": 63.98500000000058,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:41:20.463059+08:00",
+        "completed_at": "2026-07-07T18:42:24.440056+08:00",
+        "elapsed_seconds": 63.96899999999732,
+        "input_tokens": 32899,
+        "output_tokens": 8250,
+        "total_tokens": 41149,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0039",
+        "has_finding": true,
+        "finding": {
+          "summary": "Out-of-bounds index on register lock signal bypasses the lock mechanism for access control memory.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "permission_state",
+              "description": "Declares the register lock control input reglk_ctrl_i as an 8-bit logic vector [7:0].",
+              "supports_claim": "Establishes the intended maximum size and valid indices of the lock control signal array."
+            },
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "guard_logic",
+              "description": "Assigns the 8-bit reglk_ctrl_i input to the internal reglk_ctrl signal.",
+              "supports_claim": "Confirms that reglk_ctrl derives its value and effective bounds from the 8-bit input."
+            },
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "violation",
+              "description": "Uses reglk_ctrl[13] as the guard condition to prevent writes to acct_mem[03], acct_mem[04], and acct_mem[05].",
+              "supports_claim": "Because bit index 13 is out-of-bounds for the 8-bit lock control signal (which will zero-extend or return 0 for out-of-bounds bits), the condition `reglk_ctrl[13]` always evaluates to 0. This unconditionally bypasses the register lock mechanism and allows unrestricted writes to these locations."
+            }
+          ],
+          "reasoning_summary": "The access control wrapper (acct_wrapper.sv) defines its lock input signal `reglk_ctrl_i` as an 8-bit bus. However, the state update logic for specific access control registers (`acct_mem[03]`, `acct_mem[04]`, and `acct_mem[05]`) mistakenly checks bit 13 (`reglk_ctrl[13]`) to determine if writes should be locked. Accessing an out-of-bounds bit or zero-extended upper bit evaluates to 0. Consequently, the conditional check (`reglk_ctrl[13] ? acct_mem : wdata`) is permanently broken, allowing unauthorized writes to these critical access control configurations regardless of the intended locked state.",
+          "security_impact": "An attacker or compromised software can modify the access control policies for specific hardware peripherals even after they have been locked by secure boot/firmware. This leads to privilege escalation and unauthorized peripheral access.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0039",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0040",
+      "started_at": "2026-07-07T18:42:24.443052+08:00",
+      "completed_at": "2026-07-07T18:42:41.942192+08:00",
+      "elapsed_seconds": 17.5,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:42:24.447052+08:00",
+        "completed_at": "2026-07-07T18:42:41.942192+08:00",
+        "elapsed_seconds": 17.485000000000582,
+        "input_tokens": 32686,
+        "output_tokens": 1842,
+        "total_tokens": 34528,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0040",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The provided source snippets primarily contain module port declarations and instantiations. Although the seed target is 'fuse_rdata_i' within 'pkt_wrapper', the snippets do not include the read/write or functional logic inside 'pkt_wrapper' that interacts with this signal. Without seeing how 'fuse_rdata_i' or the associated lock/privilege controls ('reglk_ctrl_i') are evaluated and used in register or memory access logic, it is impossible to identify a concrete permission-related vulnerability (e.g., missing readback guards or bypassed locks)."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0040",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0041",
+      "started_at": "2026-07-07T18:42:41.942192+08:00",
+      "completed_at": "2026-07-07T18:43:02.548884+08:00",
+      "elapsed_seconds": 20.60899999999674,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:42:41.946186+08:00",
+        "completed_at": "2026-07-07T18:43:02.547437+08:00",
+        "elapsed_seconds": 20.593999999997322,
+        "input_tokens": 31453,
+        "output_tokens": 2044,
+        "total_tokens": 33497,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0041",
+        "has_finding": true,
+        "finding": {
+          "summary": "The HMAC wrapper module does not clear sensitive key registers (key0) upon system reset, potentially allowing key leakage or unauthorized reuse across security boundaries.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "violation",
+              "description": "The sequential block handling resets in hmac_wrapper clears the data array and control flags but omits key0 registers from the reset assignments.",
+              "supports_claim": "Demonstrates missing reset initialization for cryptographic key material, leading to unsafe reset behavior."
+            }
+          ],
+          "reasoning_summary": "In the hmac_wrapper RTL, when the reset condition occurs, various state variables such as startHash, newMessage, and the data registers are properly cleared. However, the cryptographic key registers (key0) are entirely omitted from this reset logic, causing them to retain their previous values. This unsafe reset behavior leaves sensitive key material in memory after a system or peripheral reset.",
+          "security_impact": "Cryptographic keys may be retained in memory after a reset, which could allow a subsequent or less privileged execution context to extract, observe, or inadvertently reuse the previous context's secret keys.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0041",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0043",
+      "started_at": "2026-07-07T18:43:02.548884+08:00",
+      "completed_at": "2026-07-07T18:43:37.183817+08:00",
+      "elapsed_seconds": 34.64100000000326,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:43:02.551399+08:00",
+        "completed_at": "2026-07-07T18:43:37.182817+08:00",
+        "elapsed_seconds": 34.64100000000326,
+        "input_tokens": 34934,
+        "output_tokens": 4378,
+        "total_tokens": 39312,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0043",
+        "has_finding": true,
+        "finding": {
+          "summary": "Typographical error and bitwidth mismatch in register lock control allows bypass of write protection for access control memory.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0007",
+              "evidence_role": "permission_state",
+              "description": "The acct_wrapper module takes an 8-bit reglk_ctrl_i input and directly assigns it to a 16-bit reglk_ctrl signal. This zero-extends the value, causing bits 8 through 15 to be permanently zero.",
+              "supports_claim": "Demonstrates that upper bits of the register lock control signal (such as bit 13) are structurally tied to zero."
+            },
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "violation",
+              "description": "The write logic for acct_mem[03], acct_mem[04], and acct_mem[05] relies on reglk_ctrl[13] to prevent overwrites. Because reglk_ctrl[13] is always 0, the lock check is bypassed and the registers accept wdata unconditionally. (This was likely a typo intended to be reglk_ctrl[3], which pairs with the read lock on reglk_ctrl[2]).",
+              "supports_claim": "Confirms that the bitwidth mismatch directly leads to a lock bypass, allowing unprotected writes to sensitive access control configuration."
+            }
+          ],
+          "reasoning_summary": "The input signal reglk_ctrl_i is declared as 8 bits but assigned to the 16-bit internal signal reglk_ctrl. This zero-extends the internal signal, leaving bits 8-15 permanently tied to zero. The write-enable guards for acct_mem[03] through acct_mem[05] check reglk_ctrl[13] (likely a typo for bit 3, given the read lock uses bit 2). Since bit 13 evaluates to 0 (unlocked), the protection is bypassed entirely, and these access control registers can always be overwritten regardless of the actual lock configuration.",
+          "security_impact": "An attacker can bypass register locks to overwrite access control permissions for specific peripherals. This undermines the system's hardware isolation and could lead to unauthorized privilege escalation or tampering.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0043",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0044",
+      "started_at": "2026-07-07T18:43:37.183817+08:00",
+      "completed_at": "2026-07-07T18:44:05.300171+08:00",
+      "elapsed_seconds": 28.10899999999674,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:43:37.184816+08:00",
+        "completed_at": "2026-07-07T18:44:05.298171+08:00",
+        "elapsed_seconds": 28.10899999999674,
+        "input_tokens": 32460,
+        "output_tokens": 3002,
+        "total_tokens": 35462,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0044",
+        "has_finding": true,
+        "finding": {
+          "summary": "The jtag_unlock signal is used in the reset condition of reglk_mem, allowing a debug interface to improperly clear system register locks.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0016",
+              "evidence_role": "violation",
+              "description": "The logic resets reglk_mem[j] to 'h0 when ~(rst_ni && ~jtag_unlock && ~rst_9) evaluates to true, clearing the locks on jtag_unlock assertion.",
+              "supports_claim": "Provides concrete evidence of unsafe reset behavior where a debug signal forces the clearing of security locks."
+            },
+            {
+              "snippet_id": "SNIP-0015",
+              "evidence_role": "protected_resource",
+              "description": "reglk_mem stores the register lock configurations (reglk_ctrl_o) which enforce write protections.",
+              "supports_claim": "Demonstrates that the cleared resource is a security-critical access control state."
+            }
+          ],
+          "reasoning_summary": "The register lock module (reglk_wrapper) protects critical system registers by preventing unauthorized writes. However, its reset logic includes the jtag_unlock signal, which clears all lock bits to 0 (unlocked). This creates a direct bypass where asserting the debug unlock signal disables all register locking mechanisms, allowing potential unauthorized access or modification of protected configuration registers.",
+          "security_impact": "An attacker with JTAG or debug access can clear register locks, bypassing access controls to modify sensitive system configurations or escalate privileges.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0044",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0045",
+      "started_at": "2026-07-07T18:44:05.300171+08:00",
+      "completed_at": "2026-07-07T18:44:12.403249+08:00",
+      "elapsed_seconds": 7.10899999999674,
+      "llm": {
+        "llm_calls": 1,
+        "status": "failed",
+        "error": "Expecting value: line 1 column 1 (char 0)",
+        "started_at": "2026-07-07T18:44:05.300171+08:00",
+        "completed_at": "2026-07-07T18:44:12.403249+08:00",
+        "elapsed_seconds": 7.10899999999674,
+        "input_tokens": 1078,
+        "output_tokens": 511,
+        "total_tokens": 1589,
+        "token_usage_source": "api"
+      },
+      "status": "llm_failed"
+    },
+    {
+      "chain_id": "CHAIN-0046",
+      "started_at": "2026-07-07T18:44:12.403249+08:00",
+      "completed_at": "2026-07-07T18:44:38.784477+08:00",
+      "elapsed_seconds": 26.375,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:44:12.404250+08:00",
+        "completed_at": "2026-07-07T18:44:38.781472+08:00",
+        "elapsed_seconds": 26.375,
+        "input_tokens": 9567,
+        "output_tokens": 2958,
+        "total_tokens": 12525,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0046",
+        "has_finding": true,
+        "finding": {
+          "summary": "The AXI PROT (protection) signals are incorrectly tied off to zero for the register lock peripheral, stripping privilege and security context from transactions.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The design hardcodes reglk_axi_req.aw.prot and reglk_axi_req.ar.prot to '0 under the assumption that AXI-lite does not use these signals.",
+              "supports_claim": "Shows the explicit destruction of the AXI transaction privilege and security attributes before they reach the reglk_wrapper module."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "protected_resource",
+              "description": "The reglk_axi_req structure is routed directly to the i_reglk_wrapper instance.",
+              "supports_claim": "Confirms that the hardcoded requests are fed into the register lock wrapper, a security-critical configuration interface."
+            }
+          ],
+          "reasoning_summary": "The AXI-Lite specification explicitly includes the ARPROT and AWPROT signals to convey the privilege and security level of a bus transaction. In this design, the developer incorrectly assumes AXI-Lite does not use these signals and hardcodes them to 0 (Unprivileged, Secure, Data access) for transactions destined for the `reglk_wrapper`. Because the register lock wrapper handles security-critical state, dropping the master's true privilege level prevents the peripheral from enforcing proper bus-level access control (e.g., restricting access to privileged masters only).",
+          "security_impact": "Loss of bus-level privilege enforcement. An unprivileged master might be able to configure register locks if the peripheral defaults to accepting unprivileged accesses, or legitimate privileged accesses may be rejected, leading to denial of service.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The internal implementation of `reglk_wrapper` is not provided, so it is unknown if it attempts to check the `prot` bits. However, destroying the security context at the bus boundary is a structural access-control flaw."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0046",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0047",
+      "started_at": "2026-07-07T18:44:38.784477+08:00",
+      "completed_at": "2026-07-07T18:44:44.871549+08:00",
+      "elapsed_seconds": 6.094000000011874,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:44:38.785477+08:00",
+        "completed_at": "2026-07-07T18:44:44.871549+08:00",
+        "elapsed_seconds": 6.094000000011874,
+        "input_tokens": 1980,
+        "output_tokens": 317,
+        "total_tokens": 2297,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0047",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The provided context only shows standard port declarations and a module instantiation connecting the AXI response signals. There is no evidence of control logic, missing guards, or any permission-related vulnerabilities within the provided snippets."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0047",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0048",
+      "started_at": "2026-07-07T18:44:44.871549+08:00",
+      "completed_at": "2026-07-07T18:45:09.317114+08:00",
+      "elapsed_seconds": 24.437999999994645,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:44:44.874058+08:00",
+        "completed_at": "2026-07-07T18:45:09.315109+08:00",
+        "elapsed_seconds": 24.437999999994645,
+        "input_tokens": 32245,
+        "output_tokens": 2871,
+        "total_tokens": 35116,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0048",
+        "has_finding": true,
+        "finding": {
+          "summary": "The jtag_unlock debug signal allows resetting the register lock configuration (reglk_mem) to 0, which removes write protections and permits unauthorized modification of protected registers.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0015",
+              "evidence_role": "debug_or_test_control",
+              "description": "The jtag_unlock signal is used as part of an active-low reset condition: `~(rst_ni && ~jtag_unlock && ~rst_9)`. Asserting jtag_unlock evaluates to true, clearing reglk_mem to 'h0.",
+              "supports_claim": "Shows that a debug signal can arbitrarily clear the protection state, overriding normal operation."
+            },
+            {
+              "snippet_id": "SNIP-0014",
+              "evidence_role": "permission_state",
+              "description": "reglk_mem stores the register lock configurations and assigns them to reglk_ctrl_o, broadcasting the lock state to peripherals.",
+              "supports_claim": "Links the cleared memory to the actual protection signals used throughout the SoC."
+            },
+            {
+              "snippet_id": "SNIP-0015",
+              "evidence_role": "guard_logic",
+              "description": "The lock logic uses a mux like `reglk_ctrl[3] ? reglk_mem[0] : wdata`. If reglk_ctrl (derived from reglk_mem) is 0, writes are allowed.",
+              "supports_claim": "Demonstrates that clearing reglk_mem to 'h0 disables the locks, allowing arbitrary writes to previously locked configurations."
+            }
+          ],
+          "reasoning_summary": "The reglk_wrapper module implements register locks using reglk_mem. The lock state is enforced by checking if the respective bit in reglk_ctrl is set. However, the jtag_unlock signal is directly wired into the asynchronous-like reset condition for reglk_mem. If jtag_unlock is asserted, reglk_mem is forced to 0, which disables all register locks. This allows unprivileged or unauthenticated logic to rewrite the locks and peripheral configurations.",
+          "security_impact": "High. An attacker with access to JTAG (or the ability to manipulate jtag_unlock) can bypass register locks and rewrite access control configurations, completely compromising the SoC's security boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0048",
+        "status": "discarded",
+        "discard_reason": "missing_violation_evidence",
+        "invalid_snippet_ids": []
+      },
+      "status": "discarded"
+    },
+    {
+      "chain_id": "CHAIN-0049",
+      "started_at": "2026-07-07T18:45:09.317114+08:00",
+      "completed_at": "2026-07-07T18:45:42.209172+08:00",
+      "elapsed_seconds": 32.88999999999942,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:45:09.319114+08:00",
+        "completed_at": "2026-07-07T18:45:42.205175+08:00",
+        "elapsed_seconds": 32.88999999999942,
+        "input_tokens": 33766,
+        "output_tokens": 3563,
+        "total_tokens": 37329,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0049",
+        "has_finding": true,
+        "finding": {
+          "summary": "Unsafe debug behavior: The debug signal `jtag_unlock` resets the register lock bits to zero, bypassing hardware write protections for multiple secure peripherals without wiping their sensitive state.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0016",
+              "evidence_role": "violation",
+              "description": "The logic in `reglk_wrapper.sv` clears `reglk_mem` to zero when `jtag_unlock` is asserted (`if(~(rst_ni && ~jtag_unlock && ~rst_9))`), effectively removing all register locks.",
+              "supports_claim": "Demonstrates that a debug-related signal can unilaterally bypass the hardware locks."
+            },
+            {
+              "snippet_id": "SNIP-0015",
+              "evidence_role": "permission_state",
+              "description": "The `reglk_mem` array is exported as `reglk_ctrl_o`, which propagates to the rest of the system to enforce access controls.",
+              "supports_claim": "Shows that the lock state is derived directly from the memory cleared by the debug signal."
+            },
+            {
+              "snippet_id": "SNIP-0013",
+              "evidence_role": "guard_logic",
+              "description": "In the HMAC wrapper, `reglk_ctrl_i` prevents writes when set to 1. Since `jtag_unlock` resets it to 0, this write protection is bypassed. Furthermore, the HMAC reset logic does not include `jtag_unlock`, meaning the secrets are not wiped when unlocked.",
+              "supports_claim": "Proves that the lock bits guard sensitive configurations and that unlocking does not clear the protected secrets."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "debug_or_test_control",
+              "description": "`jtag_unlock` is defined alongside debug request/response signals in `riscv_peripherals.sv`.",
+              "supports_claim": "Identifies `jtag_unlock` as a debug or test mechanism."
+            }
+          ],
+          "reasoning_summary": "Hardware locks (`reglk_mem`) are designed to guard peripheral configurations (like HMAC keys and ACCT rules) from modification, where a value of 1 prevents writes. However, the debug/test signal `jtag_unlock` is used in the asynchronous reset condition to clear `reglk_mem` to 0. Crucially, `jtag_unlock` only clears the lock bits and is not connected to the reset logic of the peripherals themselves. This creates a severe unsafe debug behavior where activating JTAG unlock bypasses all hardware write protections, allowing an attacker to modify or access sensitive configurations without wiping the secrets.",
+          "security_impact": "An attacker with physical access or the ability to communicate with the JTAG debug interface can unilaterally drop register locks across the SoC. This allows unauthorized modification of access control policies or extraction/manipulation of cryptographic secrets.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0049",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0050",
+      "started_at": "2026-07-07T18:45:42.209172+08:00",
+      "completed_at": "2026-07-07T18:46:17.393547+08:00",
+      "elapsed_seconds": 35.187999999994645,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:45:42.212682+08:00",
+        "completed_at": "2026-07-07T18:46:17.390038+08:00",
+        "elapsed_seconds": 35.171999999991385,
+        "input_tokens": 35370,
+        "output_tokens": 4122,
+        "total_tokens": 39492,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0050",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing access control and register lock checks in the HMAC peripheral wrapper allow unauthorized state updates.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "access_entry",
+              "description": "The hmac_wrapper module is instantiated in the peripheral subsystem and explicitly receives register lock (reglk_ctrl_i) and access control (acct_ctrl_i) signals from the system.",
+              "supports_claim": "Demonstrates the design intent that HMAC configuration and operation should be protected by privilege and lock mechanisms."
+            },
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "permission_state",
+              "description": "The hmac_wrapper module defines reglk_ctrl_i and acct_ctrl_i as inputs, meant to enforce lock values and access control.",
+              "supports_claim": "Confirms the permission states are provided to the module, establishing the expected authorization boundaries."
+            },
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "violation",
+              "description": "The synchronous write logic for HMAC (controlling startHash, newMessage, and data registers) only checks 'if(en && we)', completely omitting any conditions or gating related to reglk_ctrl_i or acct_ctrl_i.",
+              "supports_claim": "Proves that the lock and access control mechanisms are completely bypassed during register writes, leaving the HMAC protected resources vulnerable to unauthorized modifications."
+            }
+          ],
+          "reasoning_summary": "The HMAC peripheral is intended to be protected by system-level access control and register lock signals (acct_ctrl_i and reglk_ctrl_i). While these signals are properly routed into the wrapper module, the internal AXI write logic fails to use them as guards. Unlike the acct_wrapper (which correctly checks lock bits before allowing state updates), the hmac_wrapper permits any enabled write transaction to modify critical registers like startHash, newMessage, and data, bypassing the intended security policies.",
+          "security_impact": "Lower-privileged software or attackers can bypass intended access controls and lock features to maliciously alter HMAC operations, initiate unauthorized hashes, or corrupt sensitive cryptographic inputs.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The read side of the AXI interface for the HMAC wrapper is truncated in the provided snippets, so it is unclear if reads are also missing access control checks. However, the write-side vulnerability is definitively proven."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0050",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0051",
+      "started_at": "2026-07-07T18:46:17.393547+08:00",
+      "completed_at": "2026-07-07T18:46:39.793670+08:00",
+      "elapsed_seconds": 22.406000000002678,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:46:17.395550+08:00",
+        "completed_at": "2026-07-07T18:46:39.792671+08:00",
+        "elapsed_seconds": 22.406000000002678,
+        "input_tokens": 35260,
+        "output_tokens": 2323,
+        "total_tokens": 37583,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0051",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug signal jtag_unlock improperly clears all register lock bits, bypassing system lockdown protections.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0014",
+              "evidence_role": "debug_or_test_control",
+              "description": "The jtag_unlock signal is used alongside system reset signals to synchronously clear the reglk_mem array to zero.",
+              "supports_claim": "Demonstrates that asserting the debug-related jtag_unlock completely bypasses and zeroes out the security lock states."
+            },
+            {
+              "snippet_id": "SNIP-0013",
+              "evidence_role": "protected_resource",
+              "description": "The reglk_mem array provides the lock state bits driven out on reglk_ctrl_o, which protects various downstream peripherals.",
+              "supports_claim": "Confirms that clearing reglk_mem directly globally unlocks the protected resources."
+            }
+          ],
+          "reasoning_summary": "The hardware implements a register lock wrapper (reglk_wrapper) designed to freeze configuration settings for system peripherals once written. However, the debug signal `jtag_unlock` acts as a reset condition for the `reglk_mem` array. When asserted, it synchronously clears all locks. This allows any user with debug (JTAG) access to completely bypass the lockdown policies and alter security-critical access control constraints or hardware configurations.",
+          "security_impact": "An attacker with JTAG access can bypass register locks globally, potentially elevating privileges, reading sensitive data, or manipulating secure configurations that were meant to be read-only until a full system reset.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0051",
+        "status": "discarded",
+        "discard_reason": "missing_violation_evidence",
+        "invalid_snippet_ids": []
+      },
+      "status": "discarded"
+    },
+    {
+      "chain_id": "CHAIN-0054",
+      "started_at": "2026-07-07T18:46:39.793670+08:00",
+      "completed_at": "2026-07-07T18:47:00.199770+08:00",
+      "elapsed_seconds": 20.406000000002678,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:46:39.794670+08:00",
+        "completed_at": "2026-07-07T18:47:00.197771+08:00",
+        "elapsed_seconds": 20.406000000002678,
+        "input_tokens": 28919,
+        "output_tokens": 2325,
+        "total_tokens": 31244,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0054",
+        "has_finding": true,
+        "finding": {
+          "summary": "The register lock state (`reglk_mem`) can be completely cleared by the `jtag_unlock` debug signal, effectively bypassing register locks via a debug interface.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0016",
+              "evidence_role": "protected_resource",
+              "description": "`reglk_mem` is defined as a storage array containing register lock values, which are output as `reglk_ctrl_o` to secure other peripheral configurations.",
+              "supports_claim": "Shows that `reglk_mem` is the authoritative register lock state that protects sensitive configurations."
+            },
+            {
+              "snippet_id": "SNIP-0017",
+              "evidence_role": "violation",
+              "description": "The asynchronous/synchronous reset condition for `reglk_mem` includes `~jtag_unlock`. If `jtag_unlock` is asserted (goes high), it evaluates the reset condition to true and resets all register locks to 0.",
+              "supports_claim": "Demonstrates that a debug/test signal (`jtag_unlock`) can forcibly clear security locks, compromising the intended protection mechanism."
+            }
+          ],
+          "reasoning_summary": "The code securely implements locks over memory regions and registers using `reglk_mem`, which selectively blocks writes when a corresponding lock bit is set (e.g., `reglk_ctrl[3] ? reglk_mem[0] : wdata;`). However, the reset logic includes the `jtag_unlock` signal in the condition `~(rst_ni && ~jtag_unlock && ~rst_9)`. When `jtag_unlock` is active (high), the entire `reglk_mem` array is reset to '0, which clears all locks. This is a vulnerability as it allows debug operations to bypass the register locks without proper authorization state checks.",
+          "security_impact": "An attacker with access to the debug/JTAG interface can clear all access control locks on the system registers by asserting `jtag_unlock`, allowing unauthorized configuration writes, privilege escalation, and bypass of access protections.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0054",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0055",
+      "started_at": "2026-07-07T18:47:00.199770+08:00",
+      "completed_at": "2026-07-07T18:47:55.568854+08:00",
+      "elapsed_seconds": 55.36000000000058,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:47:00.201771+08:00",
+        "completed_at": "2026-07-07T18:47:55.563856+08:00",
+        "elapsed_seconds": 55.36000000000058,
+        "input_tokens": 33010,
+        "output_tokens": 6634,
+        "total_tokens": 39644,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0055",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded AXI protection (`prot`) signals to `'0` force all transactions to be treated as Secure, bypassing potential security state isolation.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The `aw_prot` signal for the PLIC master interface is hardcoded to `'0`.",
+              "supports_claim": "Tying `aw_prot` to `0` sets the AXI PROT[1] bit to 0, which designates a Secure access, regardless of the actual initiator's security state."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "violation",
+              "description": "The `aw.prot` and `ar.prot` signals for the RSA cryptographic peripheral are hardcoded to `'0`.",
+              "supports_claim": "Hardcoding the protection bits to 0 strips the dynamic privilege and security state, asserting Secure accesses for all interactions with the RSA block."
+            },
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "violation",
+              "description": "The `aw.prot` and `ar.prot` signals for the AES0 peripheral are hardcoded to `'0`.",
+              "supports_claim": "Treats all reads and writes to the AES peripheral as Secure transactions, bypassing interconnect or peripheral-level TrustZone/security checks."
+            }
+          ],
+          "reasoning_summary": "The AXI specification defines the `AxPROT[1]` bit as the security identifier, where `0` indicates a Secure access and `1` indicates a Non-secure access. In `riscv_peripherals.sv`, the `aw_prot` and `ar_prot` signals for various security-critical peripherals (PLIC, RSA, RNG, AES) are statically tied off to `'0`. This hardcoded tie-off permanently asserts the Secure state (`AxPROT[1] = 0`) and Unprivileged state (`AxPROT[0] = 0`) for all transactions. If the downstream peripherals or the interconnect enforce access control based on these protection bits, this design will bypass those checks by effectively spoofing the Secure state, elevating the privileges of Non-secure initiators.",
+          "security_impact": "An attacker operating in a Non-secure execution environment could access Secure registers, cryptographic keys (AES/RSA), and privileged interrupt configurations, leading to a complete compromise of the system's hardware security boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact exploitability depends on whether the connected AES, RSA, RNG, and PLIC modules actively enforce access control checks using the AXI `prot` signals. If they ignore `prot`, the impact is mitigated, but hardcoding `prot` to 0 remains a severe architectural vulnerability in AXI-based SoCs."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0055",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0056",
+      "started_at": "2026-07-07T18:47:55.568854+08:00",
+      "completed_at": "2026-07-07T18:48:41.359329+08:00",
+      "elapsed_seconds": 45.796000000002095,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:47:55.571853+08:00",
+        "completed_at": "2026-07-07T18:48:41.357328+08:00",
+        "elapsed_seconds": 45.78100000000268,
+        "input_tokens": 31090,
+        "output_tokens": 5594,
+        "total_tokens": 36684,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0056",
+        "has_finding": true,
+        "finding": {
+          "summary": "The access control wrapper (acct_wrapper) resets to a permissive fail-open state, allowing an unsafe localized reset to bypass register locks.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "violation",
+              "description": "On local reset (rst_6), the access control memory (acct_mem) is reset to 32'hffffffff (all 1s). This grants full permissions and bypasses the register lock controls (reglk_ctrl) applied during regular memory-mapped writes.",
+              "supports_claim": "Shows the reset logic overwriting protected permission state with a permissive fail-open value, bypassing security locks."
+            },
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "permission_state",
+              "description": "The acct_mem array values are directly driven onto the acc_ctrl_o output to determine global peripheral access permissions.",
+              "supports_claim": "Confirms that resetting acct_mem to 32'hffffffff results in all access permissions being broadly granted."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "impact",
+              "description": "The acc_ctrl array is distributed as acc_ctrl_c to all peripherals in the system, dictating whether access (e.g., rom_req, hmac, pkt) is permitted for different privilege levels.",
+              "supports_claim": "Demonstrates that a compromise of acc_ctrl via the acct_wrapper reset leads to a system-wide access control bypass."
+            }
+          ],
+          "reasoning_summary": "The acct_wrapper module maintains peripheral access control permissions (acct_mem) and protects them against modification using lock bits (reglk_ctrl). However, asserting the localized reset 'rst_6' forcibly sets all access control entries to 32'hffffffff (full permissions), regardless of the lock state. This creates an unsafe fail-open condition where triggering the peripheral reset removes all access restrictions.",
+          "security_impact": "If an attacker or unprivileged software can trigger the 'rst_6' reset, they can completely bypass the system's access controls and register locks, escalating privileges to access sensitive peripherals (such as the HMAC module and boot ROM) without authorization.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact source and control mechanism for 'rst_6' is not shown in the snippets. The severity of the vulnerability is highest if 'rst_6' can be triggered by untrusted software as a soft reset, rather than solely by a secure global hardware reset."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0056",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0057",
+      "started_at": "2026-07-07T18:48:41.359329+08:00",
+      "completed_at": "2026-07-07T18:49:26.555271+08:00",
+      "elapsed_seconds": 45.203999999997905,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:48:41.361832+08:00",
+        "completed_at": "2026-07-07T18:49:26.554268+08:00",
+        "elapsed_seconds": 45.203999999997905,
+        "input_tokens": 32223,
+        "output_tokens": 5386,
+        "total_tokens": 37609,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0057",
+        "has_finding": true,
+        "finding": {
+          "summary": "The register lock state can be fully bypassed and cleared to zero via the `jtag_unlock` debug signal, defeating software-configured lock protections.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0012",
+              "evidence_role": "access_entry",
+              "description": "The `reglk_wrapper` module takes `jtag_unlock` as an input signal, representing debug-level JTAG access.",
+              "supports_claim": "Identifies the source of the debug signal that controls the unlock behavior."
+            },
+            {
+              "snippet_id": "SNIP-0013",
+              "evidence_role": "protected_resource",
+              "description": "The `reglk_mem` array stores the lock bits, which are intended to enforce write protections on themselves and other system peripherals.",
+              "supports_claim": "Establishes `reglk_mem` as the critical security state for enforcing system register locks."
+            },
+            {
+              "snippet_id": "SNIP-0013",
+              "evidence_role": "violation",
+              "description": "The synchronous reset condition `if(~(rst_ni && ~jtag_unlock && ~rst_9))` causes all `reglk_mem` elements to be unconditionally cleared to `'h0` when `jtag_unlock` is active.",
+              "supports_claim": "Demonstrates that asserting `jtag_unlock` completely overrides the lock protections, resulting in an unsafe debug bypass of the software-defined restrictions."
+            }
+          ],
+          "reasoning_summary": "The hardware implements a register lock mechanism (`reglk_mem`) to protect critical configuration states from unauthorized writes. However, the `jtag_unlock` signal is included in the reset condition for these lock registers, allowing an external debug interface to unconditionally clear all lock bits to zero. This bypasses the lock protections and introduces an unsafe debug vulnerability where an external interface can unlock and modify restricted resources at will.",
+          "security_impact": "An attacker with JTAG access can completely bypass the system's register lock protections, leading to potential privilege escalation, unauthorized modification of security-critical configurations, or compromise of isolated peripherals.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact system-level authentication mechanism (if any) required to assert `jtag_unlock` is not shown, but unconditionally clearing locks in RTL via a debug signal is typically considered a security risk unless strongly isolated."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0057",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0060",
+      "started_at": "2026-07-07T18:49:26.555271+08:00",
+      "completed_at": "2026-07-07T18:49:35.945939+08:00",
+      "elapsed_seconds": 9.389999999999418,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:49:26.556271+08:00",
+        "completed_at": "2026-07-07T18:49:35.945939+08:00",
+        "elapsed_seconds": 9.389999999999418,
+        "input_tokens": 8251,
+        "output_tokens": 880,
+        "total_tokens": 9131,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0060",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The provided snippet simply ties off unused AXI signals (including aw.prot, ar.prot) to zero for an AXI-lite peripheral interface. This is a standard practice for unused fields in bus protocols and does not constitute a permission-related vulnerability or a bypassed security check."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0060",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0061",
+      "started_at": "2026-07-07T18:49:35.945939+08:00",
+      "completed_at": "2026-07-07T18:50:08.437663+08:00",
+      "elapsed_seconds": 32.48500000000058,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:49:35.946939+08:00",
+        "completed_at": "2026-07-07T18:50:08.436663+08:00",
+        "elapsed_seconds": 32.48500000000058,
+        "input_tokens": 8263,
+        "output_tokens": 3371,
+        "total_tokens": 11634,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0061",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded AXI protection attributes (`aw.prot` and `ar.prot` tied to '0') spoof Secure transactions and drop upstream security contexts, potentially bypassing access controls.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The AXI protection signals `aes1_axi_req.aw.prot` and `ar.prot` are hardcoded to `'0`.",
+              "supports_claim": "Tying AXI `prot` signals to 0 forces the transaction to appear as Secure, Unprivileged, Data access (since AXI `prot[1]=0` indicates Secure). This drops any Non-secure attribute from the originating master."
+            }
+          ],
+          "reasoning_summary": "The snippet explicitly ties off AXI protection signals (`aw.prot` and `ar.prot`) to 0 for an AES peripheral interface. In the AMBA AXI specification, a `prot` value of 0 translates to a Secure, Unprivileged Data access. By dropping the incoming master's `prot` value and hardcoding it to 0, the design allows any master (including Non-secure ones) to send transactions that the AES peripheral will interpret as Secure. If the AES peripheral implements security boundary checks based on `prot`, this completely bypasses those protections.",
+          "security_impact": "Privilege Escalation. A Non-secure master can send read/write requests that arrive at the AES peripheral marked as Secure, potentially allowing unauthorized access to cryptographic keys, configuration registers, or plaintext data.",
+          "confidence": "medium",
+          "uncertainty_or_missing_evidence": "The exact impact depends on whether the `aes1` peripheral actually enforces security checks using the `prot` signal. If the AES peripheral is entirely unprivileged or ignores `prot`, the impact is lower, though hardcoding protection attributes is still an anti-pattern."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0061",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0062",
+      "started_at": "2026-07-07T18:50:08.438664+08:00",
+      "completed_at": "2026-07-07T18:50:43.708576+08:00",
+      "elapsed_seconds": 35.26499999999942,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:50:08.438664+08:00",
+        "completed_at": "2026-07-07T18:50:43.707576+08:00",
+        "elapsed_seconds": 35.26499999999942,
+        "input_tokens": 8272,
+        "output_tokens": 3761,
+        "total_tokens": 12033,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0062",
+        "has_finding": true,
+        "finding": {
+          "summary": "Improper tie-off of AXI PROT signals forces all accesses to Secure state, potentially causing privilege escalation.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "AXI aw.prot and ar.prot signals are hardcoded to '0 (Secure, Unprivileged, Data access) under the incorrect assumption that AXI-lite does not use them.",
+              "supports_claim": "Shows that protection and privilege levels from the master are discarded and incorrectly hardcoded to a Secure state."
+            }
+          ],
+          "reasoning_summary": "The snippet shows AXI4 request signals for an AES peripheral being tied off. `aw.prot` and `ar.prot` are tied to '0. In the AXI protocol, PROT[1] = 0 signifies a Secure transaction. By hardcoding this to 0, all transactions traversing this interface are interpreted as Secure, which strips away the actual origin's security state. If the AES peripheral implements TrustZone or privilege checks using PROT, this tie-off will bypass those checks, allowing Non-Secure masters to interact with Secure AES registers.",
+          "security_impact": "Non-Secure bus masters may be able to access Secure-only registers within the AES peripheral, leading to unauthorized cryptographic operations, key exposure, or TrustZone bypass for this peripheral.",
+          "confidence": "medium",
+          "uncertainty_or_missing_evidence": "The internal implementation of the AES peripheral is not shown, so it is uncertain if it actually checks the PROT signals or enforces TrustZone/privilege separation."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0062",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0063",
+      "started_at": "2026-07-07T18:50:43.709576+08:00",
+      "completed_at": "2026-07-07T18:50:55.494888+08:00",
+      "elapsed_seconds": 11.797000000005937,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:50:43.709576+08:00",
+        "completed_at": "2026-07-07T18:50:55.494888+08:00",
+        "elapsed_seconds": 11.797000000005937,
+        "input_tokens": 8039,
+        "output_tokens": 1136,
+        "total_tokens": 9175,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0063",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The source snippet shows standard AXI signal tie-offs for unused fields in an AXI to AXI-lite conversion wrapper. There is no evidence of a missing security check, bypassed privilege check, or unsafe state update; tying off signals like 'prot' and 'lock' to '0' is common when the downstream peripheral does not evaluate these attributes or when upstream filtering (e.g., PMP) is used."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0063",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0064",
+      "started_at": "2026-07-07T18:50:55.494888+08:00",
+      "completed_at": "2026-07-07T18:51:20.030044+08:00",
+      "elapsed_seconds": 24.530999999988126,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:50:55.495887+08:00",
+        "completed_at": "2026-07-07T18:51:20.028044+08:00",
+        "elapsed_seconds": 24.530999999988126,
+        "input_tokens": 22459,
+        "output_tokens": 2448,
+        "total_tokens": 24907,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0064",
+        "has_finding": true,
+        "finding": {
+          "summary": "Debug mode overrides the HMAC key with all zeros, allowing predictable cryptographic operations and potential signature forgery.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "access_entry",
+              "description": "The `debug_mode_i` signal is passed from the RISC-V peripherals into the `hmac_wrapper` module.",
+              "supports_claim": "Confirms that a system-level debug mode signal is directly routed to the cryptographic peripheral."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "debug_or_test_control",
+              "description": "Continuous assignments force both the `key` and `okey_hash` to `256'b0` when `debug_mode_i` is asserted.",
+              "supports_claim": "Demonstrates that the debug mode maliciously alters the cryptographic state by replacing the provisioned secret key with a known, all-zero key."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "protected_resource",
+              "description": "The zeroed `key` and `okey_hash` are then used by the `hmac` core instance for its cryptographic operations.",
+              "supports_claim": "Shows that the predictable key is consumed by the HMAC engine, meaning any HMAC computed in debug mode will use the predictable zero key."
+            }
+          ],
+          "reasoning_summary": "The RTL logic for the HMAC wrapper explicitly overrides the cryptographic key (`key`) and outer key hash (`okey_hash`) with all zeros whenever the system's debug mode (`debug_mode_i`) is active. While this might be intended to prevent key leakage during debugging, it leaves the HMAC module fully operational with a predictable, all-zero key. An attacker who can enable debug mode can trivially forge valid HMAC signatures by computing them with a zero key, bypassing message authentication and integrity checks.",
+          "security_impact": "High. Predictable cryptographic keys allow an attacker to forge message authentication codes (MACs), potentially bypassing secure boot, firmware validation, or secure communication channels if debug mode can be enabled.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "It is unknown whether the broader system architecture rejects signatures generated while in debug mode. If the system ignores HMAC results when `debug_mode_i` is true, this risk is mitigated, but the hardware module itself is unsafe by default."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0064",
+        "status": "discarded",
+        "discard_reason": "missing_violation_evidence",
+        "invalid_snippet_ids": []
+      },
+      "status": "discarded"
+    },
+    {
+      "chain_id": "CHAIN-0065",
+      "started_at": "2026-07-07T18:51:20.030044+08:00",
+      "completed_at": "2026-07-07T18:51:26.002973+08:00",
+      "elapsed_seconds": 5.969000000011874,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:51:20.031047+08:00",
+        "completed_at": "2026-07-07T18:51:26.002973+08:00",
+        "elapsed_seconds": 5.969000000011874,
+        "input_tokens": 2174,
+        "output_tokens": 352,
+        "total_tokens": 2526,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0065",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The snippet shows signal wiring for a simulation-only Debug Transport Module (SimDTM). The assignment casts a raw 2-bit operation signal to a typed enumeration for the DMI request. This is standard simulation scaffolding and does not represent a hardware security vulnerability or permission violation."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0065",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0066",
+      "started_at": "2026-07-07T18:51:26.002973+08:00",
+      "completed_at": "2026-07-07T18:51:44.016001+08:00",
+      "elapsed_seconds": 18.015999999988708,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:51:26.003970+08:00",
+        "completed_at": "2026-07-07T18:51:44.015002+08:00",
+        "elapsed_seconds": 18.015999999988708,
+        "input_tokens": 8169,
+        "output_tokens": 1925,
+        "total_tokens": 10094,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0066",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded AXI prot signals in DMA requests grant unintended Secure access privileges.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The AXI protection bits (`aw.prot` and `ar.prot`) for the DMA requests are statically tied off to '0 in the riscv_peripherals module.",
+              "supports_claim": "By tying the 3-bit AXI `prot` signal to 0, `prot[1]` is hardcoded to 0, which corresponds to a Secure access according to the AMBA AXI specification. This forces all DMA transactions to be treated as Secure."
+            }
+          ],
+          "reasoning_summary": "The RTL ties the DMA AXI read and write protection signals (`ar.prot` and `aw.prot`) to 0 under the assumption that they are unused. However, in the AXI specification, a `prot` value of 0 corresponds to Unprivileged, Secure, Data access. Hardcoding DMA transactions to be Secure allows an attacker who can program the DMA engine to bypass system-level memory protection (like TrustZone) and improperly access secure memory domains, resulting in privilege escalation.",
+          "security_impact": "An attacker with control over the DMA can perform arbitrary reads and writes to Secure memory regions, leading to a complete compromise of system security and isolation boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0066",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0068",
+      "started_at": "2026-07-07T18:51:44.016001+08:00",
+      "completed_at": "2026-07-07T18:52:06.355057+08:00",
+      "elapsed_seconds": 22.343000000008033,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:51:44.017001+08:00",
+        "completed_at": "2026-07-07T18:52:06.353057+08:00",
+        "elapsed_seconds": 22.343000000008033,
+        "input_tokens": 23370,
+        "output_tokens": 2489,
+        "total_tokens": 25859,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0068",
+        "has_finding": true,
+        "finding": {
+          "summary": "Sensitive fuse data readback can be performed bypassing the register lock check due to an unsafe default assignment falling through in unmapped address reads.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "violation",
+              "description": "At line 96, `rdata` defaults to `fuse_rdata_i`. In the case block, address offset 4 correctly protects `fuse_rdata_i` with `reglk_ctrl_i[6]`. However, for default offsets when `fuse_addr_o > 110`, the `default` case does not overwrite `rdata`, returning the unprotected `fuse_rdata_i`.",
+              "supports_claim": "The `reglk_ctrl_i[6]` lock check on `fuse_rdata_i` can be bypassed by reading from an unmapped address."
+            },
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "guard_logic",
+              "description": "At line 107, `rdata = reglk_ctrl_i[6] ? 'b0 : fuse_rdata_i;` establishes the intended permission model (lock checking) for the sensitive fuse read data.",
+              "supports_claim": "The intended guard `reglk_ctrl_i[6]` exists but is bypassed."
+            }
+          ],
+          "reasoning_summary": "The `pkt_wrapper` module exposes `fuse_rdata_i` via an APB/AXI-Lite register interface. It implements a permission lock `reglk_ctrl_i[6]` at address case 4. However, the initial procedural assignment unconditionally sets `rdata = fuse_rdata_i` before the case statement. If a memory-mapped read accesses an unimplemented offset (triggering the `default` case) while the state variable `fuse_addr_o > 110`, the case statement fails to overwrite `rdata` with 0. Consequently, the transaction returns the unprotected fuse data, successfully bypassing the lock.",
+          "security_impact": "An attacker with read access to the peripheral bus can read potentially sensitive fuse values (such as cryptographic keys or secure configuration) by reading unmapped register offsets, entirely bypassing the register lock protection.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0068",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0069",
+      "started_at": "2026-07-07T18:52:06.355057+08:00",
+      "completed_at": "2026-07-07T18:52:44.569291+08:00",
+      "elapsed_seconds": 38.203999999997905,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:52:06.356057+08:00",
+        "completed_at": "2026-07-07T18:52:44.566291+08:00",
+        "elapsed_seconds": 38.203999999997905,
+        "input_tokens": 19321,
+        "output_tokens": 4582,
+        "total_tokens": 23903,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0069",
+        "has_finding": true,
+        "finding": {
+          "summary": "Sensitive fuse data is exposed through unmapped register reads due to an insecure default value assignment.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "violation",
+              "description": "rdata is initialized to fuse_rdata_i before the case statement. In the default case, rdata is only cleared if fuse_addr_o <= 110, leaving fuse_rdata_i exposed for fuse_addr_o > 110 on unmapped addresses.",
+              "supports_claim": "Demonstrates that unmapped reads can leak fuse_rdata_i when fuse_addr_o > 110, entirely bypassing the reglk_ctrl_i[6] lock intended for offset 4."
+            }
+          ],
+          "reasoning_summary": "In `pkt_wrapper.sv`, the read data bus `rdata` is insecurely initialized to the sensitive `fuse_rdata_i` value at the start of a read transaction (line 96). The subsequent case statement attempts to protect `fuse_rdata_i` reads at the intended offset 4 using the `reglk_ctrl_i[6]` register lock. However, for unmapped offsets that fall into the `default` case, `rdata` is only zeroed if `fuse_addr_o <= 110`. If `fuse_addr_o > 110`, the initial assignment is not overwritten. This allows an attacker to bypass the lock and read sensitive fuse data for addresses above 110 by simply reading any unmapped register offset.",
+          "security_impact": "An attacker can bypass access controls (register locks) to read sensitive fuse data (which may contain cryptographic keys, IDs, or configuration secrets) by setting `fuse_addr_o` > 110 and targeting unmapped register addresses.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0069",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0070",
+      "started_at": "2026-07-07T18:52:44.569291+08:00",
+      "completed_at": "2026-07-07T18:53:19.804409+08:00",
+      "elapsed_seconds": 35.25,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:52:44.573807+08:00",
+        "completed_at": "2026-07-07T18:53:19.803408+08:00",
+        "elapsed_seconds": 35.21899999999732,
+        "input_tokens": 20828,
+        "output_tokens": 4579,
+        "total_tokens": 25407,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0070",
+        "has_finding": true,
+        "finding": {
+          "summary": "Bypass of register lock check allows unauthorized read access to fuse_rdata_i via unsafe default assignment.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "violation",
+              "description": "rdata is assigned fuse_rdata_i prior to the case statement. The lock check (reglk_ctrl_i[6]) is only enforced at offset 4. For undefined offsets, rdata is only cleared if fuse_addr_o <= 110. An attacker can set fuse_addr_o > 110 to leak fuse_rdata_i without a lock check.",
+              "supports_claim": "Shows the exact source code logic that bypasses the read-lock permission check for sensitive fuse data."
+            }
+          ],
+          "reasoning_summary": "The module pkt_wrapper attempts to protect fuse_rdata_i using reglk_ctrl_i[6] when read at its designated offset (4). However, an unsafe pre-assignment of rdata to fuse_rdata_i coupled with an incomplete clearing condition in the default case (only clearing if fuse_addr_o <= 110) allows an attacker to bypass the lock. By arbitrarily setting fuse_addr_o > 110 and reading from an unmapped address offset, the attacker causes the default case to fall through, leaking the protected fuse_rdata_i.",
+          "security_impact": "Unauthorized read access to potentially sensitive fuse data, compromising device security, cryptographic keys, or proprietary configuration.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0070",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0073",
+      "started_at": "2026-07-07T18:53:19.804409+08:00",
+      "completed_at": "2026-07-07T18:53:49.701163+08:00",
+      "elapsed_seconds": 29.889999999999418,
+      "llm": {
+        "llm_calls": 1,
+        "status": "failed",
+        "error": "1 validation error for LLMChainAnalysis\nfinding.evidence.2.evidence_role\n  Input should be 'access_entry', 'permission_state', 'guard_logic', 'protected_resource', 'lifecycle_behavior', 'debug_or_test_control', 'violation' or 'impact' [type=literal_error, input_value='unsafe_debug_behavior', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/literal_error",
+        "started_at": "2026-07-07T18:53:19.805409+08:00",
+        "completed_at": "2026-07-07T18:53:49.701163+08:00",
+        "elapsed_seconds": 29.889999999999418,
+        "input_tokens": 25778,
+        "output_tokens": 3515,
+        "total_tokens": 29293,
+        "token_usage_source": "api"
+      },
+      "status": "llm_failed"
+    },
+    {
+      "chain_id": "CHAIN-0074",
+      "started_at": "2026-07-07T18:53:49.701163+08:00",
+      "completed_at": "2026-07-07T18:54:23.409858+08:00",
+      "elapsed_seconds": 33.70299999999406,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:53:49.702162+08:00",
+        "completed_at": "2026-07-07T18:54:23.409858+08:00",
+        "elapsed_seconds": 33.70299999999406,
+        "input_tokens": 34420,
+        "output_tokens": 3146,
+        "total_tokens": 37566,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0074",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The chain context shows unused AXI protocol signals (such as 'lock', 'burst', 'cache', and 'prot') being tied off to 0 for modules operating as AXI-Lite interfaces. Tying off the 'lock' signal to 0 is a standard adaptation because the AXI-Lite protocol does not support locked/exclusive accesses. While the 'prot' protection signal is also zeroed, access control is not bypassed; custom sideband security signals ('acct_ctrl_i' based on privilege level and 'reglk_ctrl_i') are explicitly passed into the peripheral wrappers to enforce privilege and lock state."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0074",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0077",
+      "started_at": "2026-07-07T18:54:23.409858+08:00",
+      "completed_at": "2026-07-07T18:54:50.727196+08:00",
+      "elapsed_seconds": 27.328000000008615,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:54:23.415857+08:00",
+        "completed_at": "2026-07-07T18:54:50.722201+08:00",
+        "elapsed_seconds": 27.297000000005937,
+        "input_tokens": 34507,
+        "output_tokens": 2526,
+        "total_tokens": 37033,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0077",
+        "has_finding": true,
+        "finding": {
+          "summary": "AXI protection signals (`prot`) for critical security peripherals (PLIC, RSA, RNG, AES) are hardcoded to zero, dropping privilege and security state information.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The `aw_prot` signal for the PLIC master interface is hardcoded to `'0`, stripping the AXI transaction of its protection state.",
+              "supports_claim": "Shows that AXI write transactions to the PLIC will not carry dynamic privilege or security information."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "violation",
+              "description": "The AXI read and write protection signals (`aw.prot` and `ar.prot`) for the RSA peripheral are tied to `'0`.",
+              "supports_claim": "Demonstrates the failure to propagate protection state to the cryptographic RSA module."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "The AXI read and write protection signals (`aw.prot` and `ar.prot`) for the RNG peripheral are tied to `'0`.",
+              "supports_claim": "Demonstrates the failure to propagate protection state to the cryptographic RNG module."
+            },
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "violation",
+              "description": "The AXI read and write protection signals (`aw.prot` and `ar.prot`) for the AES0 peripheral are tied to `'0`.",
+              "supports_claim": "Demonstrates the failure to propagate protection state to the cryptographic AES module."
+            }
+          ],
+          "reasoning_summary": "The RTL design explicitly hardcodes AXI protection signals (`aw_prot` and `ar_prot`) to zero for multiple sensitive interfaces, including the Platform-Level Interrupt Controller (PLIC) and several cryptographic components (RSA, RNG, AES). The `prot` signals typically indicate the privilege level (e.g., User vs. Privileged) and security state (e.g., Secure vs. Non-Secure) of the transaction initiator. By tying these signals to zero, the processor's dynamic privilege and security states are lost on the bus. This prevents downstream target peripherals from properly enforcing access controls, potentially allowing unprivileged or unauthorized execution environments to access critical security assets.",
+          "security_impact": "Downstream peripherals cannot enforce privilege-based or secure/non-secure access controls, which may allow unprivileged attackers to read/write sensitive cryptographic keys or reconfigure system-level interrupt controllers.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The SoC level memory protection unit or access control might be managed centrally elsewhere on the bus (e.g., a central firewall) that does not rely on AXI `prot` bits, although tying them off remains an unsafe practice for defense-in-depth."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0077",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0078",
+      "started_at": "2026-07-07T18:54:50.727196+08:00",
+      "completed_at": "2026-07-07T18:55:43.703499+08:00",
+      "elapsed_seconds": 52.96899999999732,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:54:50.728196+08:00",
+        "completed_at": "2026-07-07T18:55:43.698504+08:00",
+        "elapsed_seconds": 52.96899999999732,
+        "input_tokens": 32946,
+        "output_tokens": 5898,
+        "total_tokens": 38844,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0078",
+        "has_finding": true,
+        "finding": {
+          "summary": "AXI-Lite protection (`prot`) signals are improperly tied to zero, stripping the security and privilege metadata of incoming requests.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "Ties off `aw_prot` to '0 for the PLIC master interface, incorrectly assuming it is unused by AXI-Lite.",
+              "supports_claim": "Demonstrates the loss of protection metadata (Secure/Privileged state) for accesses to the PLIC."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "Ties off both `aw.prot` and `ar.prot` to '0 for `rst_axi_req`, removing privilege information.",
+              "supports_claim": "Confirms a systemic issue where protection bits are discarded during AXI-Lite handling."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "violation",
+              "description": "Ties off `aw.prot` and `ar.prot` to '0 for `rsa_axi_req` (RSA peripheral).",
+              "supports_claim": "Shows that sensitive cryptographic peripherals (RSA) receive forged Secure/Unprivileged access metadata."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "Ties off `aw.prot` and `ar.prot` to '0 for `rng_axi_req` (RNG peripheral).",
+              "supports_claim": "Extends the access-control bypass vulnerability to the Random Number Generator peripheral."
+            },
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "violation",
+              "description": "Ties off `aw.prot` and `ar.prot` to '0 for `aes0_axi_req` (AES peripheral).",
+              "supports_claim": "Extends the access-control bypass vulnerability to the AES peripheral."
+            }
+          ],
+          "reasoning_summary": "The RTL designer incorrectly commented that AXI-Lite does not use certain signals and subsequently tied off the `prot` (Protection) signals to '0 for multiple peripheral requests (PLIC, RSA, RNG, AES, etc.). In the AMBA AXI/AXI-Lite standard, the `prot` signals are strictly required for security; setting them to '0 explicitly encodes the access as 'Secure' and 'Unprivileged'. This strips the true security identity of the initiator, elevating non-secure transactions to secure transactions, allowing attackers to bypass peripheral-level TrustZone or privilege access controls.",
+          "security_impact": "High. An untrusted, Non-Secure master can access Secure-only peripheral registers (e.g., cryptographic keys in AES/RSA) because the interconnect forcefully sets the AXI Secure bit (prot[1] = 0). Conversely, legitimate privileged accesses are downgraded to unprivileged (prot[0] = 0), potentially causing denial of service for trusted software.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "There is no missing evidence for the tie-off itself. The actual exploitability depends on whether the instantiated peripherals (AES, RNG, RSA, PLIC) actively evaluate the `prot` signals for their internal register firewalls."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0078",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0079",
+      "started_at": "2026-07-07T18:55:43.703499+08:00",
+      "completed_at": "2026-07-07T18:56:43.982819+08:00",
+      "elapsed_seconds": 60.28100000000268,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:55:43.705499+08:00",
+        "completed_at": "2026-07-07T18:56:43.982819+08:00",
+        "elapsed_seconds": 60.28100000000268,
+        "input_tokens": 36966,
+        "output_tokens": 6413,
+        "total_tokens": 43379,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0079",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The provided context shows standard AXI-to-AXI-Lite protocol adaptation (tying off unused AXI signals like aw_prot, aw_id, etc. to 0) and the propagation of reset and sideband access control signals (acct_ctrl_i, reglk_ctrl_i) to various cryptographic and peripheral wrappers. There is no concrete evidence of missing guards, bypassed privilege checks, or insecure reset behavior. The tying off of 'prot' signals is safe here because access control is handled explicitly via the dedicated sideband 'acct_ctrl' signals."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0079",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0080",
+      "started_at": "2026-07-07T18:56:43.982819+08:00",
+      "completed_at": "2026-07-07T18:59:01.121275+08:00",
+      "elapsed_seconds": 137.14100000000326,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:56:43.984817+08:00",
+        "completed_at": "2026-07-07T18:59:01.119277+08:00",
+        "elapsed_seconds": 137.14100000000326,
+        "input_tokens": 15426,
+        "output_tokens": 18309,
+        "total_tokens": 33735,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0080",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing debug mode guard on the HMAC inner key (ikey_hash) exposes sensitive cryptographic state to debuggers.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "violation",
+              "description": "While 'key' and 'okey_hash' are safely zeroed out when 'debug_mode_i' is active, 'ikey_hash' lacks this ternary guard and remains exposed in debug mode.",
+              "supports_claim": "Provides explicit source-code evidence that a sensitive cryptographic signal is missing the debug mode protection applied to sibling key signals."
+            }
+          ],
+          "reasoning_summary": "The HMAC wrapper implements a debug protection mechanism that zeros out sensitive key material ('key' and 'okey_hash') when the system is in debug mode ('debug_mode_i'). This is meant to prevent an attacker with JTAG/debug access from extracting the HMAC secret. However, the 'ikey_hash' signal (which holds the inner padded key state) is assigned directly without checking 'debug_mode_i'. This omission allows an attacker to read out 'ikey_hash' via the debug interface, trivially compromising the cryptographic security of the HMAC module by revealing half of the derived key state.",
+          "security_impact": "High. An attacker with debug access can extract the HMAC inner key, allowing them to forge authentication tags or recover the original secret key.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0080",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0083",
+      "started_at": "2026-07-07T18:59:01.121275+08:00",
+      "completed_at": "2026-07-07T18:59:24.273136+08:00",
+      "elapsed_seconds": 23.155999999988126,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:59:01.124273+08:00",
+        "completed_at": "2026-07-07T18:59:24.270134+08:00",
+        "elapsed_seconds": 23.140999999988708,
+        "input_tokens": 31908,
+        "output_tokens": 2855,
+        "total_tokens": 34763,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0083",
+        "has_finding": true,
+        "finding": {
+          "summary": "The register lock memory (reglk_mem) can be completely cleared via the jtag_unlock debug signal or a soft reset (rst_9), allowing an attacker to bypass lock protections and compromise access controls.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "protected_resource",
+              "description": "Defines the reglk_mem array, which stores the system's lock values and drives the reglk_ctrl_o lock signals.",
+              "supports_claim": "The register lock state is the core resource that enforces configuration immutability."
+            },
+            {
+              "snippet_id": "SNIP-0012",
+              "evidence_role": "debug_or_test_control",
+              "description": "The procedural block resets all elements of reglk_mem to '0' when jtag_unlock is asserted or rst_9 is triggered, clearing the locks.",
+              "supports_claim": "Demonstrates an unsafe debug/reset condition that overrides and destroys the secure lock states."
+            },
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "guard_logic",
+              "description": "Shows how reglk_ctrl values are used as guards to prevent writes and mask reads for the access control memory (acct_mem).",
+              "supports_claim": "Because the locks can be cleared via debug/reset, these guard checks can be entirely bypassed, allowing unauthorized access."
+            }
+          ],
+          "reasoning_summary": "The reglk_wrapper module contains a critical vulnerability where the register lock states (reglk_mem) are cleared to zero upon the assertion of a debug signal (jtag_unlock) or a specific reset (rst_9). Since these lock states (reglk_ctrl) are relied upon by other peripherals (like acct_wrapper) to prevent unauthorized writes and mask sensitive reads, an attacker who can trigger the JTAG unlock or soft reset will bypass all system lock protections. This allows them to read previously protected information or alter access control policies.",
+          "security_impact": "An attacker with JTAG access or the ability to trigger a peripheral reset can permanently unlock all system registers, leading to a complete compromise of SoC peripheral access control and confidentiality.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0083",
+        "status": "discarded",
+        "discard_reason": "missing_violation_evidence",
+        "invalid_snippet_ids": []
+      },
+      "status": "discarded"
+    },
+    {
+      "chain_id": "CHAIN-0084",
+      "started_at": "2026-07-07T18:59:24.273136+08:00",
+      "completed_at": "2026-07-07T18:59:36.432425+08:00",
+      "elapsed_seconds": 12.15700000000652,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:59:24.274134+08:00",
+        "completed_at": "2026-07-07T18:59:36.431426+08:00",
+        "elapsed_seconds": 12.15700000000652,
+        "input_tokens": 8198,
+        "output_tokens": 1270,
+        "total_tokens": 9468,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0084",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The source snippet shows routine tie-offs of unused AXI full signals (such as burst, lock, cache, and prot) to '0 for an AXI-lite interface. There is no evidence that this bypasses security controls or creates a vulnerability, as standard AXI-lite protocol often ignores or uses default values for these fields."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0084",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0085",
+      "started_at": "2026-07-07T18:59:36.432425+08:00",
+      "completed_at": "2026-07-07T19:00:38.141056+08:00",
+      "elapsed_seconds": 61.70299999999406,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T18:59:36.432425+08:00",
+        "completed_at": "2026-07-07T19:00:38.138057+08:00",
+        "elapsed_seconds": 61.70299999999406,
+        "input_tokens": 2289,
+        "output_tokens": 1691,
+        "total_tokens": 3980,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0085",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardware boot configuration is bypassed due to a hardcoded ternary operator unconditionally assigning the Linux boot ROM data.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The assignment for `rom_rdata` uses a ternary operator based on `ariane_boot_sel_i`, but returns `rom_rdata_linux` for both the true and false conditions.",
+              "supports_claim": "Provides direct evidence that the boot selection pin is ignored and the Linux boot ROM is permanently selected."
+            }
+          ],
+          "reasoning_summary": "The hardware pin `ariane_boot_sel_i` is intended to select the boot ROM data (e.g., switching between Linux and baremetal modes, as indicated by the comment and the existence of `rom_rdata_bm`). However, the ternary assignment unconditionally routes `rom_rdata_linux` to `rom_rdata`. This completely bypasses the hardware boot control logic and forces the core to use the Linux boot ROM, disabling intended baremetal or debug/test boot flows.",
+          "security_impact": "Bypassing hardware boot configuration controls can lock out test/debug modes (denial of service for testability) or force an unintended boot sequence, violating the device's intended lifecycle or physical configuration state.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "While this is a clear hardware control bypass, whether this constitutes a critical security vulnerability versus a functional defect depends on if baremetal boot is required for secure provisioning or testing. Regardless, it is a definitive bypass of a control signal."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0085",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0089",
+      "started_at": "2026-07-07T19:00:38.142057+08:00",
+      "completed_at": "2026-07-07T19:01:03.770827+08:00",
+      "elapsed_seconds": 25.625,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T19:00:38.143056+08:00",
+        "completed_at": "2026-07-07T19:01:03.768826+08:00",
+        "elapsed_seconds": 25.625,
+        "input_tokens": 8222,
+        "output_tokens": 2762,
+        "total_tokens": 10984,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0089",
+        "has_finding": true,
+        "finding": {
+          "summary": "AXI protection signals for the RSA peripheral are hardcoded to 0, improperly escalating all requests to 'Secure' state.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The AXI read and write protection signals (aw.prot and ar.prot) are statically assigned to '0.",
+              "supports_claim": "Assigning '0 to AXI prot signals forces the Secure bit (PROT[1]) to 0, which incorrectly marks all transactions as Secure regardless of the master's actual privilege or security state."
+            }
+          ],
+          "reasoning_summary": "The snippet hardcodes `rsa_axi_req.aw.prot` and `rsa_axi_req.ar.prot` to `'0`. According to the AXI specification, PROT[1] determines the security state, where 0 indicates a Secure access and 1 indicates a Non-secure access. Hardcoding these to 0 forces all transactions to the RSA peripheral to appear as Secure. If the peripheral enforces security checks based on the `prot` signal, this hardcoding will bypass those protections, allowing non-secure components to access sensitive cryptographic resources.",
+          "security_impact": "Non-secure masters could bypass isolation boundaries (e.g., TrustZone) to access, read, or modify sensitive cryptographic keys and operations in the RSA peripheral.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact security policy of the RSA slave peripheral is not shown, but hardcoding AXI PROT to Secure on a cryptographic block's interface is structurally insecure and a known anti-pattern."
+        },
+        "no_finding_reason": ""
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0089",
+        "status": "accepted",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "accepted"
+    },
+    {
+      "chain_id": "CHAIN-0090",
+      "started_at": "2026-07-07T19:01:03.770827+08:00",
+      "completed_at": "2026-07-07T19:01:14.181494+08:00",
+      "elapsed_seconds": 10.422000000005937,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T19:01:03.771825+08:00",
+        "completed_at": "2026-07-07T19:01:14.180498+08:00",
+        "elapsed_seconds": 10.422000000005937,
+        "input_tokens": 8085,
+        "output_tokens": 964,
+        "total_tokens": 9049,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0090",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The snippet shows unused AXI signals being tied to zero (including aw.prot and ar.prot) to bridge to an AXI-lite interface. Without additional context indicating that these signals are maliciously manipulated, misrouted, or incorrectly elevate privilege for an untrusted master, tying off unused protocol signals to a default state ('0) is a standard design practice and does not constitute a clear permission-related vulnerability in this context."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0090",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    },
+    {
+      "chain_id": "CHAIN-0091",
+      "started_at": "2026-07-07T19:01:14.181494+08:00",
+      "completed_at": "2026-07-07T19:01:28.122812+08:00",
+      "elapsed_seconds": 13.937000000005355,
+      "llm": {
+        "llm_calls": 1,
+        "status": "ok",
+        "error": "",
+        "started_at": "2026-07-07T19:01:14.182494+08:00",
+        "completed_at": "2026-07-07T19:01:28.122812+08:00",
+        "elapsed_seconds": 13.937000000005355,
+        "input_tokens": 8344,
+        "output_tokens": 1393,
+        "total_tokens": 9737,
+        "token_usage_source": "api"
+      },
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0091",
+        "has_finding": false,
+        "finding": null,
+        "no_finding_reason": "The snippet shows standard AXI tie-off assignments for unused signals (like id, len, burst, lock, cache, and prot) when converting/interfacing with an AXI-lite peripheral (SHA256). There is no evidence of a missing guard, bypassed lock, or incorrect privilege check based on this limited context."
+      },
+      "evidence_validation": {
+        "chain_id": "CHAIN-0091",
+        "status": "no_finding",
+        "discard_reason": "",
+        "invalid_snippet_ids": []
+      },
+      "status": "no_finding"
+    }
+  ]
+}

@@ -73,6 +73,7 @@ def run_chain_context_analysis(
             diagnostics["discarded_finding_count"] += 1
             _finalize_chain_row(row, chain_started)
             diagnostics["per_chain"].append(row)
+            _write_partial_diagnostics(output_dir, diagnostics)
             _print_chain_done(index, len(chains), graph_id, chain_id, row, llm_diag)
             continue
         raw_analysis = analysis.model_dump(mode="json")
@@ -91,6 +92,7 @@ def run_chain_context_analysis(
                 )
             _finalize_chain_row(row, chain_started)
             diagnostics["per_chain"].append(row)
+            _write_partial_diagnostics(output_dir, diagnostics)
             _print_chain_done(index, len(chains), graph_id, chain_id, row, llm_diag)
             continue
         finding, ev_diag = validate_chain_finding(
@@ -121,6 +123,7 @@ def run_chain_context_analysis(
             )
         _finalize_chain_row(row, chain_started)
         diagnostics["per_chain"].append(row)
+        _write_partial_diagnostics(output_dir, diagnostics)
         _print_chain_done(index, len(chains), graph_id, chain_id, row, llm_diag)
     diagnostics["final_finding_count"] = len(findings)
     diagnostics["raw_llm_finding_count"] = len(raw_llm_findings)
@@ -151,6 +154,17 @@ def _now_iso() -> str:
 def _finalize_chain_row(row: dict[str, Any], started: float) -> None:
     row["completed_at"] = _now_iso()
     row["elapsed_seconds"] = time.monotonic() - started
+
+
+def _write_partial_diagnostics(output_dir: str | Path, diagnostics: dict[str, Any]) -> None:
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    partial = dict(diagnostics)
+    partial["completed_at"] = _now_iso()
+    (out / "module3B_analysis_diagnostics.partial.json").write_text(
+        json.dumps(partial, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _raw_finding_record(

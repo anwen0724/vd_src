@@ -18,7 +18,9 @@ def analyze_chain_plain_json(chat_model: Any, prompt: str) -> tuple[LLMChainAnal
     diagnostics: dict[str, Any] = {
         "llm_calls": 1,
         "status": "not_started",
+        "failure_stage": "",
         "error": "",
+        "raw_response_excerpt": "",
         "started_at": started_at,
         "completed_at": "",
         "elapsed_seconds": 0.0,
@@ -29,18 +31,65 @@ def analyze_chain_plain_json(chat_model: Any, prompt: str) -> tuple[LLMChainAnal
     }
     try:
         raw = chat_model.invoke([HumanMessage(content=user_prompt)])
-        content = getattr(raw, "content", raw)
-        diagnostics.update(_extract_token_usage(raw, user_prompt, str(content)))
-        payload = _extract_json_object(str(content))
-        diagnostics["status"] = "ok"
-        return LLMChainAnalysis.model_validate(payload), diagnostics
     except Exception as exc:  # pragma: no cover - provider exceptions vary
         diagnostics["status"] = "failed"
+        diagnostics["failure_stage"] = "api_call"
         diagnostics["error"] = str(exc)
         return None, diagnostics
-    finally:
+
+    content = _message_content_to_text(getattr(raw, "content", raw))
+    diagnostics["raw_response_excerpt"] = content[:4000]
+    diagnostics.update(_extract_token_usage(raw, user_prompt, content))
+
+    try:
+        payload = _extract_json_object(content)
+    except Exception as exc:
+        diagnostics["status"] = "failed"
+        diagnostics["failure_stage"] = "json_extract"
+        diagnostics["error"] = str(exc)
         diagnostics["completed_at"] = _now_iso()
         diagnostics["elapsed_seconds"] = time.monotonic() - started
+        return None, diagnostics
+
+    try:
+        analysis = LLMChainAnalysis.model_validate(payload)
+    except Exception as exc:
+        diagnostics["status"] = "failed"
+        diagnostics["failure_stage"] = "schema_validate"
+        diagnostics["error"] = str(exc)
+        diagnostics["completed_at"] = _now_iso()
+        diagnostics["elapsed_seconds"] = time.monotonic() - started
+        return None, diagnostics
+
+    diagnostics["status"] = "ok"
+    diagnostics["completed_at"] = _now_iso()
+    diagnostics["elapsed_seconds"] = time.monotonic() - started
+    return analysis, diagnostics
+
+
+def _message_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                block_type = str(block.get("type", "")).lower()
+                if block_type in {"thinking", "reasoning"}:
+                    continue
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+                    continue
+                nested_content = block.get("content")
+                if isinstance(nested_content, str):
+                    parts.append(nested_content)
+                    continue
+            else:
+                parts.append(str(block))
+        text = "\n".join(part for part in parts if part.strip()).strip()
+        return text or str(content)
+    return str(content)
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:

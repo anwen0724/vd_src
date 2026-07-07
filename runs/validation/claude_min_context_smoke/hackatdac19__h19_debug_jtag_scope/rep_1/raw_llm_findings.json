@@ -1,0 +1,39 @@
+{
+  "graph_id": "hackatdac19__h19_debug_jtag_scope",
+  "schema_version": "0.1",
+  "description": "Unvalidated LLM finding outputs before evidence validation and filtering.",
+  "raw_llm_findings": [
+    {
+      "chain_id": "CHAIN-0125",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0125",
+        "has_finding": true,
+        "finding": {
+          "summary": "ndmreset_o (non-debug module reset) is directly driven from the debug control register without any visible authentication or privilege guard, and the declared ndmreset_n signal is unused, suggesting incomplete or bypassed gating logic.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "At line 477, a signal 'ndmreset_n' is declared but never assigned in the visible code. At line 479, 'ndmreset_o' is directly assigned from 'dmcontrol_q.ndmreset' with no intervening guard, privilege check, or use of the declared ndmreset_n. This means any agent that can write the debug control register field ndmreset can unconditionally assert a system-wide reset.",
+              "supports_claim": "The dead ndmreset_n declaration alongside the direct unguarded assignment to ndmreset_o indicates that gating logic (e.g., authentication, lifecycle, or active-debug-session checks) was either never implemented or was removed, leaving a security-sensitive reset output exposed."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "protected_resource",
+              "description": "ndmreset_o is a non-debug module reset output capable of resetting the entire SoC. Its value is taken directly from the debug CSR register field dmcontrol_q.ndmreset with no interposed guard logic visible in the source.",
+              "supports_claim": "A system-wide reset is a privileged, security-sensitive operation; direct exposure through a debug CSR without authentication or lifecycle gating is a permission violation."
+            }
+          ],
+          "reasoning_summary": "The snippet declares ndmreset_n but never assigns it, indicating dead or incomplete logic. The live output ndmreset_o is driven purely from the raw debug control register value. No guard, authentication check, dmactive condition, or lifecycle protection is present around this assignment. An attacker with debug CSR write access can assert a system reset unconditionally.",
+          "security_impact": "An attacker or untrusted debug initiator who can write the DMCONTROL register can trigger a full non-debug-module reset of the system, causing denial of service, erasing in-flight secure state, or disrupting secure boot/TEE operations.",
+          "confidence": "low",
+          "uncertainty_or_missing_evidence": "The chain has no edges and only a single narrow snippet. Guard logic could exist upstream in the DMI arbitration path or in the host interface before dmcontrol_q is updated. The ndmreset_n declaration may be an artifact of synthesis lint or an unused intermediate. Additional context around dmcontrol_q write logic and any authentication state would be needed to confirm the absence of all guards."
+        },
+        "no_finding_reason": ""
+      }
+    }
+  ]
+}

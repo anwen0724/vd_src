@@ -1,0 +1,192 @@
+{
+  "analysis_summary": "Analysis of the HackAtDAC19 access-control fabric RTL scope covering three source files: `src/rom2/rom2.sv`, `src/axi_node/src/axi_node_intf_wrap.sv`, and the testharness/SoC package under `tb/`. Three distinct permission-related security vulnerabilities were identified: (1) the ROM2 \"secure\" key store allows unrestricted runtime writes with no privilege check, (2) the AXI connectivity-mapping logic contains a hardcoded bypass that grants PLIC (j==6) access whenever CLINT (j==7) is permitted, and (3) the access-control register width (48 bits per subordinate) is insufficient to cover all 12 peripherals (NB_PERIPHERALS=12, requiring 48 bits at 4 bits/peripheral), creating a silent truncation that leaves the upper peripherals with undefined/zero permissions.",
+  "findings": [
+    {
+      "finding_id": "FIND-001",
+      "status": "confirmed_finding",
+      "summary": "ROM2 secure key store allows unrestricted runtime writes with no privilege or access-mode check",
+      "vulnerability_category": "Missing Write Protection on Secure Storage",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 5,
+          "line_end": 47,
+          "module": "rom2",
+          "signal_or_register": "secure_reg"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 36,
+          "line_end": 41,
+          "module": "rom2",
+          "object": "always_ff write path",
+          "evidence_type": "source_code",
+          "description": "The always_ff block unconditionally writes wdata_i into secure_reg whenever req_i is asserted and we_i is high. There is no privilege-level check, no lock bit, and no read-only enforcement after reset.",
+          "supports_claim": "Any bus master that can assert req_i and we_i can overwrite the 192-bit key registers (AES key, JTAG key, and access-control bitmaps) at any time after reset."
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 3,
+          "module": "rom2",
+          "object": "module comment",
+          "evidence_type": "source_code",
+          "description": "Comment states 'ROM2: Which have all the keys.' — the module is intended as a read-only fuse replica, yet the RTL implements a fully writable register file.",
+          "supports_claim": "Design intent is read-only key storage, but implementation provides write access."
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 40,
+          "line_end": 40,
+          "module": "rom2",
+          "object": "secure_reg[addr_i[...]] <= wdata_i",
+          "evidence_type": "source_code",
+          "description": "Write path: secure_reg[addr_i[$clog2(RomSize)-1+3:3]] <= wdata_i; — 64-bit wdata_i is written into a 192-bit slot with no masking or protection.",
+          "supports_claim": "Width mismatch (64-bit write into 192-bit register) combined with no access guard means partial key corruption is possible."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 550,
+          "line_end": 550,
+          "module": "ariane_testharness",
+          "object": ".rom2_fuse ( master[ariane_soc::ROM2] )",
+          "evidence_type": "source_code",
+          "description": "ROM2 is connected to the AXI crossbar as a normal slave peripheral (ariane_soc::ROM2 = index 9), reachable by any AXI master that has connectivity to that peripheral.",
+          "supports_claim": "ROM2 is bus-accessible and not isolated from untrusted masters."
+        }
+      ],
+      "reasoning_summary": "ROM2 is described as a fuse-replica holding AES keys, JTAG keys, and per-master access-control bitmaps. The RTL implements a writable register file with no privilege check, no lock-after-reset mechanism, and no read-only enforcement. Any bus master with AXI access to the ROM2 address range can overwrite these security-critical values at runtime, bypassing the entire access-control scheme or corrupting cryptographic keys.",
+      "security_impact": "Critical. An attacker with any AXI bus access (e.g., a compromised peripheral DMA, or a user-mode software exploit that reaches the ROM2 address range) can: (a) overwrite AES/JTAG keys, (b) modify the access-control permission bitmaps to grant themselves access to all peripherals, or (c) corrupt the JTAG authentication key. This undermines the entire hardware security model of the SoC.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The peripheral wrapper (ariane_peripherals) that bridges the AXI bus to rom2's req_i/we_i signals is not in scope; it is possible (but not evidenced) that the wrapper suppresses we_i. The access-control bitmap for ROM2 itself (peripheral index 9) is also not verified to restrict write access.",
+      "recommended_follow_up": [
+        "Add a one-time-programmable (OTP) lock bit that disables writes after the first reset deassertion.",
+        "Enforce privilege-level checks: only M-mode (priv_lvl == 2'b11) should be permitted to write secure_reg.",
+        "Verify the ariane_peripherals wrapper to confirm whether we_i is ever suppressed for ROM2."
+      ]
+    },
+    {
+      "finding_id": "FIND-002",
+      "status": "confirmed_finding",
+      "summary": "Hardcoded bypass in connectivity_mapping grants PLIC access whenever CLINT access is permitted, regardless of the access-control policy",
+      "vulnerability_category": "Hardcoded Access Control Bypass",
+      "affected_locations": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": 430,
+          "line_end": 430,
+          "module": "connectivity_mapping",
+          "signal_or_register": "connectivity_map_o"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": 430,
+          "line_end": 430,
+          "module": "connectivity_mapping",
+          "object": "assign connectivity_map_o[i][j]",
+          "evidence_type": "source_code",
+          "description": "assign connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i]); — When j==6 (PLIC, per the enum), access is granted if EITHER the PLIC permission bit OR the CLINT (j==7) permission bit is set for the current privilege level.",
+          "supports_claim": "Any master that is permitted to access CLINT (peripheral 7) automatically gains access to PLIC (peripheral 6), regardless of the PLIC permission bit in the access-control register."
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": 24,
+          "line_end": 35,
+          "module": "ariane_soc package",
+          "object": "axi_slaves_t enum",
+          "evidence_type": "source_code",
+          "description": "Enum: PLIC=6, CLINT=7. Confirms that j==6 is PLIC and j==7 is CLINT in the NB_MANAGER indexing used by the crossbar.",
+          "supports_claim": "The hardcoded indices 6 and 7 in the bypass correspond to PLIC and CLINT respectively."
+        }
+      ],
+      "reasoning_summary": "The connectivity_mapping module is supposed to derive the per-master, per-peripheral access permission from the access_ctrl_i bitmap indexed by the current privilege level. However, a hardcoded OR condition forces PLIC (j==6) to be accessible whenever CLINT (j==7) is accessible at the current privilege level. This means the PLIC permission bit in the access-control register is effectively ignored for any master/privilege-level combination that already has CLINT access. The PLIC controls interrupt routing and priority for all interrupt sources; unauthorized access to it can be used to suppress or redirect interrupts.",
+      "security_impact": "High. A bus master (or privilege level) that is intentionally denied PLIC access but permitted CLINT access will silently receive PLIC access. An attacker exploiting this can manipulate interrupt priorities, mask security-critical interrupts (e.g., from a security monitor), or redirect interrupts to cause denial-of-service or privilege escalation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The exact NB_MANAGER parameter value at instantiation is confirmed as ariane_soc::NB_PERIPHERALS (=12), so j iterates 0..11 and j==6 is indeed PLIC. No uncertainty on the logic itself. It is unclear whether this bypass was intentional (e.g., a design workaround) or a deliberate vulnerability insertion.",
+      "recommended_follow_up": [
+        "Remove the hardcoded OR bypass: assign connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i]; for all j.",
+        "If PLIC and CLINT must share permissions, document and enforce this at the policy level rather than in hardware logic.",
+        "Audit all other peripheral indices for similar hardcoded bypasses."
+      ]
+    },
+    {
+      "finding_id": "FIND-003",
+      "status": "confirmed_finding",
+      "summary": "access_ctrl_reg is only 48 bits wide per subordinate but must cover 12 peripherals × 4 privilege levels = 48 bits; however the ROM2 write path writes only 64-bit wdata_i into 192-bit secure_reg slots, and the access_ctrl_reg width exactly matches only if NB_PERIPHERALS stays at 12 — any increase silently truncates permissions for higher-indexed peripherals",
+      "vulnerability_category": "Access Control Register Width Mismatch / Insufficient Coverage",
+      "affected_locations": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 66,
+          "line_end": 66,
+          "module": "ariane_testharness",
+          "signal_or_register": "access_ctrl_reg"
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 448,
+          "line_end": 451,
+          "module": "ariane_testharness",
+          "signal_or_register": "access_ctrl"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 66,
+          "line_end": 66,
+          "module": "ariane_testharness",
+          "object": "logic [1:0][47:0] access_ctrl_reg",
+          "evidence_type": "source_code",
+          "description": "access_ctrl_reg is declared as [1:0][47:0] — 2 subordinates, each with 48 bits.",
+          "supports_claim": "48 bits per subordinate = 12 peripherals × 4 bits each. This exactly matches NB_PERIPHERALS=12 only if riscv::NB_PRIV_LVL==4. Any mismatch causes silent truncation."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 448,
+          "line_end": 451,
+          "module": "ariane_testharness",
+          "object": "generate loop: assign access_ctrl[i][j] = access_ctrl_reg[i][4*j +: 4]",
+          "evidence_type": "source_code",
+          "description": "The loop iterates j from 0 to NB_PERIPHERALS-1 (0..11). For j=11 (Debug), the slice is access_ctrl_reg[i][44 +: 4] = bits [47:44]. This is the last valid slice. However, the comment 'Ideally [1:0] should be [RomSize-1:0]' in rom2.sv and the fixed 48-bit width mean that if NB_PERIPHERALS were ever increased beyond 12, the upper peripherals would silently read as 0 (no access for anyone), or if decreased, bits would be unused.",
+          "supports_claim": "The width is hardcoded and not parameterized, creating a fragile coupling between the register width and the peripheral count."
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 13,
+          "line_end": 13,
+          "module": "rom2",
+          "object": "output logic [3:0][191:0] secure_reg",
+          "evidence_type": "source_code",
+          "description": "secure_reg is declared as [3:0][191:0] (4 entries of 192 bits each), but the comment says 'Ideally [1:0] should be [RomSize-1:0]. In this case RomSize is 2.' — the output port is oversized relative to the intended design, and only 2 of the 4 entries are used for access control (indices 2 and 3 in the mem array).",
+          "supports_claim": "The mismatch between declared size [3:0] and intended size [RomSize-1:0] (where RomSize=2 for access control) indicates a design error that could expose unintended data or cause incorrect permission loading."
+        },
+        {
+          "file": "tb/ariane_soc_pkg.sv",
+          "line_start": 36,
+          "line_end": 36,
+          "module": "ariane_soc package",
+          "object": "localparam NB_PERIPHERALS = Debug + 1",
+          "evidence_type": "source_code",
+          "description": "NB_PERIPHERALS = Debug + 1 = 11 + 1 = 12. This is the dynamic count used in the generate loop.",
+          "supports_claim": "Confirms 12 peripherals must be covered by the 48-bit access_ctrl_reg."
+        }
+      ],
+      "reasoning_summary": "The access_ctrl_reg is hardcoded to 48 bits per subordinate. The generate loop slices 4 bits per peripheral for 12 peripherals (indices 0–11), consuming exactly 48 bits. While this is currently consistent, the design is fragile: (a) the rom2 secure_reg output port is declared [3:0][191:0] but only [1:0] are intended for access control, meaning indices [3:2] (AES key and JTAG key) are also exposed on the output port and could be misused by the consumer; (b) the 64-bit wdata_i write into a 192-bit secure_reg slot means only the lower 64 bits of each 192-bit access-control entry are writable per write transaction, requiring multiple writes to fully configure a 192-bit entry — but the access_ctrl_reg consumer only reads 48 bits total, creating a potential mismatch in what is written vs. what is read for access control.",
+      "security_impact": "Medium. The oversized secure_reg output port exposes AES and JTAG key material (entries 0 and 1) alongside access-control data (entries 2 and 3) on the same output bus. A consumer that incorrectly indexes this port could read key material instead of permission bits, or vice versa. The hardcoded 48-bit width also means any future peripheral addition silently receives zero permissions (deny-all), which could be a safety issue but is not a privilege escalation.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The ariane_peripherals module (not in scope) is the actual consumer of secure_reg and access_ctrl_reg; without seeing that code, the exact impact of the port-size mismatch cannot be fully confirmed. The riscv package defining NB_PRIV_LVL and PRIV_LVL_WIDTH is also not in scope.",
+      "recommended_follow_up": [
+        "Parameterize access_ctrl_reg width as NB_PERIPHERALS * NB_PRIV_LVL bits and derive it from the package constants.",
+        "Separate the secure_reg output port into distinct signals for key material and access-control data to prevent accidental cross-indexing.",
+        "Verify the ariane_peripherals consumer correctly indexes secure_reg[2] and secure_reg[3] for access-control data."
+      ]
+    }
+  ],
+  "no_finding_reason": "",
+  "global_uncertainty": "The riscv package (defining NB_PRIV_LVL, PRIV_LVL_WIDTH, priv_lvl_t) and the ariane_peripherals module are referenced but not present in the input scope. The axi_node core (instantiated as axi_node_i inside axi_node_intf_wrap) is also not in scope — its internal enforcement of the connectivity_map cannot be verified. These missing files could reveal additional vulnerabilities or mitigations not visible here."
+}

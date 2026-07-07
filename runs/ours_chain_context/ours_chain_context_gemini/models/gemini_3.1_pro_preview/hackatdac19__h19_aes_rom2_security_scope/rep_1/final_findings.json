@@ -1,0 +1,826 @@
+{
+  "graph_id": "hackatdac19__h19_aes_rom2_security_scope",
+  "schema_version": "0.1",
+  "findings": [
+    {
+      "finding_id": "F-001",
+      "status": "confirmed_finding",
+      "summary": "The cryptographic key used by the AES wrapper is directly exposed to software via memory-mapped read registers, allowing unauthorized extraction of sensitive key material.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "signal_or_register": "ct"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 456,
+          "line_end": 472,
+          "module": "ariane_peripherals",
+          "object": "i_aes_wrapper",
+          "evidence_type": "protected_resource",
+          "description": "The AES wrapper is instantiated and connected to `key_reg_out[0]`, which represents the secret cryptographic key originating from the ROM key registers.",
+          "supports_claim": "Identifies the source of the sensitive cryptographic key fed into the AES module."
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "object": "ct",
+          "evidence_type": "violation",
+          "description": "The key input `key_in` is assigned to `key_big`. In the read logic for `external_bus_io` (offsets 16 to 21), `key_big` is directly assigned to `rdata` without any access controls or masking.",
+          "supports_claim": "Provides definitive evidence that the hardware allows reading back the unmodified secret key through normal APB register reads."
+        }
+      ],
+      "reasoning_summary": "The hardware design instantiates an AES engine and supplies it with a root/secret key from a hardware ROM/fuse array. However, the APB interface logic in `aes_wrapper.sv` maps this secret key directly to read-accessible software registers at offsets 16 through 21. Because there are no read guards or masking logic (e.g., returning zeroes for key registers), any entity capable of performing a memory read to the AES block's address space can retrieve the entire 192-bit cryptographic key.",
+      "security_impact": "High. Exposure of the root or session key completely defeats the purpose of the cryptographic module, allowing malicious software or attackers to decrypt secret data, forge ciphertexts, and bypass system security protections.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0001"
+      ]
+    },
+    {
+      "finding_id": "F-002",
+      "status": "confirmed_finding",
+      "summary": "The AES wrapper module exposes its internal cryptographic key to memory-mapped reads, leading to a sensitive readback vulnerability.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "signal_or_register": "external_bus_io"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "RomSize",
+          "evidence_type": "protected_resource",
+          "description": "The rom2 module stores root keys in a memory block and assigns them to the secure_reg output on reset.",
+          "supports_claim": "Establishes that the values routed to the peripheral are sensitive cryptographic keys."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 456,
+          "line_end": 472,
+          "module": "ariane_peripherals",
+          "object": "i_aes_wrapper",
+          "evidence_type": "access_entry",
+          "description": "The ariane_peripherals module passes key_reg_out[0] (which comes from rom2's secure_reg) directly into the key_in port of the aes_wrapper.",
+          "supports_claim": "Shows that the AES wrapper operates on the protected key."
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "object": "external_bus_io",
+          "evidence_type": "violation",
+          "description": "In aes_wrapper, key_in is assigned to key_big, which is then mapped directly to external_bus_io.rdata when reading from offsets 16 through 21 (lines 128-140).",
+          "supports_claim": "Provides concrete evidence that the hardware explicitly allows the sensitive AES key to be read back unconditionally over the external bus."
+        }
+      ],
+      "reasoning_summary": "The `aes_wrapper` module receives a 192-bit cryptographic key from `rom2` via its `key_in` port and assigns it to `key_big`. The memory-mapped read logic within `aes_wrapper` unconditionally maps APB/AXI address offsets 16 through 21 to the 32-bit slices of `key_big`, writing them to `external_bus_io.rdata`. This exposes the sensitive cryptographic key to software or any bus master without any access control or privilege checking.",
+      "security_impact": "An attacker with bus access (e.g., executing arbitrary code on the processor or controlling a DMA master) can read the cryptographic key, leading to a complete compromise of the AES encryption's confidentiality and integrity.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0002"
+      ]
+    },
+    {
+      "finding_id": "F-003",
+      "status": "confirmed_finding",
+      "summary": "Sensitive readback vulnerability in AES wrapper where the 192-bit cryptographic key is directly accessible over the memory-mapped register interface.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "signal_or_register": "ct"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "object": "ct",
+          "evidence_type": "protected_resource",
+          "description": "The AES key, represented by key_big, is derived from key_in and holds sensitive cryptographic material.",
+          "supports_claim": "Identifies the cryptographic key as a sensitive resource."
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "object": "ct",
+          "evidence_type": "violation",
+          "description": "The case statement handling external bus read requests maps addresses 16 to 21 directly to portions of key_big, allowing plaintext readback of the cryptographic key.",
+          "supports_claim": "Shows that memory-mapped reads return the sensitive key material without any access control, masking, or lock mechanism."
+        }
+      ],
+      "reasoning_summary": "The AES wrapper module exposes the 192-bit cryptographic key (`key_big`) to the APB read data bus (`external_bus_io.rdata`) via memory-mapped addresses 16 to 21. Any software or bus master with read access to the peripheral can extract the AES key, compromising the confidentiality of the encryption key. Cryptographic keys should generally be write-only or locked from software readback.",
+      "security_impact": "Loss of confidentiality for the AES cryptographic key, allowing an attacker with read access to the peripheral bus to extract the key, decrypt sensitive data, or forge encrypted messages.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0003"
+      ]
+    },
+    {
+      "finding_id": "F-004",
+      "status": "confirmed_finding",
+      "summary": "The AES wrapper exposes the secret cryptographic key and intermediate state directly on the APB read interface without any access controls.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "signal_or_register": "ct"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "object": "ct",
+          "evidence_type": "protected_resource",
+          "description": "The AES key is provided as an input 'key_in' and assigned to 'key_big'.",
+          "supports_claim": "Identifies the cryptographic key as a sensitive resource."
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "object": "ct",
+          "evidence_type": "violation",
+          "description": "The memory-mapped read logic explicitly returns chunks of the secret key ('key_big') and intermediate AES state ('inter_state') to the external bus 'external_bus_io.rdata'.",
+          "supports_claim": "Shows direct readback of sensitive key material and internal states over the APB bus without any access restriction."
+        }
+      ],
+      "reasoning_summary": "The AES wrapper receives a secret key from ROM via 'key_in'. However, the read interface of the AES wrapper directly maps the secret key ('key_big') and the intermediate AES state ('inter_state') to read data channels on the external bus. This allows any software with APB bus access to simply read out the AES key and internal states, comprising a sensitive readback vulnerability.",
+      "security_impact": "An attacker with access to the APB bus can read the secret AES key and intermediate encryption states, defeating any data confidentiality guarantees provided by the AES encryption.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0004"
+      ]
+    },
+    {
+      "finding_id": "F-005",
+      "status": "confirmed_finding",
+      "summary": "Sensitive keys (AES, JTAG, Access Control) stored in rom2 are exposed to arbitrary memory-mapped reads and writes.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "signal_or_register": "RomSize"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "RomSize",
+          "evidence_type": "violation",
+          "description": "The rom2 module allows direct read and write access to secure_reg (which holds the keys) via req_i, we_i, and rdata_o without any privilege or secure-state checks.",
+          "supports_claim": "Demonstrates missing guard logic and a sensitive readback vulnerability, as keys can be read out in plaintext."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 196,
+          "line_end": 227,
+          "module": "ariane_peripherals",
+          "object": "i_rom2",
+          "evidence_type": "access_entry",
+          "description": "The rom2 module is connected to the system AXI bus through an axi2mem wrapper, exposing it to bus masters.",
+          "supports_claim": "Shows how the unprotected keys can be accessed from the broader system via standard bus transactions."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 456,
+          "line_end": 472,
+          "module": "ariane_peripherals",
+          "object": "i_aes_wrapper",
+          "evidence_type": "impact",
+          "description": "The AES hardware wrapper uses key_reg_out[0] as its key, meaning the software-readable key is actively used for hardware encryption.",
+          "supports_claim": "Shows that critical hardware security relies on keys that can be trivially extracted by software."
+        }
+      ],
+      "reasoning_summary": "The hardware design stores highly sensitive system keys (AES, JTAG, access control) in a ROM block that copies them into software-accessible registers on reset. Because the module lacks read-back protection and privilege access checks, any master on the AXI bus can read out the plaintext keys or overwrite the access control registers.",
+      "security_impact": "Complete compromise of system security. An attacker can extract the AES key to decrypt data, extract the JTAG key to bypass debug authentication, and modify access control registers to escalate privileges.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0005"
+      ]
+    },
+    {
+      "finding_id": "F-006",
+      "status": "confirmed_finding",
+      "summary": "Unrestricted memory-mapped write access allows modification of critical system keys (AES, JTAG, access control rules).",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "signal_or_register": "RomSize"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "RomSize",
+          "evidence_type": "violation",
+          "description": "The rom2 module allows unprotected write operations (we_i) to its internal secure_reg array, which initially stores cryptographic and access control keys loaded from ROM.",
+          "supports_claim": "Demonstrates the absence of access control or privilege checks when modifying the secure registers via AXI/memory requests."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 196,
+          "line_end": 227,
+          "module": "ariane_peripherals",
+          "object": "i_rom2",
+          "evidence_type": "protected_resource",
+          "description": "Outputs of secure_reg (as key_reg_out) are continuously assigned to jtag_key and access_ctrl_reg, making these critical system permissions instantly modifiable by overwriting the registers.",
+          "supports_claim": "Establishes that secure_reg dictates sensitive boundaries like debugging authorization and peripheral access matrix."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 456,
+          "line_end": 472,
+          "module": "ariane_peripherals",
+          "object": "i_aes_wrapper",
+          "evidence_type": "protected_resource",
+          "description": "The AES encryption module takes its key_in directly from key_reg_out[0].",
+          "supports_claim": "Confirms that an attacker can dynamically change the hardware AES encryption key through unrestricted writes to rom2."
+        }
+      ],
+      "reasoning_summary": "The hardware contains an AXI-mapped module (rom2) that initializes system keys from memory upon reset. However, the module accepts write operations unconditionally, overwriting the 'secure_reg' array. Because these registers are directly wired to system-critical access control rules (access_ctrl_reg), debug authentication (jtag_key), and cryptography (AES key), any bus master can compromise the entire security architecture by simply executing writes to the key addresses.",
+      "security_impact": "High. An attacker with any bus access (such as compromised firmware running on a core) can overwrite the AES key, bypass access controls, or enable JTAG debugging, completely breaking the system's root of trust and isolation mechanisms.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "None. The RTL explicitly implements logic allowing writes to the secure_reg array and uses the contents directly for cryptographic and privilege configurations.",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0008"
+      ]
+    },
+    {
+      "finding_id": "F-007",
+      "status": "confirmed_finding",
+      "summary": "The AES wrapper exposes its secret hardware key via memory-mapped read access without any protection, allowing software to extract the hardware AES key.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 123,
+          "line_end": 149,
+          "module": "aes_wrapper",
+          "signal_or_register": "procedural_assign:129"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "RomSize",
+          "evidence_type": "protected_resource",
+          "description": "The rom2 module contains hardcoded 192-bit secret keys which are loaded into the secure_reg array on reset.",
+          "supports_claim": "Identifies the source of the sensitive cryptographic keys."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 456,
+          "line_end": 472,
+          "module": "ariane_peripherals",
+          "object": "i_aes_wrapper",
+          "evidence_type": "access_entry",
+          "description": "The ariane_peripherals module routes key_reg_out[0] (from rom2) into the i_aes_wrapper instance's key_in port.",
+          "supports_claim": "Traces the secret key from the key ROM to the AES wrapper peripheral."
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 93,
+          "module": "aes_wrapper",
+          "object": "external_bus_io",
+          "evidence_type": "permission_state",
+          "description": "Inside the aes_wrapper module, key_big is continuously assigned the value of key_in.",
+          "supports_claim": "Confirms the key_big internal signal holds the hardware secret key."
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 123,
+          "line_end": 149,
+          "module": "aes_wrapper",
+          "object": "procedural_assign:129",
+          "evidence_type": "violation",
+          "description": "The aes_wrapper directly outputs the chunks of the secret key_big to the external_bus_io.rdata bus upon read requests to specific APB addresses (cases 16 to 21).",
+          "supports_claim": "Proves the existence of an unprotected sensitive readback vulnerability where software or an attacker can read the cryptographic key."
+        }
+      ],
+      "reasoning_summary": "The hardware system stores secret keys in a ROM (fuse equivalent) and routes one of these keys to the AES wrapper for encryption operations. However, the APB interface inside the AES wrapper implements an unconditional read path that maps the secret key (key_big) directly to the read data bus (rdata). There are no access controls, privilege checks, or hardware locks to prevent a master on the APB bus from reading back the secret key in plain text.",
+      "security_impact": "Complete compromise of cryptographic material. An attacker capable of reading from the AES memory-mapped registers can extract the 192-bit secret hardware key, allowing them to decrypt sensitive data or forge encrypted data, entirely bypassing hardware cryptographic isolation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0009"
+      ]
+    },
+    {
+      "finding_id": "F-008",
+      "status": "confirmed_finding",
+      "summary": "Cryptographic key is exposed to software via memory-mapped register readback in AES wrapper.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "signal_or_register": "ct"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "object": "ct",
+          "evidence_type": "protected_resource",
+          "description": "The AES wrapper receives a 192-bit cryptographic key via the `key_in` port, which is assigned to `key_big`.",
+          "supports_claim": "Identifies the cryptographic key as a sensitive internal signal."
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 14,
+          "line_end": 159,
+          "module": "aes_wrapper",
+          "object": "ct",
+          "evidence_type": "violation",
+          "description": "The read interface in `aes_wrapper` explicitly assigns `key_big` to the memory-mapped read data (`external_bus_io.rdata`) at address indices 16 through 21.",
+          "supports_claim": "Demonstrates the direct readback vulnerability allowing software to extract the AES key."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 456,
+          "line_end": 472,
+          "module": "ariane_peripherals",
+          "object": "i_aes_wrapper",
+          "evidence_type": "access_entry",
+          "description": "The `aes_wrapper` is instantiated and connected to the system peripheral bus (`reg_bus_aes`), with its `key_in` tied to `key_reg_out[0]` from the secure ROM.",
+          "supports_claim": "Confirms the AES readback interface is accessible through system memory mapping."
+        }
+      ],
+      "reasoning_summary": "The `aes_wrapper` module implements a memory-mapped register interface. Inside its read logic block, it explicitly assigns the 192-bit AES key (`key_big`) to the read data bus (`external_bus_io.rdata`) when accessed at specific word offsets (16 to 21). This is a severe sensitive readback vulnerability, as it allows any software or bus master with read access to the peripheral bus to extract the hardware-bound cryptographic key.",
+      "security_impact": "High. An attacker or compromised software component can easily read the secret cryptographic key out of the hardware register, resulting in a full compromise of any confidentiality or integrity guarantees provided by the AES module.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0011"
+      ]
+    },
+    {
+      "finding_id": "F-009",
+      "status": "confirmed_finding",
+      "summary": "The `rom2` module, which stores sensitive cryptographic and access control keys, exposes these keys to the system bus for unrestricted read and write access without any privilege or security checks.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "signal_or_register": "RomSize"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "RomSize",
+          "evidence_type": "protected_resource",
+          "description": "The `rom2` module contains sensitive keys (AES, JTAG, access control) initialized from `mem` into `secure_reg`.",
+          "supports_claim": "Confirms the module handles highly sensitive data that requires protection from software access."
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "RomSize",
+          "evidence_type": "violation",
+          "description": "Any bus request (`req_i`) allows reading the keys to `rdata_o` and writing arbitrary values to `secure_reg` using `wdata_i` without any access control or privilege checks.",
+          "supports_claim": "Demonstrates the complete lack of guard logic, enabling unauthorized readout and modification of sensitive keys."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 196,
+          "line_end": 212,
+          "module": "ariane_peripherals",
+          "object": "i_rom2",
+          "evidence_type": "access_entry",
+          "description": "The `rom2` module is connected directly to an AXI memory interface (`axi2mem`), making the keys memory-mapped and directly accessible to system bus masters (such as the CPU).",
+          "supports_claim": "Establishes the attacker-controlled access path from the system bus to the vulnerable module."
+        }
+      ],
+      "reasoning_summary": "The `rom2` module acts as a key store, initializing `secure_reg` with sensitive keys (AES, JTAG, Access Control). It is connected to the system bus via an AXI-to-memory bridge, making it memory-mapped. The logic in `rom2` unconditionally allows any bus request (`req_i`) to read (`rdata_o`) and write (`secure_reg[...] <= wdata_i`) these keys. The complete absence of privilege or security domain checks allows any software running on the core to extract cryptographic keys or overwrite them, breaking the hardware security boundaries.",
+      "security_impact": "Untrusted software can extract secret keys (e.g., AES), compromising data confidentiality. It can also overwrite the JTAG or access control keys to escalate privileges, disable hardware protections, or permanently unlock debug access.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0012"
+      ]
+    },
+    {
+      "finding_id": "F-010",
+      "status": "confirmed_finding",
+      "summary": "The 'rom2' module exposes sensitive security configurations, including access control registers, JTAG keys, and AES keys, via a memory-mapped interface without any access control or privilege verification. Arbitrary bus masters can overwrite these configurations to escalate privileges or bypass security checks.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 28,
+          "line_end": 50,
+          "module": "rom2",
+          "signal_or_register": "state_update:34"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 6,
+          "line_end": 22,
+          "module": "rom2",
+          "object": "secure_reg",
+          "evidence_type": "protected_resource",
+          "description": "The `secure_reg` register array is initialized with critical security data, including access control permissions for masters, JTAG keys, and AES keys.",
+          "supports_claim": "Identifies the sensitive nature of the data stored in the `secure_reg` registers."
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 28,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "state_update:34",
+          "evidence_type": "violation",
+          "description": "The write logic allows any bus request (`we_i`) to overwrite `secure_reg` using `wdata_i` without verifying the privilege level of the requester or enforcing a lock mechanism.",
+          "supports_claim": "Demonstrates the lack of access controls or locking guards on the configuration registers, allowing unprivileged writes."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 196,
+          "line_end": 227,
+          "module": "ariane_peripherals",
+          "object": "i_rom2",
+          "evidence_type": "impact",
+          "description": "The outputs from `secure_reg` (`key_reg_out`) are directly assigned to the system's `access_ctrl_reg` and `jtag_key` signals.",
+          "supports_claim": "Shows that unauthorized writes directly alter system hardware permissions and security keys in real-time."
+        }
+      ],
+      "reasoning_summary": "The design implements a memory-mapped 'fuse' equivalent (`rom2`) that holds access control configurations and cryptographic keys. However, the hardware allows any bus master to issue a write request and arbitrarily overwrite these critical registers because there are no privilege checks, lock bits, or write-protect mechanisms in the update logic. By writing to these addresses, an attacker can modify their own peripheral access controls, effectively disabling hardware access protections and compromising the AES and JTAG keys.",
+      "security_impact": "High. Arbitrary software or bus masters can dynamically rewrite hardware access control policies, leading to complete privilege escalation, unauthorized access to protected peripherals, and compromise of critical keys (JTAG/AES).",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0022"
+      ]
+    },
+    {
+      "finding_id": "F-011",
+      "status": "confirmed_finding",
+      "summary": "Sensitive cryptographic and access control keys are stored in bus-accessible registers without read/write access control or privilege enforcement.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 28,
+          "line_end": 50,
+          "module": "rom2",
+          "signal_or_register": "state_update:34"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 6,
+          "line_end": 22,
+          "module": "rom2",
+          "object": "secure_reg",
+          "evidence_type": "protected_resource",
+          "description": "Declares `secure_reg` memory initialized with sensitive security configurations, including JTAG keys, AES keys, and access control master policies.",
+          "supports_claim": "Confirms the target registers hold sensitive secrets and critical security states that require strict hardware protection."
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 28,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "state_update:34",
+          "evidence_type": "violation",
+          "description": "Implements the state update logic for `secure_reg` and continuous assignment for `rdata_o`. Any memory-mapped request (`req_i`) can freely read (`!we_i`) or overwrite (`we_i`) the key registers.",
+          "supports_claim": "Demonstrates a complete lack of guard logic, lock bits, or privilege checks, allowing arbitrary reads and writes from the memory bus."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 196,
+          "line_end": 227,
+          "module": "ariane_peripherals",
+          "object": "i_rom2",
+          "evidence_type": "impact",
+          "description": "Maps `key_reg_out` (which reflects `secure_reg`) directly to the system's hardware security configurations: `jtag_key`, `access_ctrl_reg`, and the AES hardware block.",
+          "supports_claim": "Shows that overwriting these registers directly alters system-level hardware enforcement mechanisms."
+        }
+      ],
+      "reasoning_summary": "The module `rom2` acts as a storage mechanism for system security keys, simulating fuses by copying initial values into the `secure_reg` flip-flops upon reset. However, it connects directly to the AXI bus interface without implementing any access control, privilege separation, or hardware locking. Consequently, any software or bus master can perform arbitrary memory mapped reads to extract secret keys (like AES and JTAG) and perform writes to alter the access control policies or tamper with system locks.",
+      "security_impact": "Complete compromise of system security boundaries. An attacker with standard bus access (such as compromised firmware or another peripheral) can extract sensitive cryptographic keys, alter access controls to elevate privileges, or maliciously replace keys to bypass JTAG authentication.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0041"
+      ]
+    },
+    {
+      "finding_id": "F-012",
+      "status": "confirmed_finding",
+      "summary": "Boot ROM contains writable logic, allowing unauthorized modification of boot code via memory-mapped accesses.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "bootrom/bootrom.sv",
+          "line_start": 249,
+          "line_end": 271,
+          "module": "bootrom",
+          "signal_or_register": "RomSize"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "bootrom/bootrom.sv",
+          "line_start": 249,
+          "line_end": 271,
+          "module": "bootrom",
+          "object": "RomSize",
+          "evidence_type": "violation",
+          "description": "The boot ROM module contains a synchronous write assignment to its memory array (`mem`) when `we_i` is asserted.",
+          "supports_claim": "Demonstrates that the supposedly read-only boot memory is implemented as a writable RAM in RTL."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 211,
+          "line_end": 234,
+          "module": "ariane_testharness",
+          "object": "rom_addr",
+          "evidence_type": "access_entry",
+          "description": "An AXI-to-memory bridge (`axi2mem`) translates AXI bus transactions and drives the `rom_we` write-enable signal.",
+          "supports_claim": "Shows that standard memory-mapped AXI write transactions can trigger writes to the ROM interface."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 238,
+          "line_end": 254,
+          "module": "ariane_testharness",
+          "object": "i_bootrom",
+          "evidence_type": "access_entry",
+          "description": "The `bootrom` module is instantiated with its `we_i` write-enable port connected directly to `rom_we`.",
+          "supports_claim": "Confirms the structural path from the AXI bus write interface directly to the boot ROM's memory update logic."
+        }
+      ],
+      "reasoning_summary": "The `bootrom` module is intended to provide strictly read-only, non-volatile memory containing initial bootloader code (root of trust). However, the RTL implementation includes an active write path where the `we_i` signal allows updating the memory array. This write-enable signal is connected to an AXI-to-memory adapter, exposing the boot ROM to memory-mapped AXI write transactions and violating the read-only protection requirement.",
+      "security_impact": "An attacker with access to issue AXI bus writes (e.g., via a compromised peripheral, DMA, or lower-privileged software) can overwrite the boot code. Upon the next system reset or boot ROM execution, the attacker's payload will execute at the highest privilege level (e.g., Machine mode), leading to a complete bypass of privilege protections and full system compromise.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0048"
+      ]
+    },
+    {
+      "finding_id": "F-013",
+      "status": "confirmed_finding",
+      "summary": "The bootrom module contains logic allowing write access to its memory array, effectively making the ROM writable and violating read-only protection.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "bootrom/bootrom.sv",
+          "line_start": 249,
+          "line_end": 271,
+          "module": "bootrom",
+          "signal_or_register": "RomSize"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "bootrom/bootrom.sv",
+          "line_start": 249,
+          "line_end": 271,
+          "module": "bootrom",
+          "object": "RomSize",
+          "evidence_type": "violation",
+          "description": "The logic block explicitly permits writing to the 'mem' array using 'wdata_i' when 'we_i' is asserted, overriding the expected read-only nature of a boot ROM.",
+          "supports_claim": "Demonstrates that the ROM data can be modified, acting as RAM rather than ROM."
+        },
+        {
+          "file": "tb/ariane_testharness.sv",
+          "line_start": 238,
+          "line_end": 254,
+          "module": "ariane_testharness",
+          "object": "i_bootrom",
+          "evidence_type": "access_entry",
+          "description": "The bootrom instance 'i_bootrom' connects the 'we_i' input to 'rom_we', which is driven by an AXI-to-memory bridge ('axi2mem'), exposing the write interface to system bus masters.",
+          "supports_claim": "Confirms the write interface is accessible and controllable from the system interconnect."
+        }
+      ],
+      "reasoning_summary": "The boot ROM is designed to store static boot code. However, the hardware logic implements a write path that allows overwriting the ROM's internal memory array if the write-enable signal (we_i) is high. The interconnect wiring shows this signal is mapped to the system's AXI bus, meaning any bus master with access to this memory region could arbitrarily modify the bootloader code.",
+      "security_impact": "An attacker or compromised peripheral with bus write access could overwrite the boot sequence. Upon reset or reboot, the system would execute the attacker's injected code at a high privilege level, completely compromising hardware root-of-trust and potentially bypassing secure boot mechanisms.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The environment analyzed includes a test harness (ariane_testharness), and it is theoretically possible the actual SoC integration prevents writes via bus interconnect firewalls or tying 'we_i' to 0. However, the module itself is inherently insecurely designed by exposing a functional write path.",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0050"
+      ]
+    },
+    {
+      "finding_id": "F-014",
+      "status": "confirmed_finding",
+      "summary": "Hardcoded access control bypass grants Manager 6 the permissions of Manager 7.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": 403,
+          "line_end": 436,
+          "module": "connectivity_mapping",
+          "signal_or_register": "access_ctrl_i"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": 403,
+          "line_end": 436,
+          "module": "connectivity_mapping",
+          "object": "access_ctrl_i",
+          "evidence_type": "violation",
+          "description": "The logic for evaluating connectivity_map_o has a hardcoded OR condition for j==6.",
+          "supports_claim": "The expression `((j==6) && access_ctrl_i[i][7][priv_lvl_i])` acts as a backdoor or privilege escalation, granting manager 6 access based on manager 7's permissions, completely bypassing manager 6's actual access control policy."
+        }
+      ],
+      "reasoning_summary": "The connectivity mapping module evaluates whether a manager (j) is allowed to access a subordinate (i) using the access_ctrl_i configuration. However, the continuous assignment includes a hardcoded rule that grants access to manager 6 whenever manager 7 is allowed access. This acts as a bypass of manager 6's own access restrictions, allowing it to inherit Manager 7's privileges.",
+      "security_impact": "Allows Manager 6 to bypass access control restrictions and interact with subordinates it shouldn't be authorized to access. This can violate data confidentiality and integrity if Manager 6 is a less trusted entity than Manager 7.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0055"
+      ]
+    },
+    {
+      "finding_id": "F-015",
+      "status": "confirmed_finding",
+      "summary": "The `rom2` module exposes sensitive keys (AES, JTAG) and access control registers to unprotected read and write operations via the system bus, allowing any bus master to extract or modify them.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "signal_or_register": "RomSize"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "RomSize",
+          "evidence_type": "protected_resource",
+          "description": "The `secure_reg` array is initialized with sensitive system keys (JTAG, AES, access control masks) on reset.",
+          "supports_claim": "Confirms the presence of sensitive cryptographic and access-control assets within the `rom2` module."
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "RomSize",
+          "evidence_type": "violation",
+          "description": "The `always_ff` block allows any bus request (`req_i`) to unconditionally read the sensitive keys into `rdata_o` or overwrite them with `wdata_i` without checking privileges, locks, or secure state.",
+          "supports_claim": "Demonstrates the complete lack of access control guards for reading and modifying sensitive system keys."
+        },
+        {
+          "file": "tb/ariane_peripherals.sv",
+          "line_start": 162,
+          "line_end": 192,
+          "module": "ariane_peripherals",
+          "object": "key_reg_out",
+          "evidence_type": "access_entry",
+          "description": "The `rom2` instance is directly connected to the system AXI bus via the `axi2mem` bridge (`i_axi2rom2`), exposing its read and write interfaces to software and bus masters.",
+          "supports_claim": "Shows that the unprotected `rom2` memory interface is accessible to software or other system components via the bus."
+        }
+      ],
+      "reasoning_summary": "The `rom2` module stores sensitive system keys (AES, JTAG) and access control masks in the `secure_reg` array. These keys are exposed directly to the system AXI bus through an `axi2mem` bridge in the `ariane_peripherals` module. The control logic inside `rom2` allows unconditional read and write access to `secure_reg` based on standard bus requests (`req_i`, `we_i`), entirely lacking guard logic, privilege checks, or hardware locks. This allows any unprivileged software or bus master to extract the keys via memory-mapped reads or tamper with them via writes.",
+      "security_impact": "An attacker with code execution (or any compromised bus master) can read out the AES and JTAG keys, completely compromising the cryptographic security and debug protection of the SoC. Furthermore, the attacker can overwrite the keys and access control masks, circumventing system protections and potentially escalating privileges.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0081"
+      ]
+    },
+    {
+      "finding_id": "F-016",
+      "status": "confirmed_finding",
+      "summary": "The AES wrapper exposes the 192-bit cryptographic key (`key_big`) directly to the APB read interface, allowing unauthorized software or bus masters to read the plaintext key.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 123,
+          "line_end": 149,
+          "module": "aes_wrapper",
+          "signal_or_register": "procedural_assign:129"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 25,
+          "line_end": 106,
+          "module": "aes_wrapper",
+          "object": "key_big",
+          "evidence_type": "protected_resource",
+          "description": "The AES key input `key_in` is assigned to `key_big`.",
+          "supports_claim": "Identifies `key_big` as the internal signal representing the sensitive cryptographic key."
+        },
+        {
+          "file": "src/aes/aes_wrapper.sv",
+          "line_start": 123,
+          "line_end": 149,
+          "module": "aes_wrapper",
+          "object": "procedural_assign:129",
+          "evidence_type": "violation",
+          "description": "The APB read logic copies `key_big` directly to `external_bus_io.rdata` at register addresses 16 through 21.",
+          "supports_claim": "Provides concrete evidence of sensitive readback, where the key can be extracted via normal bus read operations."
+        }
+      ],
+      "reasoning_summary": "The hardware design takes a cryptographic key from a secure ROM component (`rom2`) and provides it to the AES wrapper (`aes_wrapper`) via `key_in`. In `aes_wrapper`, this key is aliased as `key_big` and is directly mapped to the read interface of the configuration bus (`external_bus_io.rdata`). A malicious actor or compromised software with bus access can issue read transactions to these registers to extract the hardware key in plaintext.",
+      "security_impact": "Loss of cryptographic key confidentiality. An attacker who can read the APB registers can extract the AES key and subsequently decrypt secret data, forge ciphertexts, or compromise the broader system security architecture.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0082"
+      ]
+    }
+  ]
+}

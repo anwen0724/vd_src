@@ -1,0 +1,685 @@
+{
+  "graph_id": "hackatdac21__h21_dma_pmp_expansion_scope",
+  "schema_version": "0.1",
+  "description": "Unvalidated LLM finding outputs before evidence validation and filtering.",
+  "raw_llm_findings": [
+    {
+      "chain_id": "CHAIN-0002",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0002",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing privilege check on memory-mapped read operations allows unauthorized information disclosure of DMA configuration.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "access_entry",
+              "description": "The dma_wrapper is instantiated with an acct_ctrl_i signal, which is tied to the privilege level (acc_ctrl_c[priv_lvl_i][8]).",
+              "supports_claim": "Indicates that the system intends to restrict access to the DMA peripheral based on the current privilege level."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "protected_resource",
+              "description": "The dma_wrapper module defines the acct_ctrl_i input and various sensitive configuration registers like source/dest addresses and core_lock_reg. It also declares 'en' and 'en_acct' logic signals.",
+              "supports_claim": "Establishes the presence of sensitive internal registers and the access control input."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "violation",
+              "description": "The combinatorial read logic assigns internal register values to rdata whenever the basic enable signal (en) is true, without checking acct_ctrl_i or using an access-controlled enable signal (like en_acct).",
+              "supports_claim": "Provides concrete evidence that any memory-mapped read request can bypass access controls and leak sensitive DMA state."
+            }
+          ],
+          "reasoning_summary": "The hardware design routes a privilege-based access control signal (acct_ctrl_i) to the DMA wrapper to protect its registers. However, the AXI read transaction logic only checks the generic 'en' signal from the AXI-lite interface. By failing to include acct_ctrl_i in the read-side condition, the design permits any unprivileged AXI read request to expose internal DMA registers, such as transfer addresses and lock statuses.",
+          "security_impact": "An unprivileged attacker can read the DMA configuration (source/destination addresses and lengths). This information disclosure can leak physical memory layouts, facilitating ASLR bypasses, or allow monitoring of privileged DMA transfers.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The snippets do not show the procedural logic for writing to these registers, leaving it uncertain whether write operations correctly enforce the acct_ctrl_i privilege check."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0003",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0003",
+        "has_finding": true,
+        "finding": {
+          "summary": "The DMA controller bypasses Physical Memory Protection (PMP) checks during memory load operations if a specific condition (we_flag && length_d == 3) is met, allowing unauthorized memory reads.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "violation",
+              "description": "In the CTRL_CHECK_LOAD state, the PMP check logic contains a hardcoded bypass `|| (we_flag && length_d == 3)` which forces `pmp_allow_new` to true, ignoring the actual PMP permissions (`pmp_data_allow`).",
+              "supports_claim": "Demonstrates a direct and hardcoded bypass of the Physical Memory Protection guard."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "permission_state",
+              "description": "Shows the declarations of the DMA control registers and inputs, including `length_d`, `we_flag`, `pmp_allow_new`, and `pmp_data_allow`, mapping the signals used in the vulnerability.",
+              "supports_claim": "Validates that `we_flag` and `length_d` are configuration values that can be controlled or influenced during DMA operation."
+            },
+            {
+              "snippet_id": "SNIP-0007",
+              "evidence_role": "guard_logic",
+              "description": "In the CTRL_CHECK_STORE state, the PMP check correctly relies on `pmp_allow_new = pmp_data_allow;` without the arbitrary bypass condition.",
+              "supports_claim": "Highlights the inconsistency between the load and store permission checks, further confirming that the load path contains an intentional or erroneous security bypass."
+            }
+          ],
+          "reasoning_summary": "The DMA state machine evaluates Physical Memory Protection (PMP) rules before performing memory transactions. During a load operation (`CTRL_CHECK_LOAD`), the logic sets the permission allowance flag (`pmp_allow_new`) to true if `we_flag` is asserted and the transaction length (`length_d`) equals 3, regardless of the actual hardware PMP configuration (`pmp_data_allow`). This acts as a privilege escalation backdoor or critical flaw, allowing an attacker to instruct the DMA to read from normally inaccessible protected memory and write the contents to an unprotected region they can access.",
+          "security_impact": "An attacker with the ability to program the DMA controller can bypass hardware memory protections (PMP) to read arbitrary physical memory. This leads to a complete compromise of memory confidentiality, potentially leaking cryptographic keys or secure OS data.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact source and control of `we_flag` at the topmost system level is not fully visible in the snippets, but any logic granting a hardcoded permission bypass based on transfer length represents a critical flaw in the context of the DMA's internal PMP boundaries."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0005",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0005",
+        "has_finding": true,
+        "finding": {
+          "summary": "A logic condition bypasses Physical Memory Protection (PMP) checks for DMA load operations, allowing unauthorized memory access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "violation",
+              "description": "In the CTRL_CHECK_LOAD state, the authorization signal `pmp_allow_new` is unconditionally asserted to 1 if `we_flag && length_d == 3`. This bypasses the standard `pmp_data_allow` check.",
+              "supports_claim": "Demonstrates a hardcoded bypass mechanism overriding the physical memory protection check for specific DMA lengths."
+            }
+          ],
+          "reasoning_summary": "The DMA controller relies on PMP checks (`pmp_data_allow`) to ensure memory isolation and access authorization. However, the logic for evaluating `pmp_allow_new` during the `CTRL_CHECK_LOAD` state contains an insecure short-circuit (`|| (we_flag && length_d == 3)`). This allows an operation to completely bypass PMP authorization and perform unauthorized DMA reads if a specific length is requested while `we_flag` is asserted.",
+          "security_impact": "High. An attacker or untrusted software capable of initiating DMA requests can exploit this bypass to perform unauthorized reads from protected physical memory, leading to information disclosure or privilege escalation.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact source and control conditions for `we_flag_3` within the broader `riscv_peripherals` module are not fully detailed in the provided snippets, but the vulnerability is evident from the explicit bypass condition in the DMA controller's PMP evaluation."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0007",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0007",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardware backdoor or bypass of Physical Memory Protection (PMP) in DMA controller for specific transfer lengths.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "violation",
+              "description": "In the `CTRL_CHECK_LOAD` state, the DMA controller updates the `pmp_allow_new` permission signal. The assignment contains an explicit bypass condition `|| (we_flag && length_d == 3)` which grants access regardless of the actual PMP evaluation (`pmp_data_allow`).",
+              "supports_claim": "This shows a hardcoded privilege bypass that overrides PMP restrictions, enabling unauthorized DMA memory access."
+            }
+          ],
+          "reasoning_summary": "The DMA controller checks Physical Memory Protection (PMP) permissions before authorizing memory transfers. However, the logic determining if the operation is allowed (`pmp_allow_new`) contains a critical flaw: it explicitly grants permission if `we_flag` is asserted and the transfer length (`length_d`) is 3. This circumvents the intended PMP access control (`pmp_data_allow`), acting as a hardware backdoor or unsafe debug leftover.",
+          "security_impact": "High. Untrusted software or attackers could program the DMA controller with a transfer length of 3 to completely bypass Physical Memory Protection (PMP) restrictions. This allows unauthorized arbitrary read and write access to protected memory regions (e.g., secure enclaves or machine-mode memory), leading to full system compromise or privilege escalation.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact origin and driver of the `we_flag` input at the system level is not fully visible in the snippets, but bypassing memory protection controls based on a magic length value is fundamentally insecure regardless of the system integration context."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0010",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0010",
+        "has_finding": true,
+        "finding": {
+          "summary": "The DMA controller incorrectly evaluates Physical Memory Protection (PMP) permissions using stale register states (access type and address) rather than the newly computed values for the current operation, allowing attackers to bypass write protections.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "permission_state",
+              "description": "The sequential `reg_update` block updates `pmp_access_type_reg` and `pmp_allow_reg` on the clock edge, with `pmp_access_type_reg` defaulting to `riscv::ACCESS_READ`. This indicates that the register holds the state from the previous clock cycle.",
+              "supports_claim": "Confirms that combinational permission checkers relying on `pmp_access_type_reg` will evaluate the access type of the previous cycle (e.g., READ) instead of the newly requested access type."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "During the preparation of a write operation, the state machine sets `pmp_access_type_new = riscv::ACCESS_WRITE` and computes `pmp_addr_new`. In the exact same cycle, it evaluates and latches the permission result: `pmp_allow_new = pmp_data_allow`. Because `pmp_data_allow` relies on the current register state, it checks the PMP rules against the stale read access type and previous address.",
+              "supports_claim": "Demonstrates the authorization bypass: the DMA controller incorrectly authorizes a memory WRITE operation by checking if the address has READ permissions, completely bypassing write protections."
+            },
+            {
+              "snippet_id": "SNIP-0007",
+              "evidence_role": "lifecycle_behavior",
+              "description": "The `dma_wrapper` instantiates the DMA core and drives its active-low reset port with the combinatorial expression `rst_ni && ~rst_8`.",
+              "supports_claim": "Highlights an additional safety issue: driving an asynchronous reset pin with combinatorial logic is glitch-prone and can cause inconsistent state resets between the DMA core and its AXI wrapper."
+            }
+          ],
+          "reasoning_summary": "The DMA controller implements PMP checks to restrict memory access. However, a pipeline synchronization flaw exists in the authorization logic. When initiating a DMA write, the state machine latches the combinational permission signal (`pmp_data_allow`) in the same cycle it updates the address and access type registers for the new operation. Consequently, the permission check evaluates the stale state (the previous operation's address and access type, typically ACCESS_READ). This allows write operations to proceed based on read-access permissions, breaking the security boundary. Additionally, the core utilizes an unsafe, glitch-prone combinatorial asynchronous reset.",
+          "security_impact": "High. An attacker or unprivileged software with access to the DMA controller can bypass PMP write protections to overwrite read-only or securely isolated memory regions. This could lead to arbitrary code execution, privilege escalation, or compromise of secure data.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The internal combinational assignments of `pmp_data_allow` are not explicitly shown in the snippets. However, the architectural pattern of latching `pmp_allow_new` alongside updates to the PMP state registers strongly infers a one-cycle lag vulnerability."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0013",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0013",
+        "has_finding": true,
+        "finding": {
+          "summary": "Incorrect protection state update due to simulation-synthesis mismatch in DMA PMP state registers.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "violation",
+              "description": "The `reg_update` always block uses blocking assignments (`=`) to reset security-critical registers (`pmp_addr_reg`, `pmp_allow_reg`, `pmp_access_type_reg`, etc.) but uses non-blocking assignments (`<=`) for active updates. This creates a severe simulation-synthesis mismatch.",
+              "supports_claim": "Demonstrates an unsafe reset implementation that violates SystemVerilog synthesis guidelines and can leave stale protection state in synthesized hardware."
+            },
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "impact",
+              "description": "The `rst_ni` input to the `dma` instance is driven by `rst_ni && ~rst_8`. If `rst_8` is a software-triggered reset to clear DMA state, the synthesis mismatch might cause hardware to retain previous PMP permissions.",
+              "supports_claim": "Shows that the flawed reset path is exposed to the wrapper's reset logic (`rst_8`), which software might rely on to securely flush DMA permissions."
+            }
+          ],
+          "reasoning_summary": "The `dma` module uses blocking assignments instead of non-blocking assignments for the asynchronous reset of its PMP permission registers (`pmp_addr_reg`, `pmp_allow_reg`, etc.). Since non-blocking assignments are used elsewhere in the same sequential block, this violation of SystemVerilog coding practices leads to a simulation/synthesis mismatch. In synthesized hardware, the flip-flops may not reset correctly. If a privileged context uses the DMA and then issues a software reset (`rst_8`), the stale elevated PMP permissions might persist, allowing a subsequent lower-privileged context to exploit the DMA.",
+          "security_impact": "Hardware could fail to reset DMA PMP permissions. A less privileged software context might perform unauthorized DMA accesses by exploiting stale permissions left behind from a prior execution context.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "We do not have the synthesized gate-level netlist to definitively prove the exact failure mode (e.g., latches inferred or reset ignored), but mixed blocking/non-blocking assignments in a sequential block are universally recognized as unsafe for synthesis and often lead to incorrect hardware state."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0020",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0020",
+        "has_finding": true,
+        "finding": {
+          "summary": "A hardcoded backdoor bypasses DMA Physical Memory Protection (PMP) read checks when a specific flag and transfer length are used.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "In the CTRL_CHECK_LOAD state, the PMP authorization state `pmp_allow_new` is forced to 1 via the hardcoded condition `|| (we_flag && length_d == 3)`. This explicitly overrides the `pmp_data_allow` authorization signal from the PMP checker.",
+              "supports_claim": "Demonstrates a hardcoded bypass (Trojan/backdoor) that nullifies access control checks for specific DMA read lengths."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "guard_logic",
+              "description": "In the CTRL_CHECK_STORE state, the module properly enforces memory protections by strictly using `pmp_allow_new = pmp_data_allow`, which contrasts with the vulnerable logic in CTRL_CHECK_LOAD.",
+              "supports_claim": "Highlights the anomalous and deliberate nature of the bypass in the load checking logic."
+            }
+          ],
+          "reasoning_summary": "The DMA controller enforces access control by iteratively checking Physical Memory Protection (PMP) rules for each word in a transfer. However, in the CTRL_CHECK_LOAD state, a suspicious backdoor condition `|| (we_flag && length_d == 3)` overrides the PMP check result (`pmp_data_allow`). If triggered, the DMA ignores intermediate PMP failures and only relies on the PMP check for the 0th offset. If the 0th offset is accessible, the DMA proceeds with the entire transfer, allowing unauthorized access to adjacent protected memory.",
+          "security_impact": "An attacker who can control the DMA configuration and the `we_flag` signal can bypass PMP hardware isolation and read protected memory regions, leading to a severe breach of system confidentiality.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact source and controllability of `we_flag` within `riscv_peripherals.sv` is not fully shown, but any logic that bypasses access controls based on magic values (like length == 3) is a clear security vulnerability."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0025",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0025",
+        "has_finding": true,
+        "finding": {
+          "summary": "The hardware lock mechanism (`core_lock_reg`) in the DMA wrapper is insecurely implemented, allowing unconditional unlocking and inadvertently releasing the lock on concurrent acquisition attempts.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "violation",
+              "description": "The state update logic for `core_lock_reg` sets the register to 0 (unlocked) if a non-zero value is written while it is already locked, and allows any master to unconditionally unlock it by writing 0.",
+              "supports_claim": "Demonstrates that the lock state update logic is fundamentally flawed, failing to enforce ownership and breaking mutual exclusion under concurrent access."
+            },
+            {
+              "snippet_id": "SNIP-0010",
+              "evidence_role": "guard_logic",
+              "description": "The signal `en = en_acct && acct_ctrl_i` guards access to the DMA registers. However, this only validates overall peripheral access privilege.",
+              "supports_claim": "Confirms that any core with sufficient privilege to access the DMA wrapper can exploit the broken lock logic to interfere with other cores."
+            },
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "protected_resource",
+              "description": "The `dma_wrapper` handles AXI writes to various DMA configuration registers (e.g., `start_reg`, `source_addr_lsb_reg`).",
+              "supports_claim": "Because mutual exclusion is broken, multiple authorized cores can concurrently overwrite these configuration registers, corrupting DMA operations."
+            }
+          ],
+          "reasoning_summary": "The `core_lock_reg` is intended to provide mutual exclusion among multiple cores trying to use the shared DMA controller. However, the state update logic (`core_lock_reg <= (wdata==0) ? 0 : ((core_lock_reg==0) ? wdata : 0);`) contains critical logical flaws. First, it allows any core to clear the lock by writing 0, without verifying if the writing core is the current owner of the lock. Second, if a core attempts to acquire the lock (by writing its non-zero ID) while the lock is already held by another core (`core_lock_reg != 0`), the logic evaluates to 0, thereby inadvertently releasing the lock. This breaks mutual exclusion entirely, allowing race conditions where concurrent access or malicious interference can corrupt ongoing DMA transfers.",
+          "security_impact": "The broken lock mechanism can lead to race conditions where multiple cores configure the DMA simultaneously. This can result in arbitrary DMA memory transfers, memory corruption, or data leakage, bypassing intended software-level isolations.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0027",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0027",
+        "has_finding": true,
+        "finding": {
+          "summary": "The DMA wrapper does not enforce its core lock (`core_lock_reg`) or incoming access control signals when writing to critical DMA configuration registers, allowing the lock to be bypassed.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "access_entry",
+              "description": "Instantiates the `dma_wrapper` and connects access control signals (`reglk_ctrl_i`, `acct_ctrl_i`, `pmpcfg_i`) intended to restrict access.",
+              "supports_claim": "Demonstrates the architectural intent to protect the DMA engine using privilege and lock controls."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "protected_resource",
+              "description": "Defines the internal registers, including `core_lock_reg`, and declares the privilege checking input ports.",
+              "supports_claim": "Shows that a lock register exists to provide mutually exclusive access to the DMA engine."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "violation",
+              "description": "The `always` block performs writes to all DMA configuration registers (such as `start_reg`, `length_reg`, `source_addr`) unconditionally when `en && we` is asserted.",
+              "supports_claim": "Proves that neither the `core_lock_reg` nor the access control signals are used to gate writes, effectively bypassing the lock and privilege checks."
+            }
+          ],
+          "reasoning_summary": "The `dma_wrapper` receives access control signals and implements a `core_lock_reg` that correctly arbitrates lock acquisition. However, the subsequent logic that writes to the critical DMA configuration registers (`start_reg`, `length_reg`, address pointers) only checks for an active AXI write transaction (`en && we`). It entirely fails to evaluate whether the requester holds the lock or meets the necessary privilege requirements. As a result, the lock and privilege restrictions are fully bypassed for configuration writes.",
+          "security_impact": "An attacker or unauthorized core can blindly overwrite the active DMA configuration regardless of the lock state. This can lead to arbitrary memory overwrites (DMA hijacking), privilege escalation, or denial of service by corrupting in-flight transfers.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0028",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0028",
+        "has_finding": true,
+        "finding": {
+          "summary": "The AXI-Lite interface hardcodes transaction response signals to OKAY, masking access control or privilege violations from the bus master.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The AXI-Lite interface assigns 2'b0 (OKAY) to both axi_resp_o.b.resp and axi_resp_o.r.resp unconditionally, stating that it does not support any errors.",
+              "supports_claim": "Confirms that any illegal, unauthorized, or out-of-bounds access cannot return an AXI error response (such as SLVERR or DECERR)."
+            }
+          ],
+          "reasoning_summary": "The `axi_lite_interface` module, which exposes the `dma_wrapper` registers to the AXI bus, hardcodes the AXI response flags (`b.resp` and `r.resp`) to `2'b0` (OKAY). If a bus master attempts an unauthorized read or write (e.g., violating access control locks or unmapped memory), the transaction will not generate a bus error. Instead, it will fail silently or return zeroed data with a successful response, preventing the master CPU from raising a precise exception or detecting the security violation.",
+          "security_impact": "Unauthorized accesses (reads or writes) fail silently without triggering bus faults. An attacker or faulty unprivileged software can probe locked or privileged memory-mapped registers without triggering security alerts or system exceptions.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The logic that asserts `en` and handles writes inside `dma_wrapper` is not fully present in the snippets. However, the AXI interface's hardcoded OKAY response is sufficient to prove that bus-level errors are unconditionally suppressed."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0032",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0032",
+        "has_finding": true,
+        "finding": {
+          "summary": "The DMA controller contains vulnerabilities that bypass Physical Memory Protection (PMP) checks, including an explicit backdoor condition during loads and improper state accumulation during stores.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "violation",
+              "description": "In the CTRL_CHECK_LOAD state, the accumulated PMP authorization state is overridden by a backdoor condition `(we_flag && length_d == 3)`, forcing `pmp_allow_new` to 1 and bypassing protection checks for prior memory words.",
+              "supports_claim": "Shows explicit, unauthorized bypass logic in the permission state update for read operations."
+            },
+            {
+              "snippet_id": "SNIP-0007",
+              "evidence_role": "violation",
+              "description": "In the CTRL_CHECK_STORE state, `pmp_allow_new` is assigned directly to `pmp_data_allow` rather than accumulating with `pmp_allow_reg`. This overwrites prior PMP denials, effectively ignoring protection failures for all but the last checked words.",
+              "supports_claim": "Demonstrates an incorrect protection state update that fails to enforce PMP boundaries during write operations."
+            }
+          ],
+          "reasoning_summary": "The DMA engine verifies Physical Memory Protection (PMP) iteratively across the transfer length. Two critical flaws bypass this protection. First, during load checks, an explicit backdoor condition `(we_flag && length_d == 3)` forces the accumulated authorization state to true, ignoring previous PMP denials. Second, during store checks, the engine fails to accumulate the authorization state entirely (`pmp_allow_new = pmp_data_allow`), causing it to forget previous PMP violations. Consequently, an attacker can use the DMA engine to perform unauthorized block reads and writes across PMP boundaries.",
+          "security_impact": "An attacker can leverage the DMA engine to bypass Physical Memory Protections (PMP), allowing unauthorized reads from and writes to protected memory regions, which can lead to full system compromise or privilege escalation.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact source and external controllability of the `we_flag` signal is not shown in the snippets, though its usage directly constitutes a vulnerability."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0043",
+      "status": "discarded",
+      "discard_reason": "missing_violation_evidence",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0043",
+        "has_finding": true,
+        "finding": {
+          "summary": "PMP access check loop incorrectly skips unlocked matching entries in M-mode, allowing lower-priority locked entries to improperly deny M-mode accesses.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "guard_logic",
+              "description": "The `always_comb` block contains a loop that evaluates PMP entries. The condition `if (priv_lvl_i != riscv::PRIV_LVL_M || conf_i[i].locked)` causes the logic to completely skip over an unlocked entry for M-mode accesses. It fails to set `allow_o = 1'b1` and `break`, allowing the loop to continue to lower-priority entries.",
+              "supports_claim": "By skipping the higher-priority unlocked entry rather than granting access immediately, the hardware incorrectly allows a lower-priority locked entry to be evaluated, which can then improperly deny the M-mode access."
+            }
+          ],
+          "reasoning_summary": "According to the RISC-V Privileged Architecture specification, PMP entries are statically prioritized by their index, and the lowest-numbered matching entry dictates success or failure. For M-mode accesses, if a matching entry is unlocked (L=0), the permission bits are ignored and the access must succeed immediately. The RTL implementation misinterprets this by skipping the unlocked entry entirely when in M-mode, thus allowing the loop to continue evaluating lower-priority entries. Consequently, an overlapping lower-priority locked entry can incorrectly trap and deny the M-mode access.",
+          "security_impact": "Denial of Service (DoS) / Privilege Escalation. M-mode accesses that explicitly match a higher-priority unlocked PMP region can be erroneously denied by a lower-priority locked region, resulting in unintended CPU access faults and loss of availability for the privileged execution environment.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0047",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0047",
+        "has_finding": true,
+        "finding": {
+          "summary": "Insecure lock implementation in the DMA wrapper allows any authorized entity to clear the core lock, breaking exclusive access guarantees.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "violation",
+              "description": "The lock register update logic (`core_lock_reg <= (wdata==0) ? 0 : ((core_lock_reg==0) ? wdata : 0);`) unconditionally clears the lock when written with 0. Even worse, if the lock is already held (core_lock_reg != 0), writing a non-zero value also evaluates to 0, destroying the existing lock.",
+              "supports_claim": "Demonstrates a flawed protection state update that fails to enforce lock ownership or securely reject lock acquisition attempts when already locked."
+            },
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "guard_logic",
+              "description": "The write operation is guarded only by the general module-level access control (`assign en = en_acct && acct_ctrl_i;`), lacking a specific check for lock ownership during an unlock request.",
+              "supports_claim": "Highlights the absence of a proper authorization or ownership check when clearing the lock, allowing any core with DMA permissions to manipulate the lock."
+            }
+          ],
+          "reasoning_summary": "The DMA wrapper implements a hardware lock (`core_lock_reg`) to provide mutual exclusion for the DMA engine. However, the state update logic for this lock is insecurely designed. Writing a `0` clears the lock without verifying the requester's identity. Furthermore, if a core attempts to acquire an already-held lock by writing a non-zero value, the ternary logic incorrectly evaluates to `0`, clearing the existing lock instead of preserving it. This allows any entity with generic DMA access to inadvertently or maliciously break mutual exclusion.",
+          "security_impact": "Loss of mutual exclusion for the DMA engine. A compromised or competing core could clear a lock held by another core (either by writing 0, or by simply attempting to acquire it), interrupting its DMA transfers, or overwriting its configuration. This can lead to severe data corruption, denial of service, or privilege escalation.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0051",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0051",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded AXI protection (prot) signals to '0 bypass access control by statically marking all transactions as Secure.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The AXI protection signals aw.prot and ar.prot for the AES peripheral are tied to '0. In the AXI protocol, prot[1] = 0 indicates a Secure access, meaning all reads and writes are forced to be Secure regardless of the master's actual privilege or security state.",
+              "supports_claim": "Shows concrete assignment of security-critical AXI attributes to a fixed trusted state, enabling security bypass."
+            }
+          ],
+          "reasoning_summary": "The hardware hardcodes the AXI AWPROT and ARPROT signals to '0 under the mistaken assumption that AXI-lite does not use them or they are irrelevant. Because AXI defines prot[1] = 0 as a 'Secure' access, this strips the dynamic security attribute from the transaction. Any request reaching this point will be treated as Secure by downstream modules. This allows Non-secure entities to bypass hardware isolation and interact with restricted resources (like cryptographic keys) inside the AES peripheral as if they were in the Secure world.",
+          "security_impact": "Privilege escalation and TrustZone isolation bypass. Untrusted hardware components or Non-secure software could potentially access secure keys, tamper with cryptographic operations, or perform unauthorized data reads, completely defeating system-wide security architectures.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The precise impact depends on whether the downstream AES module enforces security checks based on the `prot` signal. However, arbitrarily granting the Secure attribute to peripheral transactions is fundamentally an unsafe design practice."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0054",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0054",
+        "has_finding": true,
+        "finding": {
+          "summary": "The AXI-Lite interface drops transaction protection bits and silently masks access control errors, while the DMA wrapper relies on a side-band privilege signal that is vulnerable to transaction-delay privilege escalation.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "Hardcoded AXI response signals (`b.resp` and `r.resp` set to `2'b0` / OKAY) swallow any downstream permission errors, silently failing instead of generating a bus fault.",
+              "supports_claim": "Demonstrates that access control violations will not be reported back to the initiator, masking failed privilege checks."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The AXI request protection and privilege bits (`aw.prot` and `ar.prot`) are tied off to 0, completely discarding the transaction's inherent security and privilege context.",
+              "supports_claim": "Proves that standard AXI transaction-level access controls are bypassed and dropped before they can be evaluated by the endpoint."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "permission_state",
+              "description": "The `dma_wrapper` uses a side-band, real-time privilege signal (`priv_lvl_i`) mapped to `acct_ctrl_i` for access control instead of the transaction-bound AXI `prot` attributes.",
+              "supports_claim": "Confirms the existence of a Time-of-Check to Time-of-Use (TOCTOU) vulnerability where transaction evaluation is dangerously decoupled from the request's original context."
+            }
+          ],
+          "reasoning_summary": "The hardware uses an AXI-Lite interface adapter that explicitly drops the standard `prot` (protection) signals by tying them off to 0. This inherently prevents proper transaction-level privilege checks. To compensate, access control is enforced using the processor's dynamic, out-of-band privilege state (`priv_lvl_i`). Because AXI bus transactions can be buffered or delayed, a write request issued during a low-privilege (user) execution state could arrive and be evaluated while the processor has elevated its privilege (machine/supervisor mode), improperly bypassing the security constraints. Furthermore, the AXI interface hardcodes its responses to OKAY (`2'b0`), meaning even if an access is correctly blocked by downstream logic, the initiator is never notified of the fault, masking potential attacks or functional bugs.",
+          "security_impact": "High. An attacker can exploit bus transaction delays to perform unauthorized DMA configuration with escalated privileges. The lack of error responses also prevents the system from detecting unauthorized access attempts, breaking secure fault-handling routines.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact internal logic of how `dma_wrapper` uses `acct_ctrl_i` to block the operation is not fully visible in the snippets, but the structural flaw of evaluating AXI operations against a dynamic side-band privilege state and masking error responses is definitive."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0055",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0055",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded OKAY responses in the AXI-Lite interface prevent the signaling of access control errors to the bus master.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The AXI-Lite interface hardcodes the read and write response flags (`axi_resp_o.r.resp` and `axi_resp_o.b.resp`) to 2'b0 (OKAY), explicitly stating 'we do not support any errors'.",
+              "supports_claim": "Confirms that the interface unconditionally returns success and cannot propagate SLVERR or DECERR bus errors."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "protected_resource",
+              "description": "The `dma_wrapper` module is instantiated with security-related signals (`reglk_ctrl_i`, `acct_ctrl_i`, `pmpcfg_i`), indicating it enforces access control policies.",
+              "supports_claim": "Demonstrates that the peripheral using the hardcoded interface handles protected resources that may require error signaling upon access violations."
+            }
+          ],
+          "reasoning_summary": "The `axi_lite_interface` hardcodes AXI response signals to OKAY (2'b0). When a peripheral like `dma_wrapper`, which has privilege and lock enforcement mechanisms, blocks an unauthorized transaction, it lacks a mechanism to signal an AXI bus error (e.g., SLVERR) back to the bus master. Consequently, the master will incorrectly assume the transaction succeeded, leading to silent failures and the masking of security violations.",
+          "security_impact": "Unauthorized accesses (reads or writes) will fail silently without triggering bus errors or system exceptions. This masks malicious activity or misconfigurations, preventing the system or OS from detecting and appropriately responding to access control violations.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The internal access control enforcement logic of `dma_wrapper` is not fully visible in the snippets, but the hardcoding in the AXI interface unconditionally prevents AXI error reporting regardless of the peripheral's internal behavior."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0057",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0057",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded AXI protection (`prot`) signals to 0 drops incoming security attributes and uniformly marks HMAC requests as Secure.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "Assignments `hmac_axi_req.aw.prot = '0` and `hmac_axi_req.ar.prot = '0` hardcode the AXI protection signals.",
+              "supports_claim": "Shows the exact lines where protection state information is discarded and hardcoded to a fixed value (0), which corresponds to a Secure, Unprivileged Data access."
+            }
+          ],
+          "reasoning_summary": "The SystemVerilog code ties off the AXI `aw.prot` and `ar.prot` signals to `'0` for the HMAC peripheral. Under the AXI specification, a `prot` value of 0 indicates an Unprivileged, Secure, Data access (PROT[1] = 0 means Secure). Hardcoding this value drops the true privilege and security attributes of the incoming transaction. This can result in a security bypass, as non-secure or otherwise unauthorized masters will have their transactions improperly elevated to 'Secure' when interacting with the HMAC.",
+          "security_impact": "Potential privilege escalation and security bypass. A non-secure master could exploit this to perform sensitive cryptographic operations or access secure keys within the HMAC module.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact security impact depends on whether the SoC relies on AXI `prot` signals for TrustZone/security isolation at the interconnect or peripheral level. If the entire design is single-security-state, this may be benign, but it fundamentally violates secure propagation of bus attributes."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0059",
+      "status": "discarded",
+      "discard_reason": "missing_violation_evidence",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0059",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded AXI protection signals (AWPROT/ARPROT) statically grant Secure access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "permission_state",
+              "description": "Assignments `assign pkt_axi_req.aw.prot = '0;` (line 1684) and `assign pkt_axi_req.ar.prot = '0;` (line 1695) tie off the AXI protection signals to zero.",
+              "supports_claim": "In the AXI protocol, PROT[1] determines the security level (0 = Secure, 1 = Non-secure). Tying this value to 0 universally elevates all transactions through this interface to Secure, potentially bypassing security isolation."
+            }
+          ],
+          "reasoning_summary": "The snippet explicitly hardcodes the AXI AWPROT and ARPROT signals to '0. In the AMBA AXI protocol, PROT[1]=0 specifies a Secure access, while PROT[0]=0 specifies an Unprivileged access. Hardcoding these protection state signals to '0 forces all transactions on this interface to be treated as Secure data accesses. If non-secure initiators can drive transactions through this interface, they will be incorrectly authenticated as Secure, leading to a bypass of TrustZone or similar hardware security checks. A safer default for unconnected AXI protection signals is 'b010 (Non-secure, Unprivileged, Data).",
+          "security_impact": "Privilege escalation and hardware security boundary bypass. Untrusted or Non-secure initiators could leverage this interface to perform unauthorized reads and writes to Secure memory or peripherals.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The broader system context is not provided to confirm whether untrusted initiators can actually drive transactions into this interface, but defaulting AXI protection metadata to Secure ('0) is inherently unsafe system design."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0060",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0060",
+        "has_finding": true,
+        "finding": {
+          "summary": "AXI protection signals (AWPROT/ARPROT) are improperly hardcoded to '0 on critical peripheral interfaces (PLIC, RSA, RNG, AES), incorrectly spoofing a 'Secure' transaction state and stripping the actual security context.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The developer explicitly ties off `plic_master.aw_prot` to `'0` under the mistaken assumption that it is not used by AXI-lite. This forces all write transactions on the PLIC master interface to be marked as Secure (`prot[1]=0`).",
+              "supports_claim": "Provides direct evidence of dropping protection metadata, resulting in static spoofing of a Secure transaction."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "Ties off both `aw.prot` and `ar.prot` to `'0` for the reset AXI interface (`rst_axi_req`).",
+              "supports_claim": "Confirms that both read and write transaction protection signals are improperly hardcoded."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "protected_resource",
+              "description": "Hardcodes `aw.prot` and `ar.prot` to `'0` for the RSA wrapper interface (`rsa_axi_req`).",
+              "supports_claim": "Shows that sensitive cryptographic resources (RSA) are exposed to this vulnerability."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "protected_resource",
+              "description": "Hardcodes `aw.prot` and `ar.prot` to `'0` for the RNG wrapper interface (`rng_axi_req`).",
+              "supports_claim": "Further highlights the risk by exposing the Random Number Generator to potentially unauthorized accesses."
+            },
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "protected_resource",
+              "description": "Hardcodes `aw.prot` and `ar.prot` to `'0` for the AES0 wrapper interface (`aes0_axi_req`).",
+              "supports_claim": "Demonstrates exposure of the AES cryptographic engine due to the hardcoded PROT signals."
+            }
+          ],
+          "reasoning_summary": "The design interfaces multiple AXI modules (PLIC, RSA, RNG, AES) and ties off several signals under the assumption they are 'not used by AXI-lite'. While signals like `id`, `len`, and `burst` are indeed absent in standard AXI-lite, the `AWPROT` and `ARPROT` signals are a standard part of the AXI4-lite specification and carry critical security/privilege routing information. By hardcoding `prot` to `'0` (which encodes `prot[1]=0`), the design assigns AMBA AXI's 'Secure' state to all transactions crossing these boundaries. This strips the actual privilege and security context of the initiator, inadvertently upgrading Non-Secure transactions to Secure and potentially allowing non-secure contexts to read/write sensitive peripheral or cryptographic registers.",
+          "security_impact": "High. An attacker residing in a Non-Secure execution environment (e.g., a standard operating system) could issue transactions that are translated across these interfaces with `prot` hardcoded to `'0`. Downstream hardware security checks or AXI firewalls observing `prot[1]=0` will evaluate the access as 'Secure', potentially allowing unauthorized control, key extraction, or tampering with RSA, RNG, AES, and PLIC components.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "Exploitability strictly depends on whether the downstream crypto cores and system peripherals rely on the AXI `PROT` bits to enforce isolation. If they ignore AXI PROT and enforce separation using out-of-band signals like PMP configurations or custom register locks, the practical severity may be mitigated."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0066",
+      "status": "discarded",
+      "discard_reason": "missing_violation_evidence",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0066",
+        "has_finding": true,
+        "finding": {
+          "summary": "Improper hardcoding of AXI PROT signals leads to loss of privilege and security attributes, potentially bypassing access controls.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "permission_state",
+              "description": "The `aw.prot` and `ar.prot` signals for the `reglk_axi_req` interface are tied off to `'0`, falsely categorizing them as signals not used by AXI-lite.",
+              "supports_claim": "Setting `prot` to `'0` hardcodes the transaction state to Unprivileged (`prot[0]=0`) and Secure (`prot[1]=0`), destroying the actual access control attributes from the bus master."
+            }
+          ],
+          "reasoning_summary": "The developer tied off AXI `prot` signals to `'0` assuming they are unused in AXI4-Lite. However, AXI4-Lite does include the `PROT` signals for access control. By hardcoding `prot` to `'0`, all downstream read and write transactions appear as Unprivileged, Secure, and Data accesses. This strips the true security and privilege context of the master, potentially granting Non-secure masters inappropriate Secure access (since `prot[1]=0` means Secure in AXI) or denying Privileged accesses.",
+          "security_impact": "This flaw can allow privilege escalation or security boundary bypass if downstream peripherals rely on the `PROT` signals to enforce TrustZone/Secure-world or privileged-only access restrictions.",
+          "confidence": "medium",
+          "uncertainty_or_missing_evidence": "The exact impact depends on whether the downstream `reglk` (register lock) peripheral evaluates the `PROT` signals to enforce security policies. If the slave ignores `PROT`, the vulnerability is moot but the implementation remains non-compliant."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0069",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0069",
+        "has_finding": true,
+        "finding": {
+          "summary": "The boot ROM read data assignment ignores the boot selection signal 'ariane_boot_sel_i' due to a copy-paste error, forcing the system to always use 'rom_rdata_linux' regardless of the selected boot mode.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "Continuous assignment of 'rom_rdata' at line 534 uses a ternary operator that assigns 'rom_rdata_linux' in both the true and false branches, rendering the 'ariane_boot_sel_i' check completely ineffective.",
+              "supports_claim": "Demonstrates the direct bypass of the boot mode selection logic."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "protected_resource",
+              "description": "Line 490 declares 'rom_rdata_bm' (presumably for baremetal boot ROM data) alongside 'rom_rdata_linux'. However, 'rom_rdata_bm' is never selected due to the flaw in the assignment logic.",
+              "supports_claim": "Highlights the intended alternative boot ROM resource that is being incorrectly ignored."
+            }
+          ],
+          "reasoning_summary": "The hardware uses a selection signal ('ariane_boot_sel_i') to determine which boot ROM data to read, presumably to switch between a Linux boot sequence and a baremetal boot sequence. However, a typographical error in the ternary operation forces 'rom_rdata_linux' to be selected regardless of the control signal's state. This bypasses the intended boot access control logic and forces exposure/execution of the Linux boot ROM data even when baremetal mode is requested.",
+          "security_impact": "Loss of boot sequence control. A privileged or system-level configuration intended to enforce a specific boot mode (baremetal) is silently bypassed, causing the system to always boot with Linux ROM data. This could lead to incorrect initialization, privilege misconfiguration, or bypass of baremetal-specific security constraints.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The exact severity depends on the functional and security differences between the baremetal and Linux boot sequences, which are defined outside these snippets."
+        },
+        "no_finding_reason": ""
+      }
+    }
+  ]
+}

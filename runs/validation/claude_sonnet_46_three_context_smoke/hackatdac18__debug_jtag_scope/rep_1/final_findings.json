@@ -1,0 +1,211 @@
+{
+  "graph_id": "hackatdac18__debug_jtag_scope",
+  "schema_version": "0.1",
+  "findings": [
+    {
+      "finding_id": "F-001",
+      "status": "confirmed_finding",
+      "summary": "The adbg_axi_biu module is a debug AXI bus interface unit that allows arbitrary AXI read/write access to system memory without any privilege, authentication, or access-control check. The only gating mechanism is the JTAG reset (trstn_i) and AXI reset (axi_aresetn), neither of which constitute permission enforcement. Any debug initiator with JTAG access can read or write any AXI address at any privilege level.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 321,
+          "line_end": 337,
+          "module": "adbg_axi_biu",
+          "signal_or_register": "rd_wrn_i"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 321,
+          "line_end": 337,
+          "module": "adbg_axi_biu",
+          "object": "rd_wrn_i",
+          "evidence_type": "access_entry",
+          "description": "The input latch always captures address, data, and write-enable from the debug interface whenever strobe_i && rdy_o, with no privilege or authentication check. The only gating is the JTAG reset trstn_i.",
+          "supports_claim": "Debug bus initiator can initiate AXI transactions to any address with no permission check beyond JTAG reset."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 496,
+          "line_end": 546,
+          "module": "adbg_axi_biu",
+          "object": "S_AXIADDR",
+          "evidence_type": "guard_logic",
+          "description": "The AXI FSM transitions from S_IDLE to S_AXIADDR upon start_toggle (derived from str_sync, which is a JTAG-domain signal), then issues either axi_master_aw_valid or axi_master_ar_valid depending on wr_reg. There is no privilege-level check, address range check, or access-control validation anywhere in this state machine.",
+          "supports_claim": "No guard exists between the debug request and the AXI transaction issuance; any JTAG-triggered request immediately becomes an AXI read or write."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 383,
+          "line_end": 404,
+          "module": "adbg_axi_biu",
+          "object": "data_o",
+          "evidence_type": "protected_resource",
+          "description": "data_o returns data_out_reg (containing AXI read data) back to the debug interface unconditionally, and err_o returns err_reg. Sensitive AXI memory read data is returned to the debug initiator without any filtering.",
+          "supports_claim": "Read data from any AXI address is returned to the debug port with no access-control filtering, enabling sensitive memory readback."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 454,
+          "line_end": 486,
+          "module": "adbg_axi_biu",
+          "object": "axi_aresetn",
+          "evidence_type": "lifecycle_behavior",
+          "description": "Reset of axi_aresetn only clears str_sync flip-flops, err_reg, and data_out_reg to 0. It does not lock out debug access or require any authentication after reset. After axi_aresetn deasserts, debug transactions can immediately proceed.",
+          "supports_claim": "Reset does not introduce any post-reset lockout or permission state; debug AXI access is available immediately after reset without requiring privilege escalation or authentication."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 321,
+          "line_end": 337,
+          "module": "adbg_axi_biu",
+          "object": "rd_wrn_i",
+          "evidence_type": "violation",
+          "description": "The always_ff block at line 324 accepts strobe_i from the JTAG debug interface and latches any address (addr_i), any data (data_i), and read/write direction (rd_wrn_i) with no permission check, authentication, address range restriction, or privilege level enforcement. This constitutes a missing guard for all AXI bus accesses initiated via debug.",
+          "supports_claim": "Missing permission guard: debug-initiated AXI accesses bypass all system access controls, allowing arbitrary read/write to the full AXI address space."
+        }
+      ],
+      "reasoning_summary": "The adbg_axi_biu module is an advanced debug bus interface unit connecting a JTAG debug domain to the AXI bus. Source snippets confirm: (1) the input latch (SNIP-0003) captures any address and data from debug without any privilege, authentication, or address-range check; (2) the AXI FSM (SNIP-0006) immediately translates a debug start_toggle into AXI read/write transactions with no interposed permission check; (3) read data is returned unconditionally to the debug port (SNIP-0004); (4) reset behavior (SNIP-0005) only clears state registers but does not enforce any post-reset lockout or require authentication. There is a structural absence of any guard logic between the JTAG debug interface and full AXI bus access.",
+      "security_impact": "An attacker with JTAG access can read or write any location in the AXI address space, including secure memory regions, cryptographic key stores, configuration registers, and privileged peripheral registers. This enables full system compromise including secret exfiltration and arbitrary code execution in privileged contexts.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "No snippet showing a higher-level JTAG authentication or debug-enable gating external to this module was provided. If the instantiating hierarchy enforces a debug-enable fuse or lifecycle gate before asserting trstn_i or strobe_i, the impact would be reduced. However, within adbg_axi_biu itself, no such check exists in the available source evidence.",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0001"
+      ]
+    },
+    {
+      "finding_id": "F-002",
+      "status": "confirmed_finding",
+      "summary": "The debug AXI BIU module (adbg_axi_biu) operates entirely without any privilege, authentication, or access-control guard. The JTAG debug interface can directly initiate arbitrary AXI read/write transactions to any address in the system memory map with no permission check, lock register, or lifecycle gating.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 454,
+          "line_end": 486,
+          "module": "adbg_axi_biu",
+          "signal_or_register": "axi_aresetn"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 282,
+          "line_end": 391,
+          "module": "adbg_axi_biu",
+          "object": "rd_wrn_i",
+          "evidence_type": "access_entry",
+          "description": "The TCK-domain latch logic at lines 323-339 accepts strobe_i and stores address, data, and write/read direction (rd_wrn_i) unconditionally whenever strobe_i && rdy_o is true. No privilege level, authentication token, or debug-enable signal is checked before latching the transaction parameters.",
+          "supports_claim": "Any assertion of strobe_i immediately queues a transaction; no access guard exists."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 496,
+          "line_end": 546,
+          "module": "adbg_axi_biu",
+          "object": "S_AXIADDR",
+          "evidence_type": "guard_logic",
+          "description": "The AXI FSM combinatorial block (lines 507-546) transitions from S_IDLE to S_AXIADDR purely on start_toggle, which is derived from the JTAG-domain str_sync signal. There is no check of a debug-enable bit, privilege register, or any other permission state before asserting axi_master_aw_valid or axi_master_ar_valid to the AXI bus.",
+          "supports_claim": "Missing guard: the FSM proceeds directly to issuing AXI address-phase signals without any authorization check."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 454,
+          "line_end": 486,
+          "module": "adbg_axi_biu",
+          "object": "axi_aresetn",
+          "evidence_type": "violation",
+          "description": "The AXI-domain registers (str_sync synchronizers, data_out_reg, err_reg) are only gated by axi_aresetn. There is no debug-lifecycle or security-state signal in the reset or enable logic. Any debug transaction that clears axi_aresetn or simply toggles str_sync proceeds to completion and the response data is latched back into data_out_reg, which is then readable by the debug interface.",
+          "supports_claim": "Sensitive AXI read data is latched and returned to the debug interface with no protection or privilege check."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 282,
+          "line_end": 391,
+          "module": "adbg_axi_biu",
+          "object": "rd_wrn_i",
+          "evidence_type": "protected_resource",
+          "description": "Lines 380-384 show that addr_reg is directly driven onto axi_master_ar_addr and axi_master_aw_addr, and data_in_reg onto axi_master_w_data. These bus signals reach all AXI slaves in the system, meaning the entire memory map is accessible without restriction.",
+          "supports_claim": "The entire AXI address space is an unguarded protected resource reachable from the debug interface."
+        }
+      ],
+      "reasoning_summary": "The adbg_axi_biu module is a debug Bus Interface Unit that bridges JTAG TCK-domain commands to AXI master transactions. The source snippets show the complete path: (1) strobe_i with rdy_o latches address/data/direction with no privilege check; (2) str_sync toggle propagates to the AXI FSM which immediately issues AXI address-phase handshakes; (3) read data is latched back and made available to the JTAG debug output. At no point in the captured source is there a debug-enable fuse, lifecycle state check, authentication gate, or privilege-level comparison. The only reset signal present is the standard axi_aresetn, which is a functional reset, not a security lock.",
+      "security_impact": "An attacker with physical or logical access to the JTAG interface can read from or write to any location in the system AXI memory map, including security-critical registers, cryptographic key stores, and protected MMIO regions, with no authorization required. This constitutes complete bypass of all software and hardware access controls enforced by the rest of the SoC.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The chain context does not include the module port declaration or the top-level integration to confirm whether an external debug-enable pin exists that gates trstn_i or strobe_i before they reach this module. If such gating exists upstream, the severity would be reduced, but no evidence of it appears in the provided source snippets.",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0002"
+      ]
+    },
+    {
+      "finding_id": "F-003",
+      "status": "confirmed_finding",
+      "summary": "The AXI debug bus interface unit (adbg_axi_biu) unconditionally drives AXI master address, data, and strobe signals directly from JTAG-controlled registers without any privilege check, address range filter, or access-control guard. Any JTAG user can issue arbitrary read or write transactions to any address in the AXI memory map.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 374,
+          "line_end": 394,
+          "module": "adbg_axi_biu",
+          "signal_or_register": "axi_master_ar_addr"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 374,
+          "line_end": 394,
+          "module": "adbg_axi_biu",
+          "object": "axi_master_ar_addr",
+          "evidence_type": "violation",
+          "description": "Lines 380-384 show that axi_master_ar_addr, axi_master_aw_addr, axi_master_w_data, and axi_master_w_strb are assigned directly from addr_reg, data_in_reg, and sel_reg with no address range check, privilege level check, or any other access-control guard. Any address loaded into addr_reg via JTAG is sent verbatim to the AXI bus.",
+          "supports_claim": "No guard or filter exists between the JTAG-controlled registers and the AXI master address/data outputs, allowing unrestricted access to the full AXI address space."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 321,
+          "line_end": 337,
+          "module": "adbg_axi_biu",
+          "object": "rd_wrn_i",
+          "evidence_type": "access_entry",
+          "description": "Lines 324-337 show that addr_reg, sel_reg, data_in_reg, and wr_reg are latched from combinatorial signals (addr_i, be_dec, swapped_data_i) directly when strobe_i && rdy_o is asserted, with only a JTAG reset (trstn_i) as the sole control. There is no check of the address or data content before latching.",
+          "supports_claim": "JTAG-supplied address and data are latched without any permission or range validation, establishing an unguarded entry point from the JTAG domain to AXI master transactions."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 184,
+          "line_end": 309,
+          "module": "adbg_axi_biu",
+          "object": "addr_i",
+          "evidence_type": "guard_logic",
+          "description": "The combinatorial logic from lines 184-309 only decodes byte-enable (be_dec) and performs data byte-swapping (swapped_data_i) based on word_size_i and addr_i. No address range check, no privilege validation, and no access-control decision is present anywhere in this logic.",
+          "supports_claim": "Absence of any guard logic between JTAG-supplied addr_i and the final AXI address output confirms the missing protection."
+        },
+        {
+          "file": "ips/adv_dbg_if/rtl/adbg_axi_biu.sv",
+          "line_start": 137,
+          "line_end": 182,
+          "module": "adbg_axi_biu",
+          "object": "addr_reg",
+          "evidence_type": "protected_resource",
+          "description": "The module is an AXI master BIU for an advanced debug interface, meaning addr_reg drives AXI read/write address channels that can target any peripheral or memory region in the SoC address map, including security-sensitive regions.",
+          "supports_claim": "The resource being accessed without a guard is the full AXI memory map, which typically includes security-critical registers and memories."
+        }
+      ],
+      "reasoning_summary": "The adbg_axi_biu module is a JTAG-to-AXI bridge. JTAG-supplied address (addr_i) and data (data_i/word_size_i) flow through combinatorial byte-enable decoding and data swapping into addr_reg and data_in_reg on every strobe. These registers are then directly and unconditionally assigned to axi_master_ar_addr, axi_master_aw_addr, axi_master_w_data, and axi_master_w_strb. There is no address range filter, no privilege check, no lifecycle lock (e.g., debug-disabled-in-production signal), and no other access-control mechanism in the sourced RTL. Any JTAG user can therefore read or write any location in the AXI address space.",
+      "security_impact": "An attacker with JTAG access (or who can emulate JTAG signaling) can read from or write to any address in the SoC AXI memory map, including secure boot keys, cryptographic registers, firmware, and privileged control registers, leading to full system compromise.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The chain context does not show the top-level integration or whether an external JTAG-enable/disable signal gates the entire adbg_axi_biu module. If such a gate exists at the instantiation boundary it would mitigate but not eliminate the finding (the module itself still has no internal guard). No such gating is visible in the provided snippets.",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0003"
+      ]
+    }
+  ]
+}

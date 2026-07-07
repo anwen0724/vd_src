@@ -1,0 +1,96 @@
+{
+  "graph_id": "hackatdac19__h19_access_control_fabric_scope",
+  "schema_version": "0.1",
+  "findings": [
+    {
+      "finding_id": "F-001",
+      "status": "confirmed_finding",
+      "summary": "Hardcoded access control exception allows AXI manager 6 to bypass its own permissions and inherit manager 7's access rights.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": 403,
+          "line_end": 436,
+          "module": "connectivity_mapping",
+          "signal_or_register": "access_ctrl_i"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/axi_node/src/axi_node_intf_wrap.sv",
+          "line_start": 403,
+          "line_end": 436,
+          "module": "connectivity_mapping",
+          "object": "access_ctrl_i",
+          "evidence_type": "violation",
+          "description": "The continuous assignment for connectivity_map_o includes a hardcoded condition `((j==6) && access_ctrl_i[i][7][priv_lvl_i])`. This grants manager 6 the access permissions configured for manager 7.",
+          "supports_claim": "Provides direct source-code evidence of a hardcoded privilege inheritance/bypass that deviates from the standard parameterized access control matrix."
+        }
+      ],
+      "reasoning_summary": "The `connectivity_mapping` module is responsible for computing the AXI connectivity matrix based on the configured access control matrix (`access_ctrl_i`) and current privilege level (`priv_lvl_i`). During the generation of the connectivity map, a hardcoded logical OR condition is injected specifically for manager index 6 (`j==6`). It allows manager 6 to connect to a subordinate if manager 7 is allowed, regardless of manager 6's actual access control configuration. This breaks isolation and creates a backdoor-like bypass where a specific manager inherits another's permissions.",
+      "security_impact": "An unauthorized AXI manager (manager 6) can gain unintended access to restricted subordinates (memory regions or peripherals) if manager 7 has access, leading to privilege escalation, unauthorized read/write capabilities, and breaking system-level hardware isolation.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "The physical entities corresponding to manager 6 and manager 7 (e.g., which IP cores they represent) are not known from this context, but the hardcoded privilege alias is inherently a security violation in a generic interconnect wrapper.",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0029"
+      ]
+    },
+    {
+      "finding_id": "F-002",
+      "status": "confirmed_finding",
+      "summary": "Unauthenticated and unrestricted write access to sensitive cryptographic keys and access control configurations, alongside unintended truncation/zero-padding of key data.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "signal_or_register": "RomSize"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "RomSize",
+          "evidence_type": "protected_resource",
+          "description": "The `secure_reg` array is initialized with critical security assets, including JTAG and AES keys, as well as access control matrices for bus masters and peripherals.",
+          "supports_claim": "Demonstrates that the contents of `secure_reg` are highly sensitive and dictate the security policy and cryptographic integrity of the system."
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "RomSize",
+          "evidence_type": "violation",
+          "description": "The write logic directly assigns `wdata_i` to `secure_reg[index]` when `req_i` and `we_i` are asserted, completely lacking any authentication, privilege checking, or lock-down status verification.",
+          "supports_claim": "Shows that any master capable of issuing bus transactions can arbitrarily overwrite the root-of-trust keys and access configurations."
+        },
+        {
+          "file": "src/rom2/rom2.sv",
+          "line_start": 1,
+          "line_end": 50,
+          "module": "rom2",
+          "object": "RomSize",
+          "evidence_type": "impact",
+          "description": "The assignment `secure_reg[...] <= wdata_i;` maps a 64-bit input directly to a 192-bit register without indexing the slice. This causes SystemVerilog to zero-extend the data, destroying the upper 128 bits of the key or access control configuration.",
+          "supports_claim": "Highlights that even if writing 64 bits was intended, the implementation permanently corrupts the remaining 128 bits of the key."
+        }
+      ],
+      "reasoning_summary": "The `rom2` module stores critical access control configurations and cryptographic keys in the `secure_reg` array. However, the hardware provides an unprotected, unauthenticated memory-mapped write interface. Any bus master can assert `req_i` and `we_i` to overwrite these registers. Furthermore, because `wdata_i` is 64 bits wide and the target register is 192 bits wide, the write operation will inadvertently zero-out the top 128 bits of the targeted key, leading to both a security bypass (unauthorized key/privilege modification) and severe availability/integrity loss (key corruption).",
+      "security_impact": "An attacker with bus access can elevate privileges by rewriting the access control master matrices, or completely compromise JTAG/AES keys. Additionally, the zero-padding bug will corrupt active cryptographic keys, causing denial of service or predictable key states.",
+      "confidence": "high",
+      "uncertainty_or_missing_evidence": "",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0054"
+      ]
+    }
+  ]
+}

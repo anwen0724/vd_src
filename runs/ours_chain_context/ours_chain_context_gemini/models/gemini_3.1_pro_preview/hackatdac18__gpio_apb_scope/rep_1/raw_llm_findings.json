@@ -1,0 +1,759 @@
+{
+  "graph_id": "hackatdac18__gpio_apb_scope",
+  "schema_version": "0.1",
+  "description": "Unvalidated LLM finding outputs before evidence validation and filtering.",
+  "raw_llm_findings": [
+    {
+      "chain_id": "CHAIN-0005",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0005",
+        "has_finding": true,
+        "finding": {
+          "summary": "The APB FLL interface (apb_fll_if) lacks access control mechanisms such as APB4 PPROT or software lock registers, allowing any master on the APB bus to modify critical system clock frequencies.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "access_entry",
+              "description": "The apb_fll_if module defines standard APB signals (PADDR, PWDATA, PWRITE, PSEL, PENABLE) but is missing the PPROT signal, preventing it from distinguishing between secure/non-secure or privileged/unprivileged transactions.",
+              "supports_claim": "Demonstrates the absence of hardware-level privilege enforcement at the APB boundary."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "violation",
+              "description": "The state machine immediately transitions and initiates a request to the FLLs (e.g., fll2_valid = 1'b1) simply upon detecting a read or write access (fll2_rd_access || fll2_wr_access), without verifying any access control or software lock.",
+              "supports_claim": "Shows that the logic unconditionally executes transactions to the FLLs without any guards or privilege checks."
+            }
+          ],
+          "reasoning_summary": "The apb_fll_if module acts as a bridge to configure the System, Cluster, and Peripheral Frequency Locked Loops (FLLs). The module's interface lacks the APB4 PPROT signal, and its internal logic lacks software lock mechanisms (such as requiring a specific key before allowing writes). This means any active master on the APB bus can arbitrary change the frequency of system clocks without restriction.",
+          "security_impact": "Unauthorized modification of system clock frequencies can lead to Denial of Service (DoS) via system hangs, or it can be abused to perform software-triggered clock fault injection (glitching) to bypass security checks or induce unintended behavior.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "There is no evidence in the snippets showing that the APB bus interconnection (e.g., apb_node) restricts access to this peripheral's address space for untrusted masters. Assuming standard flat APB routing, it is fully vulnerable."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0011",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0011",
+        "has_finding": true,
+        "finding": {
+          "summary": "The GPIO lock mechanism for the output register (r_gpio_out) is bypassed when writing via the REG_PADOUTSET address.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The logic for `REG_PADOUT` requires `r_gpio_lock[2] == '0` to write `PWDATA` to `r_gpio_out`, but the `REG_PADOUTSET` case unconditionally updates `r_gpio_out` with `r_gpio_out | PWDATA`, completely bypassing the lock check.",
+              "supports_claim": "Shows concrete lock bypass on `r_gpio_out`."
+            }
+          ],
+          "reasoning_summary": "The apb_gpio module protects `r_gpio_out` from writes by checking `r_gpio_lock[2]` when the `REG_PADOUT` address is written. However, the alias address `REG_PADOUTSET` modifies `r_gpio_out` directly without validating the lock, allowing an attacker to bypass the lock and arbitrarily set GPIO outputs.",
+          "security_impact": "An unauthorized agent can bypass the software lock on GPIO outputs, potentially manipulating external hardware states that are intended to be securely locked by privileged software.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0012",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0012",
+        "has_finding": true,
+        "finding": {
+          "summary": "Destructive lock mechanism and bypassed lock check in GPIO registers",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "When lock bits are active, writes to REG_PADDIR and REG_PADOUT assign 0 to pwdata_l, which clears the protected registers to 0 instead of ignoring the write. Furthermore, writes to REG_PADOUTSET modify r_gpio_out without evaluating any lock check.",
+              "supports_claim": "The lock logic explicitly destroys the protected register state upon a locked write, and the set-register path entirely bypasses the lock check."
+            }
+          ],
+          "reasoning_summary": "The GPIO module's lock implementation contains two major vulnerabilities. First, the lock is destructive: if a register is locked (e.g., r_gpio_lock[0] != 0), an APB write forces its value to 0 instead of preserving the current state. Second, the lock check is bypassed for the REG_PADOUTSET operation, which allows an attacker to set bits in r_gpio_out even when r_gpio_lock[2] is asserted.",
+          "security_impact": "A malicious actor or erroneous software can clear critical GPIO direction and output configurations to 0 by writing to locked registers, potentially causing denial of service or dangerous electrical states. They can also bypass the lock to arbitrarily drive output pins via the SET register.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0016",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0016",
+        "has_finding": true,
+        "finding": {
+          "summary": "The GPIO output register (`r_gpio_out`) can be modified via `REG_PADOUTSET` without verifying the `r_gpio_lock` state, effectively bypassing the locking mechanism.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "The case block for `REG_PADOUTSET` unconditionally ORs `PWDATA` into `r_gpio_out`, omitting the check for `r_gpio_lock[2]` that correctly guards writes in the `REG_PADOUT` case.",
+              "supports_claim": "Lock bypass vulnerability where setting individual bits in the protected GPIO output register is allowed regardless of its locked state."
+            }
+          ],
+          "reasoning_summary": "The APB GPIO module implements a register locking mechanism (`r_gpio_lock`) to protect critical GPIO settings from unintended or malicious modifications. While the direct write operation via `REG_PADOUT` enforces this by checking `r_gpio_lock[2]`, the logic for `REG_PADOUTSET` updates `r_gpio_out` with `PWDATA` without evaluating the lock bit. This oversight allows bypassing the lock and changing the GPIO output state.",
+          "security_impact": "Malicious or erroneous software can bypass the hardware lock and alter GPIO output pin states. This compromises the integrity of physical interactions with the SoC, potentially driving external components to unsafe states or bypassing intended security isolation boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0018",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0018",
+        "has_finding": true,
+        "finding": {
+          "summary": "The `apb_gpio` module implements a lock (`r_gpio_lock[2]`) to protect the `r_gpio_out` register from unauthorized writes. However, this lock is bypassed when modifying the register via `REG_PADOUTSET`, allowing arbitrary setting of protected GPIO outputs.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "The logic handles `REG_PADOUT` writes by checking `if(r_gpio_lock[2] == '0)` before updating `r_gpio_out`. However, the immediately following `REG_PADOUTSET` case performs `r_gpio_out <= r_gpio_out | PWDATA;` without checking the `r_gpio_lock[2]` state.",
+              "supports_claim": "This missing guard provides concrete evidence that the lock mechanism intended to protect `r_gpio_out` is bypassed by alternative register access paths."
+            }
+          ],
+          "reasoning_summary": "The `apb_gpio` module implements a permission model using the `r_gpio_lock` register to protect sensitive GPIO configuration states. Specifically, `r_gpio_lock[2]` is used to guard the `r_gpio_out` register against unauthorized modification via the `REG_PADOUT` APB address. However, the design includes additional alias registers for bitwise modification, such as `REG_PADOUTSET`. The RTL for `REG_PADOUTSET` omits the `r_gpio_lock[2]` check, allowing any bus master to assert bits in the `r_gpio_out` register regardless of the lock state, completely bypassing the intended security mechanism.",
+          "security_impact": "An attacker or compromised software module can bypass the hardware lock and alter GPIO output signals. If these GPIOs control secure peripherals, power sequencing, resets, or external hardware mechanisms, this bypass could lead to privilege escalation, denial of service, or unauthorized control of system resources.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The snippet only explicitly shows `REG_PADOUTSET`, but similar missing checks are highly likely for `REG_PADOUTCLR` (which is defined in SNIP-0004 but cut off in SNIP-0005 logic). The provided evidence is sufficient to prove the lock bypass vulnerability."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0024",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0024",
+        "has_finding": true,
+        "finding": {
+          "summary": "Locked GPIO configuration registers are incorrectly cleared to zero upon unauthorized write attempts.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "When the lock bits (r_gpio_lock[0] or r_gpio_lock[2]) are asserted, an attempted APB write to REG_PADDIR or REG_PADOUT clears the respective register to zero instead of retaining its current value.",
+              "supports_claim": "Demonstrates the destructive lock implementation where an unauthorized write zeroes the protected state."
+            }
+          ],
+          "reasoning_summary": "The GPIO APB interface implements a locking mechanism to protect the direction (r_gpio_dir) and output (r_gpio_out) registers. However, the logic for handling a locked state assigns a value of zero (pwdata_l = '0) to the intermediate variable and then assigns it to the target register, instead of preserving its existing value. As a result, any attempt to write to the locked registers will zero them out, defeating the lock's protection and destroying the stored configuration.",
+          "security_impact": "An unauthorized agent can maliciously clear locked GPIO directions or output states, potentially causing system instability, denial of service, or compromising secure hardware configurations dependent on those fixed GPIO pins.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0025",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0025",
+        "has_finding": true,
+        "finding": {
+          "summary": "The `r_gpio_out` register is protected by `r_gpio_lock[2]` during standard writes via `REG_PADOUT`, but this lock is bypassed when using the `REG_PADOUTSET` register, allowing unauthorized modification of the GPIO output.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "protected_resource",
+              "description": "Writes to `REG_PADOUT` check `r_gpio_lock[2]` to ensure `r_gpio_out` is not modified when locked.",
+              "supports_claim": "Establishes that `r_gpio_out` is a protected resource controlled by `r_gpio_lock[2]`."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "Writes to `REG_PADOUTSET` directly modify `r_gpio_out` without checking `r_gpio_lock[2]`, bypassing the intended lock mechanism.",
+              "supports_claim": "Demonstrates a direct bypass of the lock condition, allowing arbitrary modification of locked GPIO outputs."
+            }
+          ],
+          "reasoning_summary": "The GPIO module employs `r_gpio_lock[2]` to restrict updates to the `r_gpio_out` register. While the standard write path for `REG_PADOUT` properly enforces this lock, the alias write path for `REG_PADOUTSET` omits the lock check. An attacker can write to `REG_PADOUTSET` to modify `r_gpio_out` bits even when the lock is active, violating the permission policy.",
+          "security_impact": "An attacker or untrusted software can change locked GPIO output states, potentially interfering with secure peripheral controls, altering secure signals, or driving malicious physical outputs.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0026",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0026",
+        "has_finding": true,
+        "finding": {
+          "summary": "The GPIO lock mechanism for the output register can be bypassed. Writing to `REG_PADOUT` correctly checks `r_gpio_lock[2]`, but writing to `REG_PADOUTSET` directly modifies `r_gpio_out` without checking the lock.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "The logic for `REG_PADOUTSET` does not check `r_gpio_lock[2]` before modifying `r_gpio_out`, unlike `REG_PADOUT` which properly enforces the lock.",
+              "supports_claim": "The `r_gpio_out` register can be manipulated regardless of the lock state via the `REG_PADOUTSET` APB write operation, explicitly bypassing the protection."
+            }
+          ],
+          "reasoning_summary": "The APB GPIO module implements a lock mechanism (`r_gpio_lock`) to prevent unintended writes to certain configuration registers. While `REG_PADOUT` correctly evaluates `r_gpio_lock[2]` before updating `r_gpio_out`, the `REG_PADOUTSET` register bypasses this check entirely. This allows an attacker or faulty software to modify protected GPIO output states by using the SET register instead of the direct write register.",
+          "security_impact": "Loss of integrity for GPIO outputs. A locked GPIO output can still be modified, potentially altering the state of critical external components controlled by the GPIO pins, leading to system instability or hardware tampering.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0034",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0034",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing APB protection signals (PPROT) and access control guards in apb_soc_ctrl expose critical SoC configuration registers (e.g., JTAG, boot address, pad configuration) to arbitrary modification by any bus master.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0007",
+              "evidence_role": "access_entry",
+              "description": "The APB interface definition for apb_soc_ctrl lacks the PPROT (protection) signal, which is necessary to distinguish between secure/non-secure and privileged/unprivileged accesses.",
+              "supports_claim": "Demonstrates the absence of hardware privilege differentiation at the access entry point."
+            },
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "protected_resource",
+              "description": "Critical SoC control registers such as pad_cfg, JTAG debug registers (r_jtag_rego), and cluster control (r_cluster_byp, r_cluster_pow) are assigned directly from PWDATA.",
+              "supports_claim": "Shows that sensitive system states are directly modifiable by an APB write operation."
+            },
+            {
+              "snippet_id": "SNIP-0009",
+              "evidence_role": "violation",
+              "description": "Assignments to sensitive registers occur without any privilege, state, or lock checks (e.g., no check against a lock register or system privilege level).",
+              "supports_claim": "Confirms the missing guard vulnerability, allowing any bus master to perform writes to critical configuration registers."
+            }
+          ],
+          "reasoning_summary": "The apb_soc_ctrl module acts as the SoC's central configuration peripheral but uses an older APB interface lacking the PPROT signal. Consequently, it applies no privilege, security, or lock checks before updating critical SoC state (like JTAG debug registers, boot addresses, power, and pad configurations) from the APB write data (PWDATA). This missing guard allows any APB master to compromise the SoC's secure configuration.",
+          "security_impact": "An attacker controlling any bus master (such as a generic DMA or an unprivileged core) can write to apb_soc_ctrl to alter the SoC boot address, enable JTAG debug access, or remap I/O pads, completely bypassing any intended system-level security or isolation boundaries.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The APB bridge or interconnect might enforce access control globally based on address ranges before transactions reach the apb_soc_ctrl module, though typically such critical endpoints should implement local lock or privilege checks."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0035",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0035",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing privilege checks on sensitive SoC control registers allows arbitrary APB bus masters to alter critical system states.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0006",
+              "evidence_role": "access_entry",
+              "description": "The apb_soc_ctrl module defines its APB interface but omits protection signals (e.g., PPROT) or other sideband access control inputs, precluding hardware-based privilege separation.",
+              "supports_claim": "Demonstrates that the module cannot distinguish between privileged and unprivileged access requests."
+            },
+            {
+              "snippet_id": "SNIP-0008",
+              "evidence_role": "violation",
+              "description": "APB write transactions unconditionally assign new values to critical SoC control registers (r_corestatus, r_cluster_byp, r_cluster_pow, r_cluster_fetch_enable) based purely on address matching, without any guard logic.",
+              "supports_claim": "Shows the direct absence of permission state evaluation or lock checks prior to modifying protected system resources."
+            }
+          ],
+          "reasoning_summary": "The apb_soc_ctrl module is responsible for managing critical SoC operations, including core status, boot addresses, cluster execution, and power management. However, its register-write logic lacks any hardware privilege guard (such as checking APB PPROT signals or internal lock states). This omission allows any APB bus master (which could include unprivileged cores or DMA engines) to freely overwrite these security-critical control registers.",
+          "security_impact": "An attacker with unprivileged execution or control over a bus master can manipulate system execution flow, bypass security boundaries by altering boot addresses or cluster modes, and cause denial of service by unexpectedly modifying core status or power states.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0040",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0040",
+        "has_finding": true,
+        "finding": {
+          "summary": "The APB SoC Controller (`apb_soc_ctrl`) allows uncontrolled modification of critical system configuration registers (e.g., boot address, fetch enable, and pad multiplexing) without privilege or security checks.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "access_entry",
+              "description": "The write enable logic (`s_apb_write`) and state updates rely strictly on standard APB control signals (`PSEL && PENABLE && PWRITE`), lacking any side-band privilege/secure indicators.",
+              "supports_claim": "Establishes that any APB write transaction reaching this module is accepted indiscriminately."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "protected_resource",
+              "description": "Sensitive registers like `r_bootaddr` (boot address) and `r_fetchen` (fetch enable) are directly modified by `PWDATA`.",
+              "supports_claim": "Shows that highly critical SoC states are exposed to APB writes."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The sequential block updates the sensitive registers when an APB write is detected, with no authorization checks, lock bit protections, or privilege separation.",
+              "supports_claim": "Confirms the missing access control vulnerability on critical SoC registers."
+            }
+          ],
+          "reasoning_summary": "The `apb_soc_ctrl` module handles memory-mapped APB writes to critical SoC configuration registers, such as the core boot address (`r_bootaddr`), core fetch enable (`r_fetchen`), and pad multiplexing (`pad_cfg`). The module processes these writes purely based on bus protocol signals (`PSEL`, `PENABLE`, `PWRITE`) without validating the originating master's privilege level (e.g., no secure-mode or privileged-mode checks). Consequently, any master capable of issuing writes on the peripheral bus could maliciously or accidentally overwrite the boot configuration.",
+          "security_impact": "An attacker with control over an unprivileged bus master (e.g., a DMA controller or a compromised lower-privileged core) could overwrite the boot address and restart the core, leading to arbitrary code execution, privilege escalation, or denial of service.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The vulnerability assumes that the SoC does not deploy a system-level interconnect firewall or memory protection unit (MPU) that strictly filters accesses to the `apb_soc_ctrl` memory region. If a centralized bus filter is used, this local lack of checks might be mitigated, though defense-in-depth is lacking."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0043",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0043",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing access control on APB writes to JTAG configuration register, allowing unauthorized modification of debug state.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "access_entry",
+              "description": "The APB interface accepts write transactions when PSEL, PENABLE, and PWRITE are asserted, without checking privilege levels or security attributes.",
+              "supports_claim": "Shows that any bus master can initiate a write to the peripheral's registers."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "The JTAG configuration register (r_jtag_rego) is directly updated with the APB write data (PWDATA) when addressed, lacking any guard logic, lock, or access control check.",
+              "supports_claim": "Demonstrates the absence of protection mechanisms for sensitive debug registers."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "impact",
+              "description": "The internal JTAG register state (r_jtag_rego) is continuously assigned to the module's output soc_jtag_reg_o.",
+              "supports_claim": "Confirms that the unprotected register update directly alters the SoC's JTAG configuration output."
+            }
+          ],
+          "reasoning_summary": "The apb_soc_ctrl module allows any master with access to the APB bus to write to the REG_JTAGREG register. There are no privilege checks (such as APB PPROT) or authentication mechanisms implemented before updating the internal r_jtag_rego state, which directly drives the soc_jtag_reg_o output. This allows untrusted or lower-privileged software to modify JTAG and debug behavior.",
+          "security_impact": "Unauthorized software could modify JTAG configurations, potentially enabling unintended debug features, bypassing security boundaries, or compromising the system's operational integrity.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "It is possible that an upstream interconnect or firewall restricts accesses to this entire APB memory region to privileged masters only, though the peripheral itself lacks internal defense-in-depth mechanisms."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0046",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0046",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing access control and privilege checks on APB Timer configuration registers allow unauthorized modification.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "The apb_timer_unit module accepts writes to critical configuration registers (e.g., s_cfg_lo) directly from the APB interface when PSEL, PENABLE, and PWRITE are asserted. There are no privilege checks (e.g., APB PPROT) or lock guards implemented.",
+              "supports_claim": "Demonstrates the complete absence of hardware guards or access control mechanisms for modifying the timer's configuration."
+            },
+            {
+              "snippet_id": "SNIP-0011",
+              "evidence_role": "access_entry",
+              "description": "The timer is instantiated on a shared peripheral APB bus accessible by multiple masters (including UDMA, debug, and cores) without local access differentiation.",
+              "supports_claim": "Confirms that any master with access to the peripheral bus can freely issue write transactions to the timer module."
+            }
+          ],
+          "reasoning_summary": "The APB timer unit implements its configuration registers without any access control mechanisms, such as privilege level checks or configuration locks. Because the timer is attached to a shared peripheral bus, any bus master (e.g., DMA, unprivileged core tasks) can overwrite the timer configuration (s_cfg_lo, s_cfg_hi). This allows an attacker to reset the timer, disable it, or manipulate timer interrupts without authorization.",
+          "security_impact": "An unauthorized entity can tamper with system timers, potentially causing denial of service, disrupting OS/RTOS scheduling, bypassing timeout-based security measures, or enabling timing side-channel attacks.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The broader system interconnect (e.g., AXI to APB bridges or memory protection units) might enforce access control rules before transactions reach the peripheral bus. However, at the local RTL level of the timer unit, no protection or lock capability exists."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0049",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0049",
+        "has_finding": true,
+        "finding": {
+          "summary": "The APB GPIO module bypasses the GPIO lock protection when writing to the REG_PADOUTSET register, allowing unauthorized modification of the locked GPIO output state.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The logic for `REG_PADOUT` correctly checks `r_gpio_lock[2]` to prevent updates to `r_gpio_out` when locked. However, `REG_PADOUTSET` bypasses this check and updates `r_gpio_out` directly by OR-ing it with `PWDATA`.",
+              "supports_claim": "Provides direct source-code evidence that the lock mechanism intended to protect GPIO outputs can be bypassed by using the SET register instead of the direct write register."
+            }
+          ],
+          "reasoning_summary": "The design implements a lock mechanism (`r_gpio_lock[2]`) to protect the GPIO output register (`r_gpio_out`) from being modified. This protection is enforced when writing to `REG_PADOUT`. However, the protection is inadvertently omitted in the `REG_PADOUTSET` register handling logic. Because `REG_PADOUTSET` directly modifies `r_gpio_out` without checking the lock, a locked GPIO pin's output state can still be manipulated.",
+          "security_impact": "Medium to High. Bypassing the GPIO lock allows unauthorized software or attackers to modify critical hardware output states, potentially causing denial of service, improper reset of peripherals, or unauthorized physical control, depending on what the GPIO pins are connected to.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The snippet only shows `REG_PADOUTSET`. While `REG_PADOUTCLR` is missing from the snippet (likely defined below it), the vulnerability is already proven conclusively for the SET operation."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0051",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0051",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing access control on critical SoC control APB registers allows unauthorized modification of boot address and debug configurations.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The apb_soc_ctrl module processes APB writes to critical registers such as REG_FCBOOT and REG_FCFETCH without any access control or privilege checks (e.g., missing PPROT or lock logic).",
+              "supports_claim": "Demonstrates that any bus master can overwrite the boot address and fetch enable state, bypassing intended security domain restrictions."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "protected_resource",
+              "description": "The JTAG control (REG_JTAGREG) and cluster control (REG_CLUSTER_CTRL) registers are updated directly from PWDATA during unauthenticated APB writes.",
+              "supports_claim": "Confirms that debug (JTAG) and cluster control features are exposed to the same unprotected APB interface."
+            }
+          ],
+          "reasoning_summary": "The apb_soc_ctrl module exposes critical SoC control registers (boot address, fetch enable, JTAG, cluster control) over the APB bus. However, it does not implement any access control mechanisms, such as checking APB PPROT signals for privileged/secure transactions, nor does it implement software-configurable lock bits. This omission allows any bus master capable of generating APB writes to arbitrary modify the boot flow or enable debug access, leading to a complete compromise of the SoC's execution environment.",
+          "security_impact": "High. A compromised or malicious non-privileged bus master can modify the boot address to execute arbitrary code, or enable debug interfaces, fully bypassing system security and isolation.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0054",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0054",
+        "has_finding": true,
+        "finding": {
+          "summary": "Incorrect cross-wiring of AXI protection signals between read and write channels.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "The protection signals are swapped: `data_master_aw_prot_o` is assigned `s_data_master.ar_prot` (line 840), and `data_master_ar_prot_o` is assigned `s_data_master.aw_prot` (line 854).",
+              "supports_claim": "Demonstrates an incorrect protection state update where write operations receive read privileges and read operations receive write privileges."
+            }
+          ],
+          "reasoning_summary": "The RTL code for the AXI data master interface unpack logic incorrectly wires the `ar_prot` (read protection) signal to the `aw_prot_o` (write protection) output, and the `aw_prot` signal to the `ar_prot_o` output. This swapping causes write transactions to execute with the security and privilege attributes intended for reads, and vice versa.",
+          "security_impact": "High. This cross-wiring fundamentally compromises the AXI protection mechanisms (such as TrustZone secure/non-secure or privilege levels). An initiator could inadvertently or maliciously bypass memory protection boundaries if read and write permissions are asymmetric.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0112",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0112",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing access control checks for ROM and Private L2 memory regions in the SoC interconnect.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "ROM and Private L2 memory chip selects (rom_csn_o, L2_pri_CEN_o) are directly asserted from peripheral request signals without any privilege or security state checks.",
+              "supports_claim": "Shows the absence of guard logic for sensitive memory regions, unconditionally allowing access upon request."
+            }
+          ],
+          "reasoning_summary": "The SoC interconnect binds the ROM and Private L2 memory endpoints directly to incoming request signals (PER_data_req_TO_BRIDGE) without evaluating any access control, privilege, or security metadata (such as protection bits or secure state). This allows any bus master capable of generating a request to these addresses to access the memory regions unconditionally, representing a lack of endpoint authorization guards.",
+          "security_impact": "Malicious or compromised bus masters (e.g., a DMA controller or a less privileged core) could bypass intended isolation boundaries to read sensitive boot code/keys from ROM or read/modify isolated data in Private L2 memory, potentially leading to privilege escalation, arbitrary code execution, or information disclosure.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "It is possible that access control is strictly enforced at the initiating master (e.g., via an MPU/PMP or IOMMU) or earlier in the crossbar routing logic before reaching this specific interconnect port. However, from the perspective of the memory endpoints in this module, defense-in-depth is lacking."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0125",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0125",
+        "has_finding": true,
+        "finding": {
+          "summary": "Incorrect lock mechanism in apb_gpio forces locked registers to zero on write attempts instead of preserving their state.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "During a write to REG_PADDIR or REG_PADOUT, if the respective lock bit (r_gpio_lock[0] or r_gpio_lock[2]) is set, the intermediate data (pwdata_l) is forced to '0' instead of retaining the existing register value. This '0' is then written to the locked register.",
+              "supports_claim": "Demonstrates that the lock protection is flawed and actively corrupts the register state by clearing it when an unauthorized write is attempted."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "permission_state",
+              "description": "Defines the r_gpio_lock register, which is intended to protect access to the GPIO configurations.",
+              "supports_claim": "Confirms the existence and intent of the hardware lock state in the APB GPIO peripheral."
+            }
+          ],
+          "reasoning_summary": "The apb_gpio module employs `r_gpio_lock` to protect critical configuration registers like `REG_PADDIR` and `REG_PADOUT` from unauthorized modification. However, the write logic incorrectly assigns the value '0' to the input vector `pwdata_l` when the lock bit is active, instead of preserving the current register state (e.g., `pwdata_l = r_gpio_dir`). Consequently, any write attempt to a locked register overwrites the existing configuration with zeros. This vulnerability breaks the integrity provided by the lock.",
+          "security_impact": "An attacker or unprivileged software can bypass the intended lock protection and clear critical GPIO direction and output configurations. This can lead to a denial of service, unexpected hardware behavior, or system compromise by altering the state of externally connected interfaces.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0126",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0126",
+        "has_finding": true,
+        "finding": {
+          "summary": "Lock bypass in GPIO output configuration via REG_PADOUTSET",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "The logic for updating `r_gpio_out` via `REG_PADOUT` correctly checks `r_gpio_lock[2]` (lines 307-311). However, `REG_PADOUTSET` (lines 312-313) modifies `r_gpio_out` without verifying `r_gpio_lock[2]`, bypassing the lock completely.",
+              "supports_claim": "Demonstrates that the lock protection intended for `r_gpio_out` is incomplete and can be circumvented."
+            }
+          ],
+          "reasoning_summary": "The `apb_gpio` module protects GPIO output states (`r_gpio_out`) from unauthorized writes using the `r_gpio_lock[2]` bit. While a write to `REG_PADOUT` correctly enforces this lock, a write to `REG_PADOUTSET` directly modifies the register without performing the lock check. This allows the lock state to be bypassed, granting an attacker the ability to arbitrarily set bits in the locked GPIO output register.",
+          "security_impact": "An attacker or compromised peripheral could manipulate critical GPIO output signals despite them being locked by the system, potentially disrupting hardware controls, external device states, or physical security mechanisms.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0128",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0128",
+        "has_finding": true,
+        "finding": {
+          "summary": "The GPIO lock mechanism for output state can be bypassed using the SET operations, allowing unauthorized modifications.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "guard_logic",
+              "description": "The logic for REG_PADOUT protects writes to r_gpio_out by checking if r_gpio_lock[2] is '0.",
+              "supports_claim": "Establishes that the r_gpio_out register is intended to be protected by the r_gpio_lock[2] bit."
+            },
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "violation",
+              "description": "The handler for REG_PADOUTSET unconditionally modifies r_gpio_out (r_gpio_out <= r_gpio_out | PWDATA) without enforcing the r_gpio_lock[2] check.",
+              "supports_claim": "Demonstrates a bypass of the protection mechanism, allowing locked outputs to be overwritten."
+            }
+          ],
+          "reasoning_summary": "The apb_gpio module implements a lock mechanism (r_gpio_lock) to prevent unauthorized changes to GPIO configurations. While writes to the REG_PADOUT address correctly verify r_gpio_lock[2], the alias address REG_PADOUTSET modifies r_gpio_out without checking the lock state. This creates a vulnerability where software can bypass the lock and manipulate GPIO outputs.",
+          "security_impact": "An attacker or unprivileged software could alter locked GPIO output states, which might lead to physical malfunction, incorrect external device control, or denial of service.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0129",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0129",
+        "has_finding": true,
+        "finding": {
+          "summary": "Critical SoC control registers (e.g., boot address, fetch enable, power control) are exposed via APB without any access control, privilege checks, or locking mechanisms.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "violation",
+              "description": "The apb_soc_ctrl module processes APB writes (PSEL && PENABLE && PWRITE) and directly updates sensitive system registers such as `r_bootaddr` (REG_FCBOOT), `r_fetchen` (REG_FCFETCH), and cluster power controls. There are no guard conditions, `PPROT` privilege checks, or lock registers protecting these critical configurations.",
+              "supports_claim": "Demonstrates the complete lack of access control for modifying sensitive SoC states."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "protected_resource",
+              "description": "Additional critical registers, including JTAG configuration (`r_jtag_rego`) and cluster control (`r_cluster_byp`, `r_cluster_pow`, `r_cluster_fetch_enable`), are similarly written without any protection or authentication.",
+              "supports_claim": "Highlights the broad impact of the missing guard logic on multiple critical system control elements."
+            }
+          ],
+          "reasoning_summary": "The `apb_soc_ctrl` module provides memory-mapped access to the SoC's most critical operational parameters, including the boot address (`r_bootaddr`), core fetch enable (`r_fetchen`), and cluster power control. These are unconditionally writable by any master on the APB bus. Without a hardware privilege check (such as `PPROT`) or a software lock/key mechanism, any compromised software task or generic bus master can overwrite the boot address to hijack the execution flow upon a reset, or cause a denial of service by disabling core fetching or altering power states.",
+          "security_impact": "An attacker with arbitrary write access to the memory-mapped APB bus can gain arbitrary code execution upon next core boot (by hijacking `r_bootaddr`), or execute a Denial of Service by corrupting power/fetch configurations.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "It is assumed that the overarching system intends to isolate software domains or protect the boot process. If the target SoC environment is completely flat and single-privilege by design (like a basic embedded MCU with no isolation), this might be accepted behavior, but it remains a missing guard vulnerability in the context of system security."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0130",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0130",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing privilege checks and incomplete address decoding in APB peripherals allow memory protection bypass and unauthorized access.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "The apb_timer_unit module lacks a privilege protection signal (e.g., PPROT) on its APB interface and decodes only the lower 6 bits (`PADDR[5:0]`) of the 12-bit address space. This creates memory aliases and allows unprivileged modifications.",
+              "supports_claim": "Shows the absence of hardware privilege checks and the presence of incomplete address decoding, enabling attackers to bypass MPU/PMP guards via aliased addresses."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "The apb_gpio module also omits privilege signals and uses only `PADDR[6:2]` for address decoding, leaving upper bits unverified and creating further memory aliasing.",
+              "supports_claim": "Confirms the systemic lack of address bounds checking and missing APB privilege signals across multiple peripheral interfaces."
+            }
+          ],
+          "reasoning_summary": "The SoC's APB peripherals (such as apb_timer_unit and apb_gpio) do not implement privilege-level checking (e.g., AMBA PPROT) and use incomplete address decoding. By only evaluating the lowest bits of the 12-bit address, the peripherals mirror their registers across their allocated 4KB memory space. This missing guard allows an attacker to bypass Memory Protection Unit (MPU/PMP) rules—which typically only protect the canonical base address—by accessing the peripheral via an aliased address. Furthermore, the absence of privilege checks means any master can read or write critical peripheral states.",
+          "security_impact": "An attacker can bypass intended memory protections (MPU/PMP) through address aliasing to gain unauthorized access to critical peripherals. This can lead to privilege escalation, denial of service (e.g., by resetting timers or altering GPIO configurations), and full system compromise.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The broader system might implement an interconnect-level firewall or access filter before transactions reach the APB peripherals. However, at the peripheral boundary itself, the guards and address completeness checks are missing."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0131",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0131",
+        "has_finding": true,
+        "finding": {
+          "summary": "Lock bypass vulnerability in GPIO pad output set register allows unauthorized modification of locked GPIO outputs.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "violation",
+              "description": "The logic for REG_PADOUTSET modifies r_gpio_out without checking r_gpio_lock[2], whereas REG_PADOUT correctly checks the lock.",
+              "supports_claim": "Demonstrates a direct bypass of the lock mechanism intended to protect the GPIO output state."
+            }
+          ],
+          "reasoning_summary": "The apb_gpio module uses r_gpio_lock[2] to restrict writes to the GPIO output register (r_gpio_out) when accessed via REG_PADOUT. However, the write transaction for REG_PADOUTSET updates r_gpio_out directly without verifying the lock bit. This allows an attacker to bypass the intended hardware protection and assert GPIO output bits even when the register is locked.",
+          "security_impact": "Loss of integrity for locked GPIO outputs. Attackers could alter critical external control signals, potentially leading to privilege escalation, arbitrary environmental changes, or bypass of secure states.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": ""
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0135",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0135",
+        "has_finding": true,
+        "finding": {
+          "summary": "Missing access control and privilege checks for critical SoC control registers via the APB bus.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0004",
+              "evidence_role": "access_entry",
+              "description": "The apb_soc_ctrl module defines an APB interface for configuring critical SoC state (e.g., boot addresses, JTAG, cluster power). The interface lacks privilege indicator signals (such as PPROT), preventing it from differentiating between privileged and unprivileged access.",
+              "supports_claim": "Shows that the module's access entry does not receive the necessary transaction context to enforce privilege separation."
+            },
+            {
+              "snippet_id": "SNIP-0005",
+              "evidence_role": "violation",
+              "description": "Write operations update critical SoC registers (e.g., r_jtag_rego, r_cluster_pow, r_cluster_byp) directly from PWDATA purely based on address matching, without any permission or authorization checks.",
+              "supports_claim": "Confirms that sensitive SoC resources are indiscriminately programmable by any bus master capable of writing to the APB peripheral bus."
+            }
+          ],
+          "reasoning_summary": "The apb_soc_ctrl module acts as the APB peripheral managing critical SoC configurations like JTAG registers, cluster power, boot addresses, and fetch enables. Because the APB interface does not include privilege separation mechanisms, and the register update logic unconditionally commits data from any valid APB write transaction, there is no localized access control. Any master with access to the APB bus can alter these critical system states.",
+          "security_impact": "Unprivileged or malicious software, or compromised bus masters (such as DMA controllers), could maliciously overwrite the SoC boot address, disable instruction fetching, tamper with JTAG state, or power down the system cluster. This can result in denial of service, privilege escalation, or unauthorized arbitrary code execution upon reset.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "While the peripheral itself lacks protection, there is a possibility that a system-level interconnect firewall or APB bridge implements address-based access filtering. However, based strictly on the provided RTL, the peripheral is fully exposed and vulnerable."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0137",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0137",
+        "has_finding": true,
+        "finding": {
+          "summary": "The apb_soc_ctrl module allows unrestricted modification of the JTAG register (soc_jtag_reg_o) via APB writes without any privilege or authentication checks.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "access_entry",
+              "description": "The APB interface definition lacks protection signals (e.g., PPROT) to distinguish between secure/non-secure or privileged/unprivileged accesses.",
+              "supports_claim": "Shows that the peripheral has no hardware mechanism at the interface level to enforce access control."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "The state update logic for REG_JTAGREG unconditionally assigns the value of PWDATA to r_jtag_rego upon an APB write.",
+              "supports_claim": "Confirms the lack of any internal guard, lock, or privilege check before updating the JTAG-related register state."
+            }
+          ],
+          "reasoning_summary": "The apb_soc_ctrl module exposes the r_jtag_rego (driven to soc_jtag_reg_o) to the APB bus. Any bus master capable of addressing the APB slave can write to this register. There are no access controls, locks, or privilege checks (such as PPROT evaluations) implemented, which may allow compromised software to interact directly with the debug/JTAG subsystem.",
+          "security_impact": "Unauthorized software could write to the JTAG register, potentially manipulating debug states, establishing side-channels to the debug domain, or bypassing intended debug disabled/locked states.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The actual security impact depends on how the external JTAG subsystem utilizes `soc_jtag_reg_o` and whether system-level interconnects implement access filtering for this APB peripheral space."
+        },
+        "no_finding_reason": ""
+      }
+    }
+  ]
+}

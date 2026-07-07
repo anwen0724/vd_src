@@ -1,0 +1,245 @@
+{
+  "graph_id": "hackatdac19__h19_access_control_fabric_scope",
+  "schema_version": "0.1",
+  "description": "Unvalidated LLM finding outputs before evidence validation and filtering.",
+  "raw_llm_findings": [
+    {
+      "chain_id": "CHAIN-0001",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0001",
+        "has_finding": true,
+        "finding": {
+          "summary": "access_ctrl permission matrix is loaded directly from access_ctrl_reg (FUSE memory) without any authentication, locking, or integrity guard before being forwarded to the AXI crossbar privilege-level enforcement logic.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "permission_state",
+              "description": "access_ctrl_reg is declared as a plain logic array [1:0][47:0] with no write-protection, lock bit, or authenticated-write mechanism visible in the surrounding context.",
+              "supports_claim": "The register holding per-peripheral privilege permissions has no protection mechanism declared at its definition site."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "A generate-for loop at line 450 performs a combinational assign of access_ctrl[i][j] directly from access_ctrl_reg[i][4*j +: 4] with no intervening guard, lock check, privilege check, or reset-state enforcement. The comment 'Getting configuration registers from FUSE memory' implies these should be one-time programmable or authenticated values, but the path is purely combinational with no protection.",
+              "supports_claim": "The access control matrix fed to the AXI crossbar is derived from an unguarded register without any authentication or lock mechanism, allowing any agent able to write access_ctrl_reg to redefine per-peripheral privilege permissions at runtime."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "protected_resource",
+              "description": "access_ctrl drives the axi_node_intf_wrap instance which enforces privilege-level (priv_lvl) access to NB_PERIPHERALS peripherals across NB_SUBORDINATE subordinates, making it the authoritative permission matrix for the AXI interconnect.",
+              "supports_claim": "Corruption or unauthorized modification of access_ctrl directly undermines the AXI crossbar's privilege enforcement for all peripherals."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "guard_logic",
+              "description": "No guard logic, lock signal, or privilege check is present between access_ctrl_reg and access_ctrl in the generate block; the assignment is unconditional and combinational.",
+              "supports_claim": "Absence of guard logic confirms the missing protection on the permission-state update path."
+            }
+          ],
+          "reasoning_summary": "The access_ctrl signal is the privilege-level permission matrix for an AXI crossbar controlling access to all SoC peripherals. It is derived combinationally and unconditionally from access_ctrl_reg with no lock, authentication, or integrity check. Any entity capable of writing access_ctrl_reg (e.g., via a debug interface, JTAG, or software in a lower privilege level if the register is memory-mapped without proper access control) can rewrite the permission matrix and bypass the AXI interconnect's privilege enforcement entirely.",
+          "security_impact": "An attacker who can write access_ctrl_reg can grant themselves or a compromised subsystem elevated access to any peripheral, bypassing the hardware privilege-level enforcement in the AXI crossbar. This could enable access to secure memory regions, cryptographic peripherals, or debug interfaces that should be restricted to higher privilege levels.",
+          "confidence": "medium",
+          "uncertainty_or_missing_evidence": "The source snippets are from a testharness (tb/) file, so this may be test-only infrastructure rather than production RTL. The write path to access_ctrl_reg is not shown in the provided snippets; it is possible that write protection exists elsewhere. The actual axi_node_intf_wrap implementation and how it enforces priv_lvl is also not provided, limiting full impact assessment."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0008",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0008",
+        "has_finding": true,
+        "finding": {
+          "summary": "Debug interface (DMI/JTAG) accessible from testharness without authentication or privilege guard: debug requests are muxed purely on a simulation plusarg flag with no hardware access control enforcement",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "access_entry",
+              "description": "The jtag_enable signal is set via a simulation plusarg ($value$plusargs) at line 108. Lines 112-117 show a combinational MUX selecting the active debug interface (JTAG or DMI) based solely on jtag_enable[0]. There is no hardware lock, authentication check, or privilege level verification guarding which debug interface drives debug_req.",
+              "supports_claim": "The debug request path is controlled only by an unprivileged simulation argument, with no hardware-enforced permission check."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "permission_state",
+              "description": "Signals jtag_key and access_ctrl_reg are declared (lines 65-66) but are never referenced in any guard logic for the debug_req MUX assignments at lines 112-117. The declared access control registers are unused in the permission chain.",
+              "supports_claim": "Although access control state is declared, it is never applied to gate the debug interface selection or debug request signals, leaving the debug path unprotected."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "guard_logic",
+              "description": "Lines 112-117 implement the debug MUX using only jtag_enable[0] as the selector. No reference to jtag_key, access_ctrl_reg, or any other authentication/permission signal appears in these assignments.",
+              "supports_claim": "Missing guard: the only condition selecting debug access is a simulation plusarg bit, not any security-meaningful permission signal."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "protected_resource",
+              "description": "The dmi_req.op is directly assigned from debug_req_bits_op (line 159) which comes from the SimDTM DPI module without any filtering or privilege check. DMI operations can read/write arbitrary debug module registers including hart control.",
+              "supports_claim": "Arbitrary DMI operations (read/write to debug module) are reachable without any access control check."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "The debug_req signal (line 114) is driven by either jtag_dmi_req or dmi_req based only on jtag_enable[0], a simulation-time plusarg. No hardware authentication, lifecycle state, or privilege check gates whether debug requests are forwarded to the debug module. The declared jtag_key and access_ctrl_reg are completely bypassed.",
+              "supports_claim": "Any simulation entity that sets the plusarg or drives dmi_req_valid can issue arbitrary debug module interface requests with no enforced permission check, bypassing the declared access control registers."
+            }
+          ],
+          "reasoning_summary": "The testharness exposes the RISC-V debug module interface (DMI) through a MUX controlled solely by a simulation plusarg (jtag_rbb_enable). While access control registers (jtag_key, access_ctrl_reg) are declared in the same module, they are never used in any guard condition for the debug_req MUX or any other permission-enforcing logic visible in the provided snippets. The debug_req signal, which drives the debug module, is thus reachable without any authentication or privilege enforcement. DMI access permits halting harts, reading/writing registers and memory via the debug module, which represents a critical security boundary bypass.",
+          "security_impact": "An attacker or unauthorized simulation entity can issue arbitrary DMI requests to the debug module (halt/resume harts, read/write CSRs and memory) by simply setting a plusarg or driving the dmi interface signals, completely bypassing the declared but unenforced access control registers. In a pre-silicon or emulation context where testharness RTL is reused, this represents a complete debug security bypass.",
+          "confidence": "medium",
+          "uncertainty_or_missing_evidence": "This is a testharness (tb/) file, which is typically not synthesized for production. However, if this harness is used in FPGA emulation or as a reference for DUT integration, the missing guard is a real vulnerability. The full usage of jtag_key and access_ctrl_reg cannot be confirmed from the provided snippets alone — they may be used elsewhere in the file not shown. Confidence is medium rather than high because the security impact depends on deployment context."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0010",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0010",
+        "has_finding": true,
+        "finding": {
+          "summary": "The debug interface mux in ariane_testharness selects between JTAG and DMI debug paths based solely on a simulation plusarg (jtag_rbb_enable), with no authentication, privilege check, or hardware lock guarding access to the debug request channel that feeds directly into the debug module.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "guard_logic",
+              "description": "The jtag_enable signal is set from a simulation plusarg with no default protection: 'if (!$value$plusargs(\"jtag_rbb_enable=%b\", jtag_enable)) jtag_enable = 'h0;'. This plusarg-controlled integer is then used as the sole selector for all debug interface mux assignments.",
+              "supports_claim": "The only guard controlling which debug path is active is a simulation plusarg flag, not any hardware authentication or privilege check."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "violation",
+              "description": "Lines 112-117 show unconditional mux assignments: debug_req_valid, debug_resp_ready, debug_req, exit_o, jtag_resp_valid, and dmi_resp_valid are all selected purely by jtag_enable[0] with no auth check, no lock bit, and no lifecycle gating. Either the JTAG path or the DMI path directly drives debug_req into the debug module without any access control beyond the mux selection.",
+              "supports_claim": "A user who can control the jtag_rbb_enable plusarg or who operates in the default (jtag_enable=0) state gets unrestricted DMI debug access to the processor debug module."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "debug_or_test_control",
+              "description": "Signals jtag_key and access_ctrl_reg are declared (lines 65-66) but do not appear in any of the mux assignments or guard logic in SNIP-0002. The declared access control registers are never used to gate debug_req_valid or debug_req.",
+              "supports_claim": "Access control registers exist in the design but are not connected to the debug request path, meaning the protection mechanism is incomplete or dead code."
+            },
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "access_entry",
+              "description": "The SimDTM module drives dmi_req_valid and dmi_req fields (addr, op, data) directly from DPI simulation calls with no privilege filtering before they reach the mux that feeds the debug module.",
+              "supports_claim": "The DMI debug path accepts arbitrary debug requests from simulation without any permission check."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "protected_resource",
+              "description": "debug_req (a dm::dmi_req_t struct carrying address, op, and data) is assigned directly from either jtag_dmi_req or dmi_req based on the unguarded mux, and this flows into the dm_top debug module instance.",
+              "supports_claim": "The debug module receives unguarded debug requests that can read/write processor state, CSRs, and memory via the debug interface."
+            }
+          ],
+          "reasoning_summary": "The testharness instantiates a debug interface mux (lines 112-117) controlled solely by a simulation plusarg (jtag_rbb_enable). While jtag_key and access_ctrl_reg signals are declared, they are never connected to guard any debug request path. Either debug path (JTAG via SimJTAG DPI or DMI via SimDTM DPI) feeds directly into the processor debug module without authentication, privilege checking, lifecycle gating, or use of the declared access control registers. This constitutes a missing guard on a sensitive debug resource.",
+          "security_impact": "Any simulation entity that can control the jtag_rbb_enable plusarg or that operates in the default configuration gains full, unauthenticated access to the RISC-V debug module (dm_top), which can halt the core, read/write all CSRs, read/write physical memory, and inject arbitrary instructions. The declared access_ctrl_reg protection is dead code and provides no actual protection.",
+          "confidence": "medium",
+          "uncertainty_or_missing_evidence": "This is a testbench/simulation context (tb/ directory), so the security impact in production silicon depends on whether this harness structure influences or is replicated in the actual chip integration. The access_ctrl_reg and jtag_key signals are declared but their intended use is not shown in the provided snippets - it is possible they are used elsewhere in the file to gate something not captured in this chain. Additionally, the dm_top instantiation details and whether it has its own authentication are not fully visible."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0029",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0029",
+        "has_finding": true,
+        "finding": {
+          "summary": "Hardcoded privilege bypass: manager index 6 always inherits manager index 7's access rights regardless of privilege level, allowing any master at slot 6 to access subordinates permitted only for master 7.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0003",
+              "evidence_role": "violation",
+              "description": "Line 430 unconditionally ORs the access right of manager 7 into the connectivity map entry for manager 6: `connectivity_map_o[i][j] = access_ctrl_i[i][j][priv_lvl_i] || ((j==6) && access_ctrl_i[i][7][priv_lvl_i])`. This means whenever j==6, manager 6 is granted connectivity to subordinate i if either its own access_ctrl bit is set OR manager 7's access_ctrl bit is set, regardless of any privilege configuration intended to restrict manager 7's access independently.",
+              "supports_claim": "Hardcoded special-case logic permanently merges manager 7's permission bits into manager 6's connectivity, bypassing the intended per-manager, per-privilege-level access control matrix."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "guard_logic",
+              "description": "The connectivity_mapping instance receives priv_lvl_i and access_ctrl_i as inputs and produces s_connectivity_map, which is then passed as cfg_connectivity_map_i to the AXI node. The guard is the connectivity_map computation, but the hardcoded OR for j==6 undermines the intended isolation.",
+              "supports_claim": "The connectivity_map is the sole access-control gate fed to the AXI node router; a flaw here directly affects which masters can reach which subordinates."
+            },
+            {
+              "snippet_id": "SNIP-0002",
+              "evidence_role": "permission_state",
+              "description": "Line 387 assigns s_valid_rule to all-ones ('1), meaning all address rules are unconditionally valid. Combined with the bypass in the connectivity map, there is no secondary rule-based guard to compensate for the incorrect connectivity assignment.",
+              "supports_claim": "All address regions are always marked valid, so the connectivity map is the only access enforcement mechanism and its integrity is critical."
+            }
+          ],
+          "reasoning_summary": "The connectivity_mapping module is supposed to produce a per-(subordinate, manager) access bitmap by indexing access_ctrl_i with the current privilege level. However, line 430 contains a hardcoded special case that grants manager 6 all the access rights of manager 7 unconditionally (for every subordinate). This is not gated by any runtime configuration or privilege check beyond what manager 7 itself would pass. As a result, a bus master connected to manager port 6 can reach any subordinate that manager 7 is permitted to access, even if manager 6 is explicitly denied those accesses in the access_ctrl_i matrix. Since s_valid_rule is also hardwired to all-ones, there is no compensating protection.",
+          "security_impact": "A bus master on manager port 6 gains unauthorized read/write access to all subordinates that are accessible to manager 7 at the current privilege level. This breaks the intended isolation between bus masters, potentially allowing privilege escalation or unauthorized access to memory-mapped peripherals, memory regions, or security-sensitive registers that should be exclusive to manager 7.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "The intended system topology (which masters occupy slots 6 and 7 and what access_ctrl_i is programmed to) is not visible in the provided snippets. If manager 7 slot is always left disconnected or access_ctrl_i[i][7] is always zero by construction, the practical impact would be zero; however the RTL itself contains the bypass unconditionally."
+        },
+        "no_finding_reason": ""
+      }
+    },
+    {
+      "chain_id": "CHAIN-0054",
+      "status": "accepted",
+      "discard_reason": "",
+      "invalid_snippet_ids": [],
+      "raw_llm_analysis": {
+        "chain_id": "CHAIN-0054",
+        "has_finding": true,
+        "finding": {
+          "summary": "ROM2 module exposes sensitive key material (AES keys, JTAG keys, access control tokens) via an unguarded write path and unprotected readback through rdata_o, with no privilege, authentication, or lifecycle checks on either reads or writes to secure_reg.",
+          "evidence": [
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "protected_resource",
+              "description": "secure_reg holds 192-bit cryptographic keys for AES, JTAG, and access control masters, initialized from hardcoded const mem on reset. The comment explicitly states these are key values replicated from fuses.",
+              "supports_claim": "The resource being accessed contains highly sensitive cryptographic key material that requires strict access controls."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "Line 40: secure_reg[addr_i[$clog2(RomSize)-1+3:3]] <= wdata_i; allows any requester with req_i=1 and we_i=1 to overwrite any entry in secure_reg. There is no privilege level check, no authentication, no lock register, and no lifecycle state guard. Any bus master that can assert req_i and we_i can corrupt or replace AES/JTAG/access-control keys.",
+              "supports_claim": "Missing write-access guard allows unauthorized overwrite of cryptographic keys stored in secure_reg."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "violation",
+              "description": "Line 47: assign rdata_o = (raddr_q < RomSize) ? secure_reg[raddr_q] : '0; unconditionally drives the full 192-bit key entry to the rdata_o output port whenever a valid address has been latched. There is no read-access guard, privilege check, or output masking based on lifecycle or permission state.",
+              "supports_claim": "Any bus master that asserts req_i with we_i=0 can read back raw 192-bit cryptographic key material without restriction."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "access_entry",
+              "description": "req_i and we_i are plain input ports with no accompanying privilege or permission qualifier signals in the module interface, confirming there is no architectural mechanism to differentiate trusted from untrusted requesters.",
+              "supports_claim": "The module interface provides no privilege or permission inputs, so no guard can exist at this level."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "lifecycle_behavior",
+              "description": "On reset (~rst_ni), secure_reg is unconditionally loaded from mem (line 34), which hardcodes all keys in plaintext in the RTL. No lifecycle state (e.g., TEST vs PRODUCTION) controls whether keys are loaded or exposed.",
+              "supports_claim": "Keys are always loaded on reset regardless of lifecycle or debug state, and the plaintext values are visible in RTL."
+            },
+            {
+              "snippet_id": "SNIP-0001",
+              "evidence_role": "impact",
+              "description": "The combination of unrestricted write (line 40) and unrestricted readback (line 47) of 192-bit AES keys, JTAG authentication keys, and access-control tokens means any bus master can exfiltrate or corrupt these secrets, enabling privilege escalation, authentication bypass, and cryptographic compromise.",
+              "supports_claim": "Full read and write access to all cryptographic keys without any guard constitutes a critical security vulnerability."
+            }
+          ],
+          "reasoning_summary": "The rom2 module is designed to store and protect cryptographic key material (AES keys, JTAG keys, access control tokens) in secure_reg. However, the source code shows that: (1) any requester asserting req_i+we_i can overwrite any key entry without any privilege, authentication, lock, or lifecycle check; (2) any requester asserting req_i with we_i=0 receives the full 192-bit raw key on rdata_o without restriction; (3) the module interface contains no privilege or permission qualifier inputs, making it architecturally impossible to distinguish trusted from untrusted requesters within this module; (4) all keys are hardcoded in plaintext in the RTL const array and loaded unconditionally on reset regardless of lifecycle state.",
+          "security_impact": "Critical: An unprivileged bus master can read all 192-bit AES, JTAG, and access-control keys, enabling cryptographic attacks and authentication bypass. The same master can overwrite keys to corrupt security policy or inject known keys. This completely defeats the security objective of the ROM/fuse key storage.",
+          "confidence": "high",
+          "uncertainty_or_missing_evidence": "It is possible that a bus fabric or interconnect wrapper outside this module enforces access control before req_i is asserted, but no such wrapper is present in the provided chain context, and the module itself contains zero internal guards. The hardcoded plaintext keys in RTL are also a separate concern (key exposure at synthesis/netlist level) but are confirmed by the source snippet."
+        },
+        "no_finding_reason": ""
+      }
+    }
+  ]
+}

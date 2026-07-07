@@ -14,7 +14,11 @@ Decide whether the chain context supports a permission-related vulnerability fin
 
 A finding requires concrete source-code evidence for a violation such as missing guard, bypassed lock/auth/privilege check, unsafe reset or debug behavior, sensitive readback, or incorrect protection state update.
 
-Return only valid JSON:
+Return only one valid JSON object. Do not include prose, Markdown, code fences, or hidden reasoning.
+For each evidence item, evidence_role must be exactly one of:
+access_entry, permission_state, guard_logic, protected_resource, lifecycle_behavior, debug_or_test_control, violation, impact.
+
+JSON schema:
 {
   "chain_id": "string",
   "has_finding": true,
@@ -23,7 +27,7 @@ Return only valid JSON:
     "evidence": [
       {
         "snippet_id": "string",
-        "evidence_role": "access_entry | permission_state | guard_logic | protected_resource | lifecycle_behavior | debug_or_test_control | violation | impact",
+        "evidence_role": "violation",
         "description": "string",
         "supports_claim": "string"
       }
