@@ -15,6 +15,8 @@ from llm import (
     DeepSeekClientConfig,
     GPTClient,
     GPTClientConfig,
+    GeminiClient,
+    GeminiClientConfig,
     MockClient,
     MockClientConfig,
     QwenClient,
@@ -26,7 +28,7 @@ from method.baseline.read_search_llm import ReadSearchLLMBaseline
 from tools.file_tools import ReadSearchTools
 
 
-ProviderName = Literal["mock", "gpt", "claude", "deepseek", "qwen"]
+ProviderName = Literal["mock", "gpt", "claude", "deepseek", "qwen", "gemini"]
 MethodName = Literal["json_read_search", "langchain_read_search"]
 
 
@@ -248,6 +250,14 @@ def _create_llm_client(config: BaselineRunConfig):
                 max_tokens=config.max_tokens,
             )
         )
+    if config.provider == "gemini":
+        return GeminiClient(
+            GeminiClientConfig(
+                model=model or GeminiClientConfig().model,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+            )
+        )
     raise ValueError(f"Unsupported provider: {config.provider}")
 
 
@@ -264,6 +274,8 @@ def _model_name(config: BaselineRunConfig) -> str:
         return DeepSeekClientConfig().model
     if config.provider == "qwen":
         return QwenClientConfig().model
+    if config.provider == "gemini":
+        return GeminiClientConfig().model
     raise ValueError(f"Unsupported provider: {config.provider}")
 
 

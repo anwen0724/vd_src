@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scripts.batch_build_rtl_structure_graphs import discover_input_scopes
+from scripts.build.batch_build_rtl_structure_graphs import discover_input_scopes
 
 
 def test_discover_input_scopes_uses_benchmark_scope_directories(tmp_path):
@@ -32,7 +32,7 @@ def test_batch_cli_writes_each_scope_to_module1_runs_dir(tmp_path):
     (first / "top.sv").write_text("module top(input logic a); endmodule\n", encoding="utf-8")
     (second / "core.sv").write_text("module core(output logic b); endmodule\n", encoding="utf-8")
 
-    script = Path(__file__).resolve().parents[1] / "scripts" / "batch_build_rtl_structure_graphs.py"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "build" / "batch_build_rtl_structure_graphs.py"
     completed = subprocess.run(
         [
             sys.executable,

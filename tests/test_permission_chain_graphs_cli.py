@@ -1,4 +1,4 @@
-from scripts.batch_build_permission_chain_graphs import resolve_repo_root
+from scripts.build.batch_build_permission_chain_graphs import resolve_repo_root
 
 
 def test_resolve_repo_root():

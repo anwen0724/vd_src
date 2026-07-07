@@ -8,7 +8,7 @@ from typing import Literal, Optional
 from llm.env import get_first_env, load_project_env
 
 
-ProviderName = Literal["gpt", "claude", "deepseek", "qwen"]
+ProviderName = Literal["gpt", "claude", "deepseek", "qwen", "gemini"]
 
 
 @dataclass
@@ -74,6 +74,31 @@ def create_chat_model(cfg: LangChainModelConfig):
             max_tokens=cfg.max_tokens,
             api_key=cfg.api_key or get_first_env("V3_QWEN_API_KEY", "QWEN_API_KEY"),
             base_url=cfg.base_url or get_first_env("V3_QWEN_BASE_URL", "QWEN_BASE_URL"),
+            timeout=cfg.request_timeout,
+        )
+
+    if cfg.provider == "gemini":
+        gemini_base_url = cfg.base_url or get_first_env("V3_GEMINI_BASE_URL", "GEMINI_BASE_URL")
+        gemini_api_key = cfg.api_key or get_first_env("V3_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
+        if gemini_base_url:
+            from langchain_openai import ChatOpenAI
+
+            return ChatOpenAI(
+                model=cfg.model,
+                temperature=cfg.temperature,
+                max_tokens=cfg.max_tokens,
+                api_key=gemini_api_key,
+                base_url=gemini_base_url,
+                timeout=cfg.request_timeout,
+            )
+
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        return ChatGoogleGenerativeAI(
+            model=cfg.model,
+            temperature=cfg.temperature,
+            max_output_tokens=cfg.max_tokens,
+            api_key=gemini_api_key,
             timeout=cfg.request_timeout,
         )
 

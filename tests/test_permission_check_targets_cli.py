@@ -1,6 +1,6 @@
 import json
 
-from scripts.build_permission_check_targets import main
+from scripts.build.build_permission_check_targets import main
 
 
 def test_single_graph_cli_writes_targets_and_diagnostics(tmp_path):

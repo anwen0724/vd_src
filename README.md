@@ -2,20 +2,19 @@
 
 `src/` 是本课题后续代码实现与实验运行的独立项目根目录。
 
-本目录不只是外层研究项目的普通源码目录，而是后续 baseline 实验、proposed method 实现、LLM/agent 调用、实验数据副本、运行配置、运行输出和评估结果的代码项目空间。
+本目录不只是外层研究项目的普通源码目录，而是 baseline 实验、本文方法实现、LLM/agent 调用、实验数据副本、运行配置、运行输出和评估结果的代码项目空间。
 
 外层 `docs/`、`data/`、`experiments/` 等目录主要用于研究讨论、数据准备、人工整理和历史留存。正式代码运行时需要的内容应逐步整理进入 `src/` 内部对应目录。
 
 ## 当前定位
 
-当前阶段先搭建 baseline 实验地基：
+当前阶段包含 baseline 实验地基和当前 ours 方法实现：
 
 - 运行 baseline LLM / agent 方法；
 - 调用模型并保存输出；
 - 管理实验输入、运行配置和运行结果；
-- 为后续人工评分和指标汇总提供代码支持。
-
-后续提出的方法也继续在本目录中实现。
+- 为后续人工评分和指标汇总提供代码支持；
+- 运行当前 ours 三模块方法。
 
 ## 目录结构
 
@@ -24,7 +23,7 @@ src/
 ├─ README.md
 ├─ method/
 │  ├─ baseline/
-│  └─ proposed/
+│  └─ ours/
 ├─ llm/
 ├─ tools/
 ├─ runtime/
@@ -34,17 +33,23 @@ src/
 │  └─ agent_inputs/
 ├─ runs/
 │  ├─ baseline/
-│  └─ proposed/
+│  └─ module*/
 ├─ results/
 │  ├─ baseline/
-│  └─ proposed/
+│  └─ ours/
 ├─ prompts/
-│  ├─ baseline/
-│  └─ proposed/
+│  └─ baseline/
 ├─ schemas/
 ├─ templates/
 ├─ configs/
 ├─ scripts/
+│  ├─ run/
+│  ├─ build/
+│  ├─ evaluate/
+│  ├─ evaluation/
+│  ├─ analysis/
+│  ├─ legacy/
+│  └─ dev/
 ├─ utils/
 └─ tests/
 ```
@@ -56,7 +61,7 @@ src/
 存放实验中运行的方法实现。
 
 - `method/baseline/`：baseline 方法实现，例如 direct LLM baseline、read/search-only baseline。
-- `method/proposed/`：后续本文提出的方法实现。
+- `method/ours/`：当前本文方法实现，包括 RTL 结构图、权限检查目标、权限链路图、方案 B 链路上下文分析和方案 A 工具调用对比。
 
 `llm/`
 
@@ -85,6 +90,21 @@ src/
 
 存放具体实验运行过程文件，例如 raw output、structured output、trace、run metadata 和运行日志。
 
+当前 ours 主线实验复用以下中间产物：
+
+- `runs/module1_rtl_structure_graphs/`：模块1生成的仓库级 RTL 结构图；
+- `runs/module2_1_permission_check_targets/`：模块2生成的权限检查目标；
+- `runs/module2_chain_graphs/`：模块2生成的权限链路图；
+- `runs/module3B_permission_chain_contexts/`：模块3输入的链路上下文。
+
+完整运行模块3时，优先使用配置驱动入口：
+
+```powershell
+python scripts/run/run_ours_chain_context_batch.py --config configs/ours_chain_context_deepseek.yaml
+```
+
+在 PyCharm 中也可以右键运行 `scripts/run/run_ours_chain_context_batch.py`。默认读取 DeepSeek 配置；如需切换模型或 repo 范围，修改 `configs/ours_chain_context_*.yaml`。
+
 `results/`
 
 存放实验评分和汇总结果，例如 run summary、模型对比表和错误分析结果。
@@ -94,7 +114,6 @@ src/
 存放代码运行时实际读取的 prompt。
 
 - `prompts/baseline/`：baseline 实验 prompt。
-- `prompts/proposed/`：后续 proposed method prompt。
 
 `schemas/`
 
@@ -110,7 +129,7 @@ src/
 
 `scripts/`
 
-存放本代码项目内部的辅助执行脚本。正式运行入口后续可以由统一 CLI 或这里的脚本触发。
+存放本代码项目内部的运行入口和辅助脚本。正式实验入口在 `scripts/run/`；中间产物构建在 `scripts/build/`；覆盖率、开销和指标汇总在 `scripts/evaluate/` 与 `scripts/evaluation/`；压缩分析在 `scripts/analysis/`；历史脚本在 `scripts/legacy/`；调试脚本在 `scripts/dev/`。详细说明见 `scripts/README.md`。
 
 `utils/`
 

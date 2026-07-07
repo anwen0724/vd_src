@@ -1,0 +1,146 @@
+{
+  "graph_id": "hackatdac21__h21_access_reglock_reset_expansion_scope",
+  "schema_version": "0.1",
+  "findings": [
+    {
+      "finding_id": "F-001",
+      "status": "confirmed_finding",
+      "summary": "Reset of acct_wrapper sets access control memory to all-ones, granting all permissions and bypassing register locks.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 67,
+          "line_end": 147,
+          "module": "acct_wrapper",
+          "signal_or_register": "j"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 67,
+          "line_end": 147,
+          "module": "acct_wrapper",
+          "object": "j",
+          "evidence_type": "permission_state",
+          "description": "Lines 81-85: On reset condition, a loop sets acct_mem[j] <= 32'hffffffff for all entries, making all access control bits '1'.",
+          "supports_claim": "Establishes that the permission state becomes fully permissive after reset."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 67,
+          "line_end": 147,
+          "module": "acct_wrapper",
+          "object": "j",
+          "evidence_type": "violation",
+          "description": "The same reset logic does not consider any register lock (reglk_ctrl) bits, bypassing the hardware lock mechanism intended to protect critical entries.",
+          "supports_claim": "Shows that the reset path is a direct override of the access control protection."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 19,
+          "line_end": 62,
+          "module": "acct_wrapper",
+          "object": "axi_lite_interface_i",
+          "evidence_type": "protected_resource",
+          "description": "Line 49: acc_ctrl_o is formed from acct_mem entries. With acct_mem all-ones, acc_ctrl_o will be all-ones, enabling access to all peripherals.",
+          "supports_claim": "Connects the internal permission state to the output that controls system access."
+        }
+      ],
+      "reasoning_summary": "The acct_wrapper module uses acct_mem to store access control bits for peripherals. On reset, the entire memory is set to 0xFFFFFFFF, granting permission to all peripherals. The register lock mechanism (reglk_ctrl) protects specific entries from unauthorized writes during normal operation, but the reset logic does not respect these locks and forcefully opens all entries. This insecure default state can be exploited if an adversary can trigger a reset pulse.",
+      "security_impact": "An attacker capable of causing a reset (e.g., through a debug interface, software-induced reset, or fault injection) can temporarily gain full access to all protected peripherals, circumventing the hardware-enforced access control scheme.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The origin and security of rst_6 (the reset signal) is not shown; it is assumed that a reset can be triggered by untrusted sources. Additionally, the we_flag input may also override permissions, but its driver is not provided in the snippets.",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0001"
+      ]
+    },
+    {
+      "finding_id": "F-002",
+      "status": "confirmed_finding",
+      "summary": "Access control memory (acct_mem) is reset to all-ones (full access) unconditionally, bypassing the register lock (reglk_ctrl). A reset can override locked permissions and grant full access to all peripherals.",
+      "vulnerability_category": "permission_related_vulnerability",
+      "affected_locations": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 67,
+          "line_end": 147,
+          "module": "acct_wrapper",
+          "signal_or_register": "j"
+        }
+      ],
+      "evidence": [
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 67,
+          "line_end": 147,
+          "module": "acct_wrapper",
+          "object": "j",
+          "evidence_type": "violation",
+          "description": "Reset logic sets all acct_mem registers to 32'hffffffff, ignoring any lock bits.",
+          "supports_claim": "Lines 81-85 show that when rst_ni is low or rst_6 is high, every acct_mem entry is assigned 32'hffffffff without considering reglk_ctrl."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 67,
+          "line_end": 147,
+          "module": "acct_wrapper",
+          "object": "j",
+          "evidence_type": "guard_logic",
+          "description": "Normal write operations use reglk_ctrl to protect specific entries from modification.",
+          "supports_claim": "Lines 90-108 conditionally write wdata to acct_mem only if the corresponding reglk_ctrl bit is not set, demonstrating the lock intent."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 67,
+          "line_end": 147,
+          "module": "acct_wrapper",
+          "object": "j",
+          "evidence_type": "permission_state",
+          "description": "acct_mem holds the access control vectors for peripherals.",
+          "supports_claim": "The register array acct_mem is defined in SNIP-0007 line 39, and its values drive acc_ctrl_o (line 49), which control peripheral access."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 67,
+          "line_end": 147,
+          "module": "acct_wrapper",
+          "object": "j",
+          "evidence_type": "lifecycle_behavior",
+          "description": "Reset condition triggers on rst_ni or rst_6.",
+          "supports_claim": "The always block (lines 79-112) triggers on posedge clk_i and checks ~(rst_ni && ~rst_6) to reset acct_mem."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/acct/acct_wrapper.sv",
+          "line_start": 19,
+          "line_end": 62,
+          "module": "acct_wrapper",
+          "object": "acc_ctrl_o",
+          "evidence_type": "access_entry",
+          "description": "Signal en gates access to acct_mem, combining AXI enable and acct_ctrl_i.",
+          "supports_claim": "Line 73: assign en = en_acct && acct_ctrl_i; ensures that only when acct_ctrl_i is high can the module be accessed, but reset does not depend on en."
+        },
+        {
+          "file": "piton/design/chip/tile/ariane/src/rst_ctrl/rst_wrapper.sv",
+          "line_start": 23,
+          "line_end": 63,
+          "module": "rst_wrapper",
+          "object": "acct_ctrl_i",
+          "evidence_type": "protected_resource",
+          "description": "rst_6 is generated by rst_wrapper and can reset the ACCT module.",
+          "supports_claim": "Lines 63 assigns rst_6 = rst_mem[6] // ACCT, showing an external reset control that could be exploited."
+        }
+      ],
+      "reasoning_summary": "The register lock mechanism (reglk_ctrl) is designed to prevent unauthorized writes to specific access control registers. However, the reset path unconditionally sets all acct_mem locations to 32'hffffffff, completely ignoring the lock state. This means a reset can override any locked permissions and grant full access, violating the intended protection state update.",
+      "security_impact": "If an attacker can trigger reset of the ACCT module (e.g., via a fault, debug interface, or another vulnerability), they can clear all access controls and gain full access to all peripherals, leading to privilege escalation.",
+      "confidence": "medium",
+      "uncertainty_or_missing_evidence": "The direct exploitability depends on the ability to assert rst_6 from an untrusted source. The provided snippets show rst_6 is controlled by the rst_wrapper, which itself is protected by its own acct_ctrl_i, but no evidence confirms an unprivileged trigger path. The design flaw is evident, but the full attack chain is not fully demonstrated.",
+      "recommended_follow_up": [],
+      "source_chain_ids": [
+        "CHAIN-0002"
+      ]
+    }
+  ]
+}

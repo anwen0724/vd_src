@@ -52,10 +52,10 @@ langchain_read_search_llm.py
 
 ## 后续对比关系
 
-该 baseline 不是本文提出的方法。后续 proposed method 将放在：
+该 baseline 不是本文提出的方法。当前 ours 方法位于：
 
 ```text
-src/method/proposed/
+src/method/ours/
 ```
 
 baseline 结果用于建立对比，并为后续方法设计提供错误分析依据。

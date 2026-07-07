@@ -25,7 +25,7 @@ rtl_structure_graph_diagnostics.json
 命令行入口：
 
 ```bash
-python src/scripts/build_rtl_structure_graph.py --repo <rtl_repo> --out <output_dir>
+python src/scripts/build/build_rtl_structure_graph.py --repo <rtl_repo> --out <output_dir>
 ```
 
 模块1不生成权限检查目标，不做权限语义判断，不判断漏洞。

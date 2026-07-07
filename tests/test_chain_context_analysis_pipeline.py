@@ -1,6 +1,5 @@
 import json
-
-from langchain_core.messages import AIMessage
+from types import SimpleNamespace
 
 from method.ours.chain_context_analysis.config import ChainContextAnalysisConfig
 from method.ours.chain_context_analysis.pipeline import run_chain_context_analysis
@@ -8,7 +7,7 @@ from method.ours.chain_context_analysis.pipeline import run_chain_context_analys
 
 class FakeChat:
     def invoke(self, _messages):
-        return AIMessage(
+        return SimpleNamespace(
             content=json.dumps(
                 {
                     "chain_id": "CHAIN-0001",
@@ -30,11 +29,12 @@ class FakeChat:
                     },
                     "no_finding_reason": "",
                 }
-            )
+            ),
+            usage_metadata={"input_tokens": 100, "output_tokens": 25, "total_tokens": 125},
         )
 
 
-def test_chain_context_analysis_pipeline(tmp_path):
+def test_chain_context_analysis_pipeline(tmp_path, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "a.sv").write_text("module a;\nassign rdata = secret;\nendmodule\n", encoding="utf-8")
@@ -71,5 +71,20 @@ def test_chain_context_analysis_pipeline(tmp_path):
     out = tmp_path / "out"
     summary = run_chain_context_analysis(contexts, repo, out, FakeChat(), ChainContextAnalysisConfig())
     assert summary["final_finding_count"] == 1
+    assert summary["elapsed_seconds"] >= 0
+    assert summary["total_tokens"] == 125
     final_answer = json.loads((out / "final_answer.json").read_text(encoding="utf-8"))
     assert final_answer["findings"][0]["affected_locations"][0]["file"] == "a.sv"
+    diagnostics = json.loads((out / "module3B_analysis_diagnostics.json").read_text(encoding="utf-8"))
+    assert diagnostics["elapsed_seconds"] >= 0
+    assert diagnostics["input_tokens"] == 100
+    assert diagnostics["output_tokens"] == 25
+    assert diagnostics["total_tokens"] == 125
+    assert diagnostics["per_chain"][0]["elapsed_seconds"] >= 0
+    assert diagnostics["per_chain"][0]["started_at"]
+    assert diagnostics["per_chain"][0]["completed_at"]
+    assert diagnostics["per_chain"][0]["llm"]["token_usage_source"] == "api"
+    output = capsys.readouterr().out
+    assert "[chain-context][1/1] START graph=g chain=CHAIN-0001" in output
+    assert "[chain-context][1/1] ACCEPTED graph=g chain=CHAIN-0001" in output
+    assert "tokens=125" in output

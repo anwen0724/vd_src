@@ -1,1 +1,0 @@
-[mock response] model=mock-model; prompt_preview=You are an RTL security analysis assistant.  INPUT_SCOPE: C:\Users\anwen\Desktop\vulnerability_detection\src\datasets\agent_inputs\smoke\simple_auth_scope  Task

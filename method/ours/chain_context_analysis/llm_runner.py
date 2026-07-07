@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+from datetime import datetime
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -10,10 +12,25 @@ from .schema import LLMChainAnalysis
 
 
 def analyze_chain_plain_json(chat_model: Any, prompt: str) -> tuple[LLMChainAnalysis | None, dict[str, Any]]:
-    diagnostics: dict[str, Any] = {"llm_calls": 1, "status": "not_started", "error": ""}
+    started_at = _now_iso()
+    started = time.monotonic()
+    user_prompt = prompt + "\n\nReturn only JSON. Do not wrap in Markdown."
+    diagnostics: dict[str, Any] = {
+        "llm_calls": 1,
+        "status": "not_started",
+        "error": "",
+        "started_at": started_at,
+        "completed_at": "",
+        "elapsed_seconds": 0.0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "token_usage_source": "unavailable",
+    }
     try:
-        raw = chat_model.invoke([HumanMessage(content=prompt + "\n\nReturn only JSON. Do not wrap in Markdown.")])
+        raw = chat_model.invoke([HumanMessage(content=user_prompt)])
         content = getattr(raw, "content", raw)
+        diagnostics.update(_extract_token_usage(raw, user_prompt, str(content)))
         payload = _extract_json_object(str(content))
         diagnostics["status"] = "ok"
         return LLMChainAnalysis.model_validate(payload), diagnostics
@@ -21,6 +38,9 @@ def analyze_chain_plain_json(chat_model: Any, prompt: str) -> tuple[LLMChainAnal
         diagnostics["status"] = "failed"
         diagnostics["error"] = str(exc)
         return None, diagnostics
+    finally:
+        diagnostics["completed_at"] = _now_iso()
+        diagnostics["elapsed_seconds"] = time.monotonic() - started
 
 
 def _extract_json_object(text: str) -> dict[str, Any]:
@@ -37,3 +57,89 @@ def _extract_json_object(text: str) -> dict[str, Any]:
             raise
         return json.loads(cleaned[start : end + 1])
 
+
+def _extract_token_usage(raw: Any, prompt: str, output_text: str) -> dict[str, Any]:
+    api_usage = _usage_from_api(raw)
+    if api_usage is not None:
+        api_usage["token_usage_source"] = "api"
+        return api_usage
+
+    input_tokens = _estimate_tokens(prompt)
+    output_tokens = _estimate_tokens(output_text)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "token_usage_source": "estimated_char4",
+    }
+
+
+def _usage_from_api(raw: Any) -> dict[str, int] | None:
+    candidates: list[Any] = []
+    usage_metadata = getattr(raw, "usage_metadata", None)
+    if usage_metadata:
+        candidates.append(usage_metadata)
+    response_metadata = getattr(raw, "response_metadata", None)
+    if isinstance(response_metadata, dict):
+        candidates.extend(
+            item
+            for item in [
+                response_metadata.get("token_usage"),
+                response_metadata.get("usage"),
+                response_metadata.get("usage_metadata"),
+            ]
+            if item
+        )
+
+    for usage in candidates:
+        if not isinstance(usage, dict):
+            continue
+        input_tokens = _first_int(
+            usage,
+            "input_tokens",
+            "prompt_tokens",
+            "input_token_count",
+            "prompt_token_count",
+        )
+        output_tokens = _first_int(
+            usage,
+            "output_tokens",
+            "completion_tokens",
+            "output_token_count",
+            "completion_token_count",
+            "candidates_token_count",
+        )
+        total_tokens = _first_int(usage, "total_tokens", "total_token_count")
+        if input_tokens is None and output_tokens is None and total_tokens is None:
+            continue
+        input_tokens = input_tokens or 0
+        output_tokens = output_tokens or 0
+        total_tokens = total_tokens if total_tokens is not None else input_tokens + output_tokens
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+        }
+    return None
+
+
+def _first_int(mapping: dict[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        value = mapping.get(key)
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(1, (len(text) + 3) // 4)
+
+
+def _now_iso() -> str:
+    return datetime.now().astimezone().isoformat()

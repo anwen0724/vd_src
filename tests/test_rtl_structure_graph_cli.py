@@ -18,7 +18,7 @@ endmodule
         encoding="utf-8",
     )
 
-    script = Path(__file__).resolve().parents[1] / "scripts" / "build_rtl_structure_graph.py"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "build" / "build_rtl_structure_graph.py"
     completed = subprocess.run(
         [
             sys.executable,

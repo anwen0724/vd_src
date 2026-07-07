@@ -1,6 +1,6 @@
 import json
 
-from scripts.batch_build_permission_check_targets import run_batch
+from scripts.build.batch_build_permission_check_targets import run_batch
 
 
 def test_batch_build_permission_check_targets_writes_per_scope_outputs_and_manifest(tmp_path):

@@ -1,2 +1,0 @@
-"""Permission vulnerability knowledge support."""
-
