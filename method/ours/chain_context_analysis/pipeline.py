@@ -28,6 +28,7 @@ def run_chain_context_analysis(
     if config.max_chains is not None:
         chains = chains[: config.max_chains]
     findings: list[dict[str, Any]] = []
+    raw_llm_findings: list[dict[str, Any]] = []
     diagnostics: dict[str, Any] = {
         "graph_id": graph_id,
         "chain_count": len(chains),
@@ -40,6 +41,7 @@ def run_chain_context_analysis(
         "completed_at": "",
         "elapsed_seconds": 0.0,
         "final_finding_count": 0,
+        "raw_llm_finding_count": 0,
         "discarded_finding_count": 0,
         "no_finding_count": 0,
         "per_chain": [],
@@ -73,9 +75,20 @@ def run_chain_context_analysis(
             diagnostics["per_chain"].append(row)
             _print_chain_done(index, len(chains), graph_id, chain_id, row, llm_diag)
             continue
+        raw_analysis = analysis.model_dump(mode="json")
+        row["raw_llm_analysis"] = raw_analysis
         if analysis.chain_id != chain.get("chain_id"):
             row["status"] = "chain_id_mismatch"
             diagnostics["discarded_finding_count"] += 1
+            if analysis.has_finding:
+                raw_llm_findings.append(
+                    _raw_finding_record(
+                        chain=chain,
+                        status="chain_id_mismatch",
+                        raw_analysis=raw_analysis,
+                        evidence_validation={},
+                    )
+                )
             _finalize_chain_row(row, chain_started)
             diagnostics["per_chain"].append(row)
             _print_chain_done(index, len(chains), graph_id, chain_id, row, llm_diag)
@@ -97,13 +110,23 @@ def run_chain_context_analysis(
         else:
             findings.append(finding)
             row["status"] = "accepted"
+        if analysis.has_finding:
+            raw_llm_findings.append(
+                _raw_finding_record(
+                    chain=chain,
+                    status=str(row.get("status", "")),
+                    raw_analysis=raw_analysis,
+                    evidence_validation=ev_diag,
+                )
+            )
         _finalize_chain_row(row, chain_started)
         diagnostics["per_chain"].append(row)
         _print_chain_done(index, len(chains), graph_id, chain_id, row, llm_diag)
     diagnostics["final_finding_count"] = len(findings)
+    diagnostics["raw_llm_finding_count"] = len(raw_llm_findings)
     diagnostics["completed_at"] = _now_iso()
     diagnostics["elapsed_seconds"] = time.monotonic() - started
-    write_outputs(output_dir, graph_id, findings, diagnostics)
+    write_outputs(output_dir, graph_id, findings, diagnostics, raw_llm_findings)
     return {
         "graph_id": graph_id,
         "chain_count": len(chains),
@@ -115,6 +138,7 @@ def run_chain_context_analysis(
         "completed_at": diagnostics["completed_at"],
         "elapsed_seconds": diagnostics["elapsed_seconds"],
         "final_finding_count": len(findings),
+        "raw_llm_finding_count": len(raw_llm_findings),
         "discarded_finding_count": diagnostics["discarded_finding_count"],
         "output_dir": str(output_dir),
     }
@@ -127,6 +151,22 @@ def _now_iso() -> str:
 def _finalize_chain_row(row: dict[str, Any], started: float) -> None:
     row["completed_at"] = _now_iso()
     row["elapsed_seconds"] = time.monotonic() - started
+
+
+def _raw_finding_record(
+    *,
+    chain: dict[str, Any],
+    status: str,
+    raw_analysis: dict[str, Any],
+    evidence_validation: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "chain_id": chain.get("chain_id"),
+        "status": status,
+        "discard_reason": evidence_validation.get("discard_reason", ""),
+        "invalid_snippet_ids": evidence_validation.get("invalid_snippet_ids", []),
+        "raw_llm_analysis": raw_analysis,
+    }
 
 
 def _print_chain_done(
