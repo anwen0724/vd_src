@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal, Optional
+from urllib.parse import urlparse
 
 from llm.env import get_first_env, load_project_env
 
@@ -78,7 +79,9 @@ def create_chat_model(cfg: LangChainModelConfig):
         )
 
     if cfg.provider == "gemini":
-        gemini_base_url = cfg.base_url or get_first_env("V3_GEMINI_BASE_URL", "GEMINI_BASE_URL")
+        gemini_base_url = _normalize_openai_compatible_base_url(
+            cfg.base_url or get_first_env("V3_GEMINI_BASE_URL", "GEMINI_BASE_URL")
+        )
         gemini_api_key = cfg.api_key or get_first_env("V3_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
         if gemini_base_url:
             from langchain_openai import ChatOpenAI
@@ -103,3 +106,12 @@ def create_chat_model(cfg: LangChainModelConfig):
         )
 
     raise ValueError(f"Unsupported provider: {cfg.provider}")
+
+
+def _normalize_openai_compatible_base_url(base_url: str | None) -> str | None:
+    if not base_url:
+        return None
+    parsed = urlparse(base_url)
+    if parsed.scheme and parsed.netloc and parsed.path in {"", "/"}:
+        return base_url.rstrip("/") + "/v1"
+    return base_url

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlparse
 
 from .env import get_first_env, load_project_env
 
@@ -26,7 +27,9 @@ class GeminiClient:
         load_project_env()
         self.cfg = cfg or GeminiClientConfig()
         api_key = self.cfg.api_key or get_first_env("V3_GEMINI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
-        base_url = self.cfg.base_url or get_first_env("V3_GEMINI_BASE_URL", "GEMINI_BASE_URL")
+        base_url = _normalize_openai_compatible_base_url(
+            self.cfg.base_url or get_first_env("V3_GEMINI_BASE_URL", "GEMINI_BASE_URL")
+        )
 
         if base_url:
             from openai import OpenAI
@@ -70,3 +73,12 @@ class GeminiClient:
             config=config,
         )
         return getattr(response, "text", "") or ""
+
+
+def _normalize_openai_compatible_base_url(base_url: str | None) -> str | None:
+    if not base_url:
+        return None
+    parsed = urlparse(base_url)
+    if parsed.scheme and parsed.netloc and parsed.path in {"", "/"}:
+        return base_url.rstrip("/") + "/v1"
+    return base_url
