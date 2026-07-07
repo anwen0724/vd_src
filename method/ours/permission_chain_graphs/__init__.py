@@ -1,0 +1,2 @@
+"""Permission chain graph generation."""
+
